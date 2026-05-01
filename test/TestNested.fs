@@ -33,7 +33,7 @@ let ``test nested record decodes valid input`` () =
     let map =
         parseRaw """{"name":"Alice","address":{"street":"Main 1","city":"Oslo"}}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok r ->
         r.Name |> equal "Alice"
         r.Address.Street |> equal "Main 1"
@@ -45,7 +45,7 @@ let ``test nested record reports inner missing field`` () =
     let codec = auto<User> ()
     let map = parseRaw """{"name":"Alice","address":{"street":"Main 1"}}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
@@ -64,7 +64,7 @@ let ``test list of strings decodes`` () =
     let codec = auto<Tagged> ()
     let map = parseRaw """{"title":"hello","tags":["a","b","c"]}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok r ->
         r.Title |> equal "hello"
         r.Tags |> equal [ "a"; "b"; "c" ]
@@ -75,7 +75,7 @@ let ``test list of strings empty decodes`` () =
     let codec = auto<Tagged> ()
     let map = parseRaw """{"title":"empty","tags":[]}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok r ->
         r.Tags |> equal []
         r.Title |> equal "empty"
@@ -98,7 +98,7 @@ let ``test list of records decodes`` () =
                 {"name":"Bob","address":{"street":"S2","city":"Bergen"}}
             ]}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok r ->
         r.Name |> equal "Engineering"
         r.Members.Length |> equal 2
@@ -117,7 +117,7 @@ let ``test list of records reports element index in error`` () =
                 {"name":"Bob"}
             ]}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs

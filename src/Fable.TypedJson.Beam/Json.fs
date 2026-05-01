@@ -25,11 +25,11 @@ let inline auto<'T> () : TypedJson<'T> = Fable.TypedJson.Json.auto<'T> beam
 let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
     Fable.TypedJson.Json.autoWith<'T> beam registry
 
-let inline validate<'T> (caseRules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
-    Fable.TypedJson.Json.validate<'T> beam caseRules map
+let inline validate<'T> (map: JsonMap) : Result<'T, FieldError list> =
+    Fable.TypedJson.Json.validate<'T> beam map
 
-let inline validateWith<'T> (registry: CodecRegistry) (caseRules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
-    Fable.TypedJson.Json.validateWith<'T> beam registry caseRules map
+let inline validateWith<'T> (registry: CodecRegistry) (map: JsonMap) : Result<'T, FieldError list> =
+    Fable.TypedJson.Json.validateWith<'T> beam registry map
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
     Fable.TypedJson.Schema.validateJson<'T> beam map
@@ -42,14 +42,16 @@ let inline dump<'T> (record: 'T) : obj =
 
 /// Generate a JSON Schema document for record type `'T`. Uses the supplied
 /// `CodecRegistry` for custom-codec types and `caseRules` to map F# field
-/// names to JSON keys. For codec-attached aliases, use `jsonSchemaOfCodec`.
+/// names to JSON keys. For codec-attached aliases / case rule, use
+/// `jsonSchemaOfCodec` instead.
 let inline jsonSchemaOf<'T> (registry: CodecRegistry) (caseRules: CaseRules) : string =
     Fable.TypedJson.JsonSchemaGen.jsonSchemaOf<'T> beam registry caseRules
 
-/// Generate a JSON Schema document from a `TypedJson<'T>` codec. Honors any
-/// aliases attached via `TypedJson.alias`.
-let inline jsonSchemaOfCodec<'T> (registry: CodecRegistry) (caseRules: CaseRules) (codec: TypedJson<'T>) : string =
-    Fable.TypedJson.JsonSchemaGen.jsonSchemaOfCodec<'T> beam registry caseRules codec
+/// Generate a JSON Schema document from a `TypedJson<'T>` codec. Reads the
+/// codec's configured `caseRules` and any `alias` overrides so the schema
+/// matches what the codec accepts and produces.
+let inline jsonSchemaOfCodec<'T> (registry: CodecRegistry) (codec: TypedJson<'T>) : string =
+    Fable.TypedJson.JsonSchemaGen.jsonSchemaOfCodec<'T> beam registry codec
 
 module Encode =
     let inline string s = Fable.TypedJson.Json.Encode.string s

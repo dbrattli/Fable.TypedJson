@@ -35,7 +35,7 @@ let ``test alias redirects decode lookup`` () =
     // JSON uses the alias keys, not snake_case derived from field names.
     let map = parseRaw """{"loc":"Oslo","n":3}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok r ->
         r.Location |> equal "Oslo"
         r.Days |> equal 3
@@ -47,7 +47,7 @@ let ``test alias affects error path on missing key`` () =
     // JSON is missing the aliased key.
     let map = parseRaw """{"days":3}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         // The schema looked up "loc" and missed it. The FieldError's `path`
@@ -60,7 +60,7 @@ let ``test alias affects error path on missing key`` () =
 [<Fact>]
 let ``test alias redirects encode output`` () =
     let codec = auto<WeatherRequest> () |> alias "Location" "loc"
-    let json = codec.encode CaseRules.SnakeCase { Location = "Oslo"; Days = 5 }
+    let json = codec.encodeWith CaseRules.SnakeCase { Location = "Oslo"; Days = 5 }
     let parsed = parseRaw json
 
     backend.ContainsKey(parsed, "loc") |> equal true
@@ -74,7 +74,7 @@ let ``test alias redirects encode output`` () =
 [<Fact>]
 let ``test alias falls through to case rule for unaliased fields`` () =
     let codec = auto<WeatherRequest> () |> alias "Location" "loc"
-    let json = codec.encode CaseRules.SnakeCase { Location = "Oslo"; Days = 5 }
+    let json = codec.encodeWith CaseRules.SnakeCase { Location = "Oslo"; Days = 5 }
     let parsed = parseRaw json
 
     // "Days" wasn't aliased, so it follows the SnakeCase rule.
@@ -90,7 +90,7 @@ let ``test alias propagates to JSON schema property keys`` () =
         |> alias "Location" "loc"
         |> alias "Days" "n"
 
-    let json = jsonSchemaOfCodec emptyRegistry CaseRules.SnakeCase codec
+    let json = jsonSchemaOfCodec emptyRegistry (codec |> withCaseRules CaseRules.SnakeCase)
     let parsed = parseRaw json
 
     let props = backend.Get(parsed, "properties")
@@ -132,7 +132,7 @@ let ``test alias preserves withModel composition`` () =
 
     let map = parseRaw """{"loc":"Oslo","days":3}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok r ->
         r.Location |> equal "Oslo"
         r.Days |> equal 3
@@ -141,7 +141,7 @@ let ``test alias preserves withModel composition`` () =
     // Negative path: withModel still fires even when alias was applied later.
     let bad = parseRaw """{"loc":"Oslo","days":-1}"""
 
-    match codec.decode CaseRules.SnakeCase bad with
+    match codec.decodeWith CaseRules.SnakeCase bad with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs

@@ -154,17 +154,17 @@ let inline jsonSchemaOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (c
     | SVDict m -> schemaToJson backend m
     | _ -> backend.Stringify(toNative backend schemaValue)
 
-/// Generate a JSON Schema document from a `TypedJson<'T>` codec. Honors any
-/// aliases attached via `TypedJson.alias`.
+/// Generate a JSON Schema document from a `TypedJson<'T>` codec. Reads the
+/// codec's configured `caseRules` and any `alias`-attached overrides so the
+/// emitted schema matches what the codec actually accepts and produces.
 let inline jsonSchemaOfCodec<'T>
     (backend: IJsonBackend)
     (registry: CodecRegistry)
-    (caseRules: Json.CaseRules)
     (codec: Json.TypedJson<'T>)
     : string =
     let t = typeof<'T>
 
-    let schemaValue = schemaForRecord registry codec.aliases caseRules t
+    let schemaValue = schemaForRecord registry codec.aliases codec.caseRules t
 
     match schemaValue with
     | SVDict m -> schemaToJson backend m

@@ -44,7 +44,7 @@ let ``test error on single missing field has correct path`` () =
     let codec = auto<User> ()
     let map = parseRaw """{"name":"Alice","age":30}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         errors.Length |> equal 1
@@ -55,7 +55,7 @@ let ``test error on single missing field has descriptive message`` () =
     let codec = auto<User> ()
     let map = parseRaw """{"name":"Alice","age":30}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         let msg = errors.[0].message
@@ -68,7 +68,7 @@ let ``test all missing fields are reported`` () =
     let codec = auto<User> ()
     let map = parseRaw """{}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         errors.Length |> equal 3
@@ -80,7 +80,7 @@ let ``test all missing config fields are reported`` () =
     let codec = auto<Config> ()
     let map = parseRaw """{}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         errors.Length |> equal 3
@@ -92,7 +92,7 @@ let ``test partial fields reports only missing ones`` () =
     let codec = auto<Config> ()
     let map = parseRaw """{"host":"localhost","port":8080}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         errors.Length |> equal 1
@@ -107,7 +107,7 @@ let ``test missing optional field is not an error`` () =
     let codec = auto<WithOptional> ()
     let map = parseRaw """{"required":"hello"}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok record ->
         record.Required |> equal "hello"
         record.Optional |> equal None
@@ -118,7 +118,7 @@ let ``test missing required field with optional present`` () =
     let codec = auto<WithOptional> ()
     let map = parseRaw """{"optional":42}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         errors.Length |> equal 1
@@ -129,7 +129,7 @@ let ``test both required and optional missing reports only required`` () =
     let codec = auto<WithOptional> ()
     let map = parseRaw """{}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         // Only required field should be in errors
@@ -147,7 +147,7 @@ let ``test wrong case rule causes missing field errors`` () =
     let map = parseRaw """{"name":"Alice","age":30,"email":"a@b.com"}"""
 
     // SnakeCase expects "name", "age", "email" — which matches!
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> () // should work since keys are already lowercase
     | Error _ -> equal "Ok" "Error"
 
@@ -158,7 +158,7 @@ let ``test camelCase json with snake_case rule fails for multi-word fields`` () 
     let map = parseRaw """{"host":"localhost","port":8080,"debug":true}"""
 
     // "host", "port", "debug" are single words, so both rules match
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok config ->
         config.Host |> equal "localhost"
         config.Port |> equal 8080
@@ -174,7 +174,7 @@ let ``test decode empty object reports all required fields`` () =
     let codec = auto<User> ()
     let map = parseRaw """{}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors -> errors.Length |> equal 3
 
@@ -184,7 +184,7 @@ let ``test error paths use json key names not field names`` () =
     let codec = auto<Nested> ()
     let map = parseRaw """{}"""
 
-    match codec.decode CaseRules.LowerFirst map with
+    match codec.decodeWith CaseRules.LowerFirst map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         let paths = errors |> List.map (fun e -> e.path) |> List.sort
@@ -198,7 +198,7 @@ let ``test extra fields in json are ignored`` () =
     let map =
         parseRaw """{"label":"test","value":1.5,"extra":"ignored","another":true}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok record ->
         record.Label |> equal "test"
         record.Value |> equal 1.5

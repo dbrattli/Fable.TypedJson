@@ -113,7 +113,7 @@ let ``test auto with custom codec accepts valid value`` () =
     let codec = autoWith<Req> codecs
     let map = parseRaw """{"days":7, "name":"hello"}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok r ->
         let (DayCount n) = r.Days
         n |> equal 7
@@ -125,7 +125,7 @@ let ``test auto with custom codec rejects out-of-range value`` () =
     let codec = autoWith<Req> codecs
     let map = parseRaw """{"days":15, "name":"hello"}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         // The error from Codec.le surfaces through the registry into the FieldError list.
@@ -138,7 +138,7 @@ let ``test auto with custom codec rejects zero`` () =
     let codec = autoWith<Req> codecs
     let map = parseRaw """{"days":0, "name":"hello"}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
@@ -170,7 +170,7 @@ let ``test withModel accepts valid cross-field invariant`` () =
 
     let map = parseRaw """{"start":1, "until":10}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok r ->
         r.Start |> equal 1
         r.Until |> equal 10
@@ -193,7 +193,7 @@ let ``test withModel rejects invalid cross-field invariant`` () =
 
     let map = parseRaw """{"start":10, "until":1}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs

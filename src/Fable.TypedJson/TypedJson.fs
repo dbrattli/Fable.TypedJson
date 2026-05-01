@@ -130,15 +130,29 @@ let applyCaseRule (caseRule: CaseRules) (name: string) : string =
 type JsonMap = obj
 
 type TypedJson<'T> = {
-    decode: CaseRules -> JsonMap -> Result<'T, FieldError list>
-    encode: CaseRules -> 'T -> string
-    /// Per-field JSON-key overrides keyed by F# field name. The auto-generated
-    /// codec consults this map before falling back to `applyCaseRule`. Empty by
-    /// default — use `TypedJson.alias` to extend.
+    /// Decode using the codec's configured `caseRules`. Use `decodeWith` to
+    /// override the rule for a single call.
+    decode: JsonMap -> Result<'T, FieldError list>
+    /// Encode using the codec's configured `caseRules`. Use `encodeWith` to
+    /// override the rule for a single call.
+    encode: 'T -> string
+    /// Decode with an explicit case rule, overriding the codec's default.
+    /// Useful when one codec serves multiple JSON formats.
+    decodeWith: CaseRules -> JsonMap -> Result<'T, FieldError list>
+    /// Encode with an explicit case rule, overriding the codec's default.
+    encodeWith: CaseRules -> 'T -> string
+    /// Default case rule applied to F# field names → JSON keys. Defaults to
+    /// `LowerFirst` (camelCase) — the most common convention for modern
+    /// JSON APIs (JS/TS, REST, OpenAPI). Use `withCaseRules` to change it.
+    caseRules: CaseRules
+    /// Per-field JSON-key overrides keyed by F# field name (canonicalized to
+    /// PascalCase). Consulted before `caseRules`. Use `TypedJson.alias` to
+    /// extend.
     aliases: Map<string, string>
-    /// Rebuild this codec with a different alias map. Used by combinators
-    /// (notably `alias`) to extend the alias map without redoing the auto
-    /// reflection machinery.
+    /// Rebuild this codec with a different default case rule. Mirrors
+    /// `withAliases`. Used by `withCaseRules` and downstream combinators.
+    withCaseRules: CaseRules -> TypedJson<'T>
+    /// Rebuild this codec with a different alias map. Used by `alias`.
     withAliases: Map<string, string> -> TypedJson<'T>
 }
 
@@ -226,25 +240,25 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         | Some alias -> alias
         | None -> applyCaseRule caseRules fieldName
 
-    // Recursive constructor — building a new codec with extended aliases is
-    // a single Map.add + recursive call away. The recursion is fine because
-    // F# allows `let rec` for nested values that capture each other.
-    let rec build (aliases: Map<string, string>) : TypedJson<'T> =
-        let decode (caseRules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
+    // Recursive constructor — building a new codec with different aliases or
+    // a different default case rule is a single recursive call away. F#
+    // allows `let rec` for nested values that capture each other.
+    let rec build (aliases: Map<string, string>) (caseRules: CaseRules) : TypedJson<'T> =
+        let decodeWith (rules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
             let lookup (fieldName: string) : JsonValue option =
-                let jsonKey = resolveKey aliases caseRules fieldName
+                let jsonKey = resolveKey aliases rules fieldName
                 jsonMapAdapter backend map jsonKey
 
             schemaFn lookup
 
-        let encode (caseRules: CaseRules) (record: 'T) : string =
+        let encodeWith (rules: CaseRules) (record: 'T) : string =
             let values = FSharpValue.GetRecordFields(box record)
 
             let entries =
                 Array.zip fields values
                 |> Array.toList
                 |> List.choose (fun (fi, v) ->
-                    let jsonKey = resolveKey aliases caseRules fi.Name
+                    let jsonKey = resolveKey aliases rules fi.Name
 
                     if isOptionType fi.PropertyType.FullName then
                         match unbox<obj option> v with
@@ -253,34 +267,36 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                     else
                         Some(jsonKey, v))
 
-            Encode.object backend entries
-            |> Encode.toJson backend
+            Encode.object backend entries |> Encode.toJson backend
 
         {
-            decode = decode
-            encode = encode
+            decode = decodeWith caseRules
+            encode = encodeWith caseRules
+            decodeWith = decodeWith
+            encodeWith = encodeWith
+            caseRules = caseRules
             aliases = aliases
-            withAliases = build
+            withCaseRules = fun newRules -> build aliases newRules
+            withAliases = fun newAliases -> build newAliases caseRules
         }
 
-    build Map.empty
+    build Map.empty CaseRules.LowerFirst
 
 /// Auto codec with the default empty codec registry. Use `autoWith` to pass a registry of custom codecs.
 let inline auto<'T> (backend: IJsonBackend) : TypedJson<'T> =
     autoWith<'T> backend Fable.TypedJson.Schema.emptyRegistry
 
-/// Shorthand: create auto codec and decode in one call.
-let inline validate<'T> (backend: IJsonBackend) (caseRules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
-    (auto<'T> backend).decode caseRules map
+/// Shorthand: create auto codec and decode in one call (uses the codec's default `LowerFirst`).
+let inline validate<'T> (backend: IJsonBackend) (map: JsonMap) : Result<'T, FieldError list> =
+    (auto<'T> backend).decode map
 
 /// Shorthand: create autoWith codec (with custom registry) and decode in one call.
 let inline validateWith<'T>
     (backend: IJsonBackend)
     (registry: CodecRegistry)
-    (caseRules: CaseRules)
     (map: JsonMap)
     : Result<'T, FieldError list> =
-    (autoWith<'T> backend registry).decode caseRules map
+    (autoWith<'T> backend registry).decode map
 
 /// Compose a cross-field model validator onto a codec. Runs after the per-field
 /// decode succeeds. If the validator returns Error, those errors replace the success.
@@ -293,23 +309,37 @@ let inline validateWith<'T>
 ///
 /// Pydantic equivalent: `@model_validator(mode="after")`.
 let withModel (validator: 'T -> Result<'T, FieldError list>) (codec: TypedJson<'T>) : TypedJson<'T> =
-    // Wrap the inner codec's decode with the model validator. We rebuild
-    // recursively so a subsequent `alias` call still rebuilds the inner
-    // codec via the original `withAliases` and re-applies the model validator.
+    // Wrap the inner codec's decode with the model validator. Rebuild
+    // recursively so subsequent `alias` / `withCaseRules` calls re-apply
+    // the validator on the fresh inner codec.
     let rec wrap (inner: TypedJson<'T>) : TypedJson<'T> =
-        let decode (caseRules: CaseRules) (map: JsonMap) =
-            match inner.decode caseRules map with
+        let decodeWith (rules: CaseRules) (map: JsonMap) =
+            match inner.decodeWith rules map with
             | Ok v -> validator v
             | Error errs -> Error errs
 
         {
-            decode = decode
+            decode = decodeWith inner.caseRules
             encode = inner.encode
+            decodeWith = decodeWith
+            encodeWith = inner.encodeWith
+            caseRules = inner.caseRules
             aliases = inner.aliases
+            withCaseRules = fun rules -> wrap (inner.withCaseRules rules)
             withAliases = fun aliases -> wrap (inner.withAliases aliases)
         }
 
     wrap codec
+
+/// Set the default case rule used to derive JSON keys from F# field names.
+/// Defaults to `LowerFirst` (camelCase). Set to `SnakeCase` for snake_case
+/// APIs, `KebabCase` for hyphen-separated keys, etc.
+///
+///   let codec = auto<WeatherRequest> beam |> withCaseRules CaseRules.SnakeCase
+///
+/// Per-field overrides via `alias` still take precedence.
+let withCaseRules (caseRules: CaseRules) (codec: TypedJson<'T>) : TypedJson<'T> =
+    codec.withCaseRules caseRules
 
 /// Override the JSON key for a single F# record field, replacing whatever
 /// the active `CaseRules` would have produced. Affects decode lookup,

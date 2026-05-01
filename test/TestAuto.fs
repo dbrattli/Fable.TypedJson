@@ -44,7 +44,7 @@ let ``test auto decode simple record`` () =
     let codec = auto<SimpleRecord> ()
     let map = parseRaw """{"name":"Alice","age":30}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok record ->
         record.Name |> equal "Alice"
         record.Age |> equal 30
@@ -55,7 +55,7 @@ let ``test auto decode float record`` () =
     let codec = auto<RecordWithFloat> ()
     let map = parseRaw """{"air_temperature":22.5,"relative_humidity":65.0}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok record ->
         record.AirTemperature |> equal 22.5
         record.RelativeHumidity |> equal 65.0
@@ -66,7 +66,7 @@ let ``test auto decode with option some`` () =
     let codec = auto<RecordWithOption> ()
     let map = parseRaw """{"name":"Alice","email":"a@b.com"}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok record ->
         record.Name |> equal "Alice"
         record.Email |> equal (Some "a@b.com")
@@ -77,7 +77,7 @@ let ``test auto decode with option none`` () =
     let codec = auto<RecordWithOption> ()
     let map = parseRaw """{"name":"Alice"}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok record ->
         record.Name |> equal "Alice"
         record.Email |> equal None
@@ -88,7 +88,7 @@ let ``test auto decode missing required field`` () =
     let codec = auto<SimpleRecord> ()
     let map = parseRaw """{"name":"Alice"}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors ->
         errors.Length |> equal 1
@@ -99,7 +99,7 @@ let ``test auto decode accumulates all errors`` () =
     let codec = auto<SimpleRecord> ()
     let map = parseRaw """{}"""
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
     | Error errors -> errors.Length |> equal 2
 
@@ -111,7 +111,7 @@ let ``test auto decode accumulates all errors`` () =
 let ``test auto encode simple record`` () =
     let codec = auto<SimpleRecord> ()
     let record = { Name = "Bob"; Age = 25 }
-    let json = codec.encode CaseRules.SnakeCase record
+    let json = codec.encodeWith CaseRules.SnakeCase record
     let map = parseRaw json
     let name = unbox<string> (backend.Get(map, "name"))
     let age = unbox<int> (backend.Get(map, "age"))
@@ -127,7 +127,7 @@ let ``test auto encode float record`` () =
         RelativeHumidity = 65.0
     }
 
-    let json = codec.encode CaseRules.SnakeCase record
+    let json = codec.encodeWith CaseRules.SnakeCase record
     let map = parseRaw json
     let temp = unbox<float> (backend.Get(map, "air_temperature"))
     let humidity = unbox<float> (backend.Get(map, "relative_humidity"))
@@ -143,7 +143,7 @@ let ``test auto encode with option some`` () =
         Email = Some "a@b.com"
     }
 
-    let json = codec.encode CaseRules.SnakeCase record
+    let json = codec.encodeWith CaseRules.SnakeCase record
     let map = parseRaw json
     let name = unbox<string> (backend.Get(map, "name"))
     let email = unbox<string> (backend.Get(map, "email"))
@@ -158,10 +158,10 @@ let ``test auto encode with option some`` () =
 let ``test auto round-trip simple record`` () =
     let codec = auto<SimpleRecord> ()
     let original = { Name = "Charlie"; Age = 40 }
-    let json = codec.encode CaseRules.SnakeCase original
+    let json = codec.encodeWith CaseRules.SnakeCase original
     let map = parseRaw json
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok decoded ->
         decoded.Name |> equal original.Name
         decoded.Age |> equal original.Age
@@ -176,10 +176,10 @@ let ``test auto round-trip float record`` () =
         RelativeHumidity = 88.2
     }
 
-    let json = codec.encode CaseRules.SnakeCase original
+    let json = codec.encodeWith CaseRules.SnakeCase original
     let map = parseRaw json
 
-    match codec.decode CaseRules.SnakeCase map with
+    match codec.decodeWith CaseRules.SnakeCase map with
     | Ok decoded ->
         decoded.AirTemperature
         |> equal original.AirTemperature
