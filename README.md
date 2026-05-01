@@ -285,7 +285,13 @@ Fable.TypedJson.Python (Python shim)
 
 ## Prerequisites
 
-- .NET SDK 10
+### Using the library (NuGet consumer)
+
+The published packages target **netstandard2.0**, so any .NET runtime that supports netstandard2.0 works — .NET 6 / 7 / 8 / 9 / 10, .NET Core 2.0+, .NET Framework 4.6.1+, Mono 5.4+. Plus the Fable toolchain in your project for the actual transpilation to BEAM / Python / JS / .NET.
+
+### Building this repo from source
+
+- .NET SDK that satisfies the test fsproj's `net10.0` target (currently .NET SDK 10)
 - For the BEAM target: Erlang/OTP and `rebar3`
 - For the Python target: `uv` (the venv pulls in `fable-library` and `pytest`)
 - `just` (task runner)
