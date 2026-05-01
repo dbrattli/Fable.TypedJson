@@ -89,6 +89,49 @@ let codec =
 
 `alias` flows through decode lookup, encode output, **and** the JSON Schema's `properties` / `required` keys. Field names you pass to `alias` are normalized to PascalCase internally so the same call works on every backend (BEAM lowercases reflection names, Python preserves the F# spelling).
 
+## Schema vs TypedJson — validate dicts and maps too
+
+Internally there are two layers, and you can stop at the bottom one:
+
+- **`Schema`** — format-agnostic. A `Schema<'T>` is just a function from a
+  `string -> JsonValue option` lookup to `Result<'T, FieldError list>`. It
+  walks the F# record's reflection, applies the registered codecs, and
+  accumulates errors. It doesn't know anything about JSON.
+- **`TypedJson`** — JSON-specific shell on top: adds `CaseRules`, the
+  encode side, `alias`, `withModel`, and the `Encode.toJson` / `parseRaw`
+  plumbing.
+
+Because `Schema` only needs a key→value lookup, it validates any source
+that fits that shape. The library ships with two adapters out of the box:
+
+```fsharp
+// Map<string, string> — LLM tool-call inputs, form fields, env vars, ...
+// Every value arrives as a string; primitive codecs coerce to int / float /
+// bool / etc. via `Type coercion` below.
+let toolInput : Map<string, string> =
+    Map.ofList [ "location", "Oslo"; "days", "3"; "detailed", "true" ]
+
+match validateMap<WeatherRequest> toolInput with
+| Ok req -> handle req
+| Error errs -> printfn "%s" (formatErrors errs)
+```
+
+```fsharp
+// Backend-native JSON map (a parsed jsx map / Python dict / ...)
+let jsonMap = parseRaw """{"location":"Oslo","days":3}"""
+
+match validateJson<WeatherRequest> jsonMap with
+| Ok req -> handle req
+| Error errs -> printfn "%s" (formatErrors errs)
+```
+
+Both go through the same `Schema.auto<'T>`. The difference is just the
+adapter that turns the source map into the lookup function. Building your
+own adapter for env-var dicts, query strings, or BEAM proplists is a few
+lines of F#. Pydantic users coming from the LLM tool-call use case will
+recognize this — it's the same role `model_validate` plays for dict
+inputs in Pydantic.
+
 ## Approach
 
 - **Validators-as-types**: each field's type carries its rules. Reuse across records, compose across libraries.
@@ -176,7 +219,16 @@ If you want a low-level JSON AST to inspect or you need maximum control over dec
 
 ## Architecture
 
-Backend-agnostic core, with per-target shims that supply the JSON map plumbing through `IJsonBackend`:
+Two design axes, each independent:
+
+1. **Schema vs TypedJson layering** (vertical) — `Schema` is format-agnostic
+   record validation; `TypedJson` is the JSON shell on top. You can stop at
+   `Schema` if you're validating a `Map<string, string>` from an LLM tool
+   call or a dict from elsewhere — see [Schema vs TypedJson](#schema-vs-typedjson--validate-dicts-and-maps-too) above.
+2. **Backend-agnostic core vs per-target shims** (horizontal) — `IJsonBackend`
+   abstracts the actual JSON parser and the native map type. Concrete shims
+   ship for BEAM (jsx) and Python (`json`); JS and .NET are a similarly
+   sized addition.
 
 ```text
 Fable.TypedJson (core, no backend deps)
