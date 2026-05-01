@@ -28,12 +28,12 @@ type User = { Name: string; Address: Address }
 
 [<Fact>]
 let ``test nested record decodes valid input`` () =
-    let codec = auto<User> ()
+    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
 
     let map =
         parseRaw """{"name":"Alice","address":{"street":"Main 1","city":"Oslo"}}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         r.Name |> equal "Alice"
         r.Address.Street |> equal "Main 1"
@@ -42,10 +42,10 @@ let ``test nested record decodes valid input`` () =
 
 [<Fact>]
 let ``test nested record reports inner missing field`` () =
-    let codec = auto<User> ()
+    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"name":"Alice","address":{"street":"Main 1"}}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
@@ -61,10 +61,10 @@ type Tagged = { Title: string; Tags: string list }
 
 [<Fact>]
 let ``test list of strings decodes`` () =
-    let codec = auto<Tagged> ()
+    let codec = auto<Tagged> () |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"title":"hello","tags":["a","b","c"]}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         r.Title |> equal "hello"
         r.Tags |> equal [ "a"; "b"; "c" ]
@@ -72,10 +72,10 @@ let ``test list of strings decodes`` () =
 
 [<Fact>]
 let ``test list of strings empty decodes`` () =
-    let codec = auto<Tagged> ()
+    let codec = auto<Tagged> () |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"title":"empty","tags":[]}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         r.Tags |> equal []
         r.Title |> equal "empty"
@@ -89,7 +89,7 @@ type Team = { Name: string; Members: User list }
 
 [<Fact>]
 let ``test list of records decodes`` () =
-    let codec = auto<Team> ()
+    let codec = auto<Team> () |> withCaseRules CaseRules.SnakeCase
 
     let map =
         parseRaw
@@ -98,7 +98,7 @@ let ``test list of records decodes`` () =
                 {"name":"Bob","address":{"street":"S2","city":"Bergen"}}
             ]}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         r.Name |> equal "Engineering"
         r.Members.Length |> equal 2
@@ -108,7 +108,7 @@ let ``test list of records decodes`` () =
 
 [<Fact>]
 let ``test list of records reports element index in error`` () =
-    let codec = auto<Team> ()
+    let codec = auto<Team> () |> withCaseRules CaseRules.SnakeCase
 
     let map =
         parseRaw
@@ -117,7 +117,7 @@ let ``test list of records reports element index in error`` () =
                 {"name":"Bob"}
             ]}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs

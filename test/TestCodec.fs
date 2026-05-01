@@ -110,10 +110,10 @@ type Req = { Days: DayCount; Name: string }
 
 [<Fact>]
 let ``test auto with custom codec accepts valid value`` () =
-    let codec = autoWith<Req> codecs
+    let codec = autoWith<Req> codecs |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"days":7, "name":"hello"}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         let (DayCount n) = r.Days
         n |> equal 7
@@ -122,10 +122,10 @@ let ``test auto with custom codec accepts valid value`` () =
 
 [<Fact>]
 let ``test auto with custom codec rejects out-of-range value`` () =
-    let codec = autoWith<Req> codecs
+    let codec = autoWith<Req> codecs |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"days":15, "name":"hello"}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         // The error from Codec.le surfaces through the registry into the FieldError list.
@@ -135,10 +135,10 @@ let ``test auto with custom codec rejects out-of-range value`` () =
 
 [<Fact>]
 let ``test auto with custom codec rejects zero`` () =
-    let codec = autoWith<Req> codecs
+    let codec = autoWith<Req> codecs |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"days":0, "name":"hello"}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
@@ -157,6 +157,7 @@ type Range = { Start: int; Until: int }
 let ``test withModel accepts valid cross-field invariant`` () =
     let codec =
         auto<Range> ()
+        |> withCaseRules CaseRules.SnakeCase
         |> withModel (fun r ->
             if r.Start <= r.Until then
                 Ok r
@@ -170,7 +171,7 @@ let ``test withModel accepts valid cross-field invariant`` () =
 
     let map = parseRaw """{"start":1, "until":10}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         r.Start |> equal 1
         r.Until |> equal 10
@@ -180,6 +181,7 @@ let ``test withModel accepts valid cross-field invariant`` () =
 let ``test withModel rejects invalid cross-field invariant`` () =
     let codec =
         auto<Range> ()
+        |> withCaseRules CaseRules.SnakeCase
         |> withModel (fun r ->
             if r.Start <= r.Until then
                 Ok r
@@ -193,7 +195,7 @@ let ``test withModel rejects invalid cross-field invariant`` () =
 
     let map = parseRaw """{"start":10, "until":1}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs

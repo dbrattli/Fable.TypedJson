@@ -146,10 +146,10 @@ let private codecs: CodecRegistry = emptyRegistry |> registerAll
 
 [<Fact>]
 let ``test auto with refined types accepts valid record`` () =
-    let codec = autoWith<Account> codecs
+    let codec = autoWith<Account> codecs |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"username":"alice","age":30,"contact":"alice@example.com"}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         let (NonEmptyString u) = r.Username
         u |> equal "alice"
@@ -161,10 +161,10 @@ let ``test auto with refined types accepts valid record`` () =
 
 [<Fact>]
 let ``test auto with refined types rejects empty username`` () =
-    let codec = autoWith<Account> codecs
+    let codec = autoWith<Account> codecs |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"username":"","age":30,"contact":"alice@example.com"}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
@@ -174,10 +174,10 @@ let ``test auto with refined types rejects empty username`` () =
 
 [<Fact>]
 let ``test auto with refined types rejects negative age`` () =
-    let codec = autoWith<Account> codecs
+    let codec = autoWith<Account> codecs |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"username":"alice","age":-1,"contact":"alice@example.com"}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
@@ -185,10 +185,10 @@ let ``test auto with refined types rejects negative age`` () =
 
 [<Fact>]
 let ``test auto with refined types rejects malformed email`` () =
-    let codec = autoWith<Account> codecs
+    let codec = autoWith<Account> codecs |> withCaseRules CaseRules.SnakeCase
     let map = parseRaw """{"username":"alice","age":30,"contact":"not-an-email"}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs

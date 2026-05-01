@@ -29,13 +29,14 @@ type WeatherRequest = { Location: string; Days: int }
 let ``test alias redirects decode lookup`` () =
     let codec =
         auto<WeatherRequest> ()
+        |> withCaseRules CaseRules.SnakeCase
         |> alias "Location" "loc"
         |> alias "Days" "n"
 
     // JSON uses the alias keys, not snake_case derived from field names.
     let map = parseRaw """{"loc":"Oslo","n":3}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         r.Location |> equal "Oslo"
         r.Days |> equal 3
@@ -43,11 +44,14 @@ let ``test alias redirects decode lookup`` () =
 
 [<Fact>]
 let ``test alias affects error path on missing key`` () =
-    let codec = auto<WeatherRequest> () |> alias "Location" "loc"
+    let codec =
+        auto<WeatherRequest> ()
+        |> withCaseRules CaseRules.SnakeCase
+        |> alias "Location" "loc"
     // JSON is missing the aliased key.
     let map = parseRaw """{"days":3}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         // The schema looked up "loc" and missed it. The FieldError's `path`
@@ -59,47 +63,47 @@ let ``test alias affects error path on missing key`` () =
 
 [<Fact>]
 let ``test alias redirects encode output`` () =
-    let codec = auto<WeatherRequest> () |> alias "Location" "loc"
-    let json = codec.encodeWith CaseRules.SnakeCase { Location = "Oslo"; Days = 5 }
+    let codec =
+        auto<WeatherRequest> ()
+        |> withCaseRules CaseRules.SnakeCase
+        |> alias "Location" "loc"
+
+    let json = codec.encode { Location = "Oslo"; Days = 5 }
     let parsed = parseRaw json
 
     backend.ContainsKey(parsed, "loc") |> equal true
-
-    backend.ContainsKey(parsed, "location")
-    |> equal false
-
-    unbox<string> (backend.Get(parsed, "loc"))
-    |> equal "Oslo"
+    backend.ContainsKey(parsed, "location") |> equal false
+    unbox<string> (backend.Get(parsed, "loc")) |> equal "Oslo"
 
 [<Fact>]
 let ``test alias falls through to case rule for unaliased fields`` () =
-    let codec = auto<WeatherRequest> () |> alias "Location" "loc"
-    let json = codec.encodeWith CaseRules.SnakeCase { Location = "Oslo"; Days = 5 }
+    let codec =
+        auto<WeatherRequest> ()
+        |> withCaseRules CaseRules.SnakeCase
+        |> alias "Location" "loc"
+
+    let json = codec.encode { Location = "Oslo"; Days = 5 }
     let parsed = parseRaw json
 
-    // "Days" wasn't aliased, so it follows the SnakeCase rule.
+    // "Days" wasn't aliased, so it follows the codec's SnakeCase rule.
     backend.ContainsKey(parsed, "days") |> equal true
-
-    unbox<int> (backend.Get(parsed, "days"))
-    |> equal 5
+    unbox<int> (backend.Get(parsed, "days")) |> equal 5
 
 [<Fact>]
 let ``test alias propagates to JSON schema property keys`` () =
     let codec =
         auto<WeatherRequest> ()
+        |> withCaseRules CaseRules.SnakeCase
         |> alias "Location" "loc"
         |> alias "Days" "n"
 
-    let json = jsonSchemaOfCodec emptyRegistry (codec |> withCaseRules CaseRules.SnakeCase)
+    let json = jsonSchemaOfCodec emptyRegistry codec
     let parsed = parseRaw json
 
     let props = backend.Get(parsed, "properties")
     backend.ContainsKey(props, "loc") |> equal true
     backend.ContainsKey(props, "n") |> equal true
-
-    backend.ContainsKey(props, "location")
-    |> equal false
-
+    backend.ContainsKey(props, "location") |> equal false
     backend.ContainsKey(props, "days") |> equal false
 
     // `required` must list the aliased keys too.
@@ -118,6 +122,7 @@ let ``test alias preserves withModel composition`` () =
     // Combinator order matters — verify alias works after withModel.
     let codec =
         auto<WeatherRequest> ()
+        |> withCaseRules CaseRules.SnakeCase
         |> withModel (fun r ->
             if r.Days > 0 then
                 Ok r
@@ -132,7 +137,7 @@ let ``test alias preserves withModel composition`` () =
 
     let map = parseRaw """{"loc":"Oslo","days":3}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
+    match codec.decode map with
     | Ok r ->
         r.Location |> equal "Oslo"
         r.Days |> equal 3
@@ -141,10 +146,8 @@ let ``test alias preserves withModel composition`` () =
     // Negative path: withModel still fires even when alias was applied later.
     let bad = parseRaw """{"loc":"Oslo","days":-1}"""
 
-    match codec.decodeWith CaseRules.SnakeCase bad with
+    match codec.decode bad with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
-
-        formatted.Contains("must be positive")
-        |> equal true
+        formatted.Contains("must be positive") |> equal true

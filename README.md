@@ -41,9 +41,11 @@ let codecs =
     |> Refined.registerAll              // NonEmptyString, PositiveInt, Email, Url, ...
 
 // 4. Auto-derive the codec and decode. Errors accumulate across all fields.
+//    The default JSON casing is camelCase (`LowerFirst`); chain
+//    `withCaseRules CaseRules.SnakeCase` if you need snake_case keys.
 let codec = autoWith<WeatherRequest> codecs
 
-match codec.decode CaseRules.SnakeCase jsonMap with
+match codec.decode jsonMap with
 | Ok req -> handle req
 | Error errs ->
     // [{ path = "days";     message = "must be > 0" };
@@ -60,7 +62,8 @@ Like Pydantic's `model_json_schema()`, a single call walks the codec tree and em
 ```fsharp
 type Account = { Username: NonEmptyString; Email: Email }
 
-let schemaJson = jsonSchemaOf<Account> codecs CaseRules.SnakeCase
+let codec = autoWith<Account> codecs
+let schemaJson = jsonSchemaOfCodec codecs codec
 // {
 //   "type": "object",
 //   "title": "Account",
@@ -72,7 +75,7 @@ let schemaJson = jsonSchemaOf<Account> codecs CaseRules.SnakeCase
 // }
 ```
 
-For aliases attached via `TypedJson.alias`, use `jsonSchemaOfCodec codec` so the property names match the codec's actual JSON keys.
+`jsonSchemaOfCodec` reads the codec's configured `caseRules` and any `alias` overrides, so the schema's property names always match the JSON the codec actually accepts and produces. (For a quick schema with no aliases or codec, `jsonSchemaOf<'T> codecs caseRules` takes the case rule explicitly.)
 
 ## Aliases and cross-field rules
 
@@ -147,12 +150,34 @@ inputs in Pydantic.
 
 ## Case rules
 
-Field names from F# reflection are transformed into JSON keys via a `CaseRules` argument at decode/encode time. The rule normalizes names through PascalCase internally so the same rule produces consistent output regardless of how the backend's reflection presents the F# name (BEAM lowercases, Python preserves):
+Field names from F# reflection are transformed into JSON keys via a `CaseRules` setting on the codec. The default is `LowerFirst` (camelCase) — the most common convention for modern JSON APIs. Use `withCaseRules` to switch.
+
+```fsharp
+// Default (camelCase): no extra step needed
+let camel = auto<WeatherRequest> beam
+camel.encode { Location = "Oslo"; Days = 3 }
+// {"location":"Oslo","days":3}
+
+// Snake_case
+let snake = auto<WeatherRequest> beam |> withCaseRules CaseRules.SnakeCase
+snake.encode { Location = "Oslo"; Days = 3 }
+// {"location":"Oslo","days":3}      ← single-word fields look the same
+
+// Multi-word fields show the difference:
+type Reading = { AirTemperature: float; WindSpeed: float }
+(auto<Reading> beam |> withCaseRules CaseRules.SnakeCase).encode { ... }
+// {"air_temperature":22.5,"wind_speed":3.0}
+
+// One-off override (rare — same codec, multiple JSON formats):
+codec.decodeWith CaseRules.SnakeCaseAllCaps map
+```
+
+The rule normalizes names through PascalCase internally so the same rule produces consistent output regardless of how the backend's reflection presents the F# name (BEAM lowercases, Python preserves):
 
 | Rule               | Input            | Output           |
 | ------------------ | ---------------- | ---------------- |
 | `None`             | `MyField`        | `MyField`        |
-| `LowerFirst`       | `MyField`        | `myField`        |
+| `LowerFirst` (default) | `MyField`    | `myField`        |
 | `SnakeCase`        | `MyField`        | `my_field`       |
 | `SnakeCaseAllCaps` | `MyField`        | `MY_FIELD`       |
 | `KebabCase`        | `MyField`        | `my-field`       |
