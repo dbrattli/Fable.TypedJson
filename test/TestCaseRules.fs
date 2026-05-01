@@ -12,9 +12,11 @@ open Fable.TypedJson.Json
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+
 let backend = python
 #else
 open Fable.TypedJson.Beam.Json
+
 let backend = beam
 #endif
 
@@ -25,47 +27,58 @@ let backend = beam
 
 [<Fact>]
 let ``test snake_case conversion`` () =
-    applyCaseRule CaseRules.SnakeCase "AirTemperature" |> equal "air_temperature"
+    applyCaseRule CaseRules.SnakeCase "AirTemperature"
+    |> equal "air_temperature"
 
 [<Fact>]
 let ``test snake_case multi-word`` () =
-    applyCaseRule CaseRules.SnakeCase "RelativeHumidity" |> equal "relative_humidity"
+    applyCaseRule CaseRules.SnakeCase "RelativeHumidity"
+    |> equal "relative_humidity"
 
 [<Fact>]
 let ``test snake_case single word`` () =
-    applyCaseRule CaseRules.SnakeCase "Name" |> equal "name"
+    applyCaseRule CaseRules.SnakeCase "Name"
+    |> equal "name"
 
 [<Fact>]
 let ``test snake_case already lowercase`` () =
-    applyCaseRule CaseRules.SnakeCase "name" |> equal "name"
+    applyCaseRule CaseRules.SnakeCase "name"
+    |> equal "name"
 
 [<Fact>]
 let ``test lower_first conversion`` () =
-    applyCaseRule CaseRules.LowerFirst "AirTemperature" |> equal "airTemperature"
+    applyCaseRule CaseRules.LowerFirst "AirTemperature"
+    |> equal "airTemperature"
 
 [<Fact>]
 let ``test lower_first single word`` () =
-    applyCaseRule CaseRules.LowerFirst "Name" |> equal "name"
+    applyCaseRule CaseRules.LowerFirst "Name"
+    |> equal "name"
 
 [<Fact>]
 let ``test kebab_case conversion`` () =
-    applyCaseRule CaseRules.KebabCase "AirTemperature" |> equal "air-temperature"
+    applyCaseRule CaseRules.KebabCase "AirTemperature"
+    |> equal "air-temperature"
 
 [<Fact>]
 let ``test snake_case_all_caps conversion`` () =
-    applyCaseRule CaseRules.SnakeCaseAllCaps "AirTemperature" |> equal "AIR_TEMPERATURE"
+    applyCaseRule CaseRules.SnakeCaseAllCaps "AirTemperature"
+    |> equal "AIR_TEMPERATURE"
 
 [<Fact>]
 let ``test none preserves case`` () =
-    applyCaseRule CaseRules.None "AirTemperature" |> equal "AirTemperature"
+    applyCaseRule CaseRules.None "AirTemperature"
+    |> equal "AirTemperature"
 
 [<Fact>]
 let ``test pascal_case conversion`` () =
-    applyCaseRule CaseRules.PascalCase "air_temperature" |> equal "AirTemperature"
+    applyCaseRule CaseRules.PascalCase "air_temperature"
+    |> equal "AirTemperature"
 
 [<Fact>]
 let ``test pascal_case single word`` () =
-    applyCaseRule CaseRules.PascalCase "name" |> equal "Name"
+    applyCaseRule CaseRules.PascalCase "name"
+    |> equal "Name"
 
 // ============================================================================
 // Auto Codec with Different Case Rules
@@ -85,8 +98,7 @@ let ``test auto decode with snake_case keys`` () =
     | Ok w ->
         w.AirTemperature |> equal 22.5
         w.WindSpeed |> equal 3.0
-    | Error e ->
-        equal "Ok" (sprintf "Error: %A" e)
+    | Error e -> equal "Ok" (sprintf "Error: %A" e)
 
 [<Fact>]
 let ``test auto decode with camelCase keys`` () =
@@ -97,8 +109,7 @@ let ``test auto decode with camelCase keys`` () =
     | Ok w ->
         w.AirTemperature |> equal 22.5
         w.WindSpeed |> equal 3.0
-    | Error e ->
-        equal "Ok" (sprintf "Error: %A" e)
+    | Error e -> equal "Ok" (sprintf "Error: %A" e)
 
 [<Fact>]
 let ``test auto decode with PascalCase keys`` () =
@@ -109,13 +120,17 @@ let ``test auto decode with PascalCase keys`` () =
     | Ok w ->
         w.AirTemperature |> equal 22.5
         w.WindSpeed |> equal 3.0
-    | Error e ->
-        equal "Ok" (sprintf "Error: %A" e)
+    | Error e -> equal "Ok" (sprintf "Error: %A" e)
 
 [<Fact>]
 let ``test auto encode with snake_case`` () =
     let codec = auto<Weather> ()
-    let record = { AirTemperature = 22.5; WindSpeed = 3.0 }
+
+    let record = {
+        AirTemperature = 22.5
+        WindSpeed = 3.0
+    }
+
     let json = codec.encode CaseRules.SnakeCase record
     let map = parseRaw json
     let temp = unbox<float> (backend.Get(map, "air_temperature"))
@@ -124,7 +139,12 @@ let ``test auto encode with snake_case`` () =
 [<Fact>]
 let ``test auto encode with camelCase`` () =
     let codec = auto<Weather> ()
-    let record = { AirTemperature = 22.5; WindSpeed = 3.0 }
+
+    let record = {
+        AirTemperature = 22.5
+        WindSpeed = 3.0
+    }
+
     let json = codec.encode CaseRules.LowerFirst record
     let map = parseRaw json
     let temp = unbox<float> (backend.Get(map, "airTemperature"))
@@ -133,14 +153,22 @@ let ``test auto encode with camelCase`` () =
 [<Fact>]
 let ``test same codec different casing`` () =
     let codec = auto<Weather> ()
-    let record = { AirTemperature = 22.5; WindSpeed = 3.0 }
+
+    let record = {
+        AirTemperature = 22.5
+        WindSpeed = 3.0
+    }
 
     // Encode as snake_case
     let snakeJson = codec.encode CaseRules.SnakeCase record
     let snakeMap = parseRaw snakeJson
-    backend.ContainsKey(snakeMap, "air_temperature") |> equal true
+
+    backend.ContainsKey(snakeMap, "air_temperature")
+    |> equal true
 
     // Encode same record as camelCase
     let camelJson = codec.encode CaseRules.LowerFirst record
     let camelMap = parseRaw camelJson
-    backend.ContainsKey(camelMap, "airTemperature") |> equal true
+
+    backend.ContainsKey(camelMap, "airTemperature")
+    |> equal true

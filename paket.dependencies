@@ -1,31 +1,32 @@
 # https://fsprojects.github.io/Paket/nuget-dependencies.html
 #
-# Dependencies are split by Fable target. Each project picks ONE group via
-# its `paket.references` to keep version resolution consistent within that
-# project (Paket can't reconcile mixed groups inside a single fsproj).
+# Library packages target netstandard2.0 (broad consumability when published
+# to NuGet). The Test group targets net10.0 since the test runner runs on
+# .NET (it's the host that drives Fable to transpile to BEAM/Python and
+# then runs those targets).
 #
-#   Main   → Fable.TypedJson (backend-agnostic core)
-#   Beam   → Fable.TypedJson.Beam
-#   Python → Fable.TypedJson.Python
+#   Main   → Fable.TypedJson (backend-agnostic core, netstandard2.0)
+#   Beam   → Fable.TypedJson.Beam (netstandard2.0)
+#   Python → Fable.TypedJson.Python (netstandard2.0)
+#   Test   → Fable.TypedJson.Test (net10.0)
 #
-# Each group declares its full deps (including FSharp.Core and Fable.Core)
-# rather than inheriting from Main, so resolution is self-contained.
+# Each project's `paket.references` opts into its single group.
 
 source https://api.nuget.org/v3/index.json
 storage: none
-framework: net10.0
+framework: netstandard2.0
 
 nuget FSharp.Core >= 5.0.0 lowest_matching: true
-nuget Fable.Core >= 5.0.0
+nuget Fable.Core >= 5.0.0 lowest_matching: true
 
 # BEAM (Erlang) backend
 group Beam
     source https://api.nuget.org/v3/index.json
     storage: none
-    framework: net10.0
+    framework: netstandard2.0
 
     nuget FSharp.Core >= 5.0.0 lowest_matching: true
-    nuget Fable.Core >= 5.0.0
+    nuget Fable.Core >= 5.0.0 lowest_matching: true
     nuget Fable.Beam >= 5.0.0-rc.27
     nuget Fable.Beam.Jsx >= 5.0.0-rc.8
 
@@ -33,8 +34,23 @@ group Beam
 group Python
     source https://api.nuget.org/v3/index.json
     storage: none
-    framework: net10.0
+    framework: netstandard2.0
 
     nuget FSharp.Core >= 5.0.0 lowest_matching: true
-    nuget Fable.Core >= 5.0.0
+    nuget Fable.Core >= 5.0.0 lowest_matching: true
+    nuget Fable.Python >= 5.1.0
+
+# Test runner (host process). Tests transpile the same F# source to BOTH
+# BEAM and Python via #if PYTHON, so this group includes every backend's
+# Fable bindings — Fable's source-walking compiler needs them all visible
+# under one project's reference set.
+group Test
+    source https://api.nuget.org/v3/index.json
+    storage: none
+    framework: net10.0
+
+    nuget FSharp.Core
+    nuget Fable.Core
+    nuget Fable.Beam >= 5.0.0-rc.27
+    nuget Fable.Beam.Jsx >= 5.0.0-rc.8
     nuget Fable.Python >= 5.1.0

@@ -12,9 +12,11 @@ open Fable.TypedJson.Json
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+
 let backend = python
 #else
 open Fable.TypedJson.Beam.Json
+
 let backend = beam
 #endif
 
@@ -35,8 +37,7 @@ let ``test encode simple object`` () =
 let ``test encode nested object`` () =
     let json =
         Encode.object [
-            "user",
-            Encode.object [ "name", Encode.string "Bob"; "active", Encode.bool true ]
+            "user", Encode.object [ "name", Encode.string "Bob"; "active", Encode.bool true ]
         ]
         |> Encode.toJson
 
@@ -53,7 +54,9 @@ let ``test encode list of strings`` () =
 
     // Round-trip via the backend confirms the list is well-formed JSON.
     let parsed = parseRaw json
-    backend.IsArray(backend.Get(parsed, "tags")) |> equal true
+
+    backend.IsArray(backend.Get(parsed, "tags"))
+    |> equal true
 
 [<Fact>]
 let ``test encode optional some`` () =
@@ -74,7 +77,8 @@ let ``test encode optional none`` () =
     let parsed = parseRaw json
     // Each backend's JSON-null sentinel differs (BEAM: `null` atom from jsx,
     // Python: `None`). `IsNull` abstracts the comparison.
-    backend.IsNull(backend.Get(parsed, "value")) |> equal true
+    backend.IsNull(backend.Get(parsed, "value"))
+    |> equal true
 
 [<Fact>]
 let ``test encode handles special characters`` () =
@@ -111,6 +115,7 @@ let ``test encode bool`` () =
 [<Fact>]
 let ``test encode raw pre-encoded json`` () =
     let inner = """{"x":1}"""
+
     let json =
         Encode.object [ "data", Encode.raw inner ]
         |> Encode.toJson

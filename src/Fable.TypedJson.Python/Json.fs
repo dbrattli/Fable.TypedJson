@@ -27,11 +27,7 @@ let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
 let inline validate<'T> (caseRules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validate<'T> python caseRules map
 
-let inline validateWith<'T>
-    (registry: CodecRegistry)
-    (caseRules: CaseRules)
-    (map: JsonMap)
-    : Result<'T, FieldError list> =
+let inline validateWith<'T> (registry: CodecRegistry) (caseRules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateWith<'T> python registry caseRules map
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
@@ -40,7 +36,8 @@ let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
 let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError list> =
     Fable.TypedJson.Schema.validateMap<'T> python map
 
-let inline dump<'T> (record: 'T) : obj = Fable.TypedJson.Schema.dump<'T> python record
+let inline dump<'T> (record: 'T) : obj =
+    Fable.TypedJson.Schema.dump<'T> python record
 
 /// Generate a JSON Schema document for record type `'T`. Uses the supplied
 /// `CodecRegistry` for custom-codec types and `caseRules` to map F# field
@@ -50,11 +47,7 @@ let inline jsonSchemaOf<'T> (registry: CodecRegistry) (caseRules: CaseRules) : s
 
 /// Generate a JSON Schema document from a `TypedJson<'T>` codec. Honors any
 /// aliases attached via `TypedJson.alias`.
-let inline jsonSchemaOfCodec<'T>
-    (registry: CodecRegistry)
-    (caseRules: CaseRules)
-    (codec: TypedJson<'T>)
-    : string =
+let inline jsonSchemaOfCodec<'T> (registry: CodecRegistry) (caseRules: CaseRules) (codec: TypedJson<'T>) : string =
     Fable.TypedJson.JsonSchemaGen.jsonSchemaOfCodec<'T> python registry caseRules codec
 
 module Encode =
@@ -62,8 +55,18 @@ module Encode =
     let inline int n = Fable.TypedJson.Json.Encode.int n
     let inline float f = Fable.TypedJson.Json.Encode.float f
     let inline bool b = Fable.TypedJson.Json.Encode.bool b
-    let inline list (encoder: 'T -> obj) (items: 'T list) = Fable.TypedJson.Json.Encode.list python encoder items
-    let inline optional (encoder: 'T -> obj) (v: 'T option) = Fable.TypedJson.Json.Encode.optional python encoder v
-    let object (fields: (string * obj) list) = Fable.TypedJson.Json.Encode.object python fields
-    let raw (jsonStr: string) = Fable.TypedJson.Json.Encode.raw python jsonStr
-    let toJson (term: obj) = Fable.TypedJson.Json.Encode.toJson python term
+
+    let inline list (encoder: 'T -> obj) (items: 'T list) =
+        Fable.TypedJson.Json.Encode.list python encoder items
+
+    let inline optional (encoder: 'T -> obj) (v: 'T option) =
+        Fable.TypedJson.Json.Encode.optional python encoder v
+
+    let object (fields: (string * obj) list) =
+        Fable.TypedJson.Json.Encode.object python fields
+
+    let raw (jsonStr: string) =
+        Fable.TypedJson.Json.Encode.raw python jsonStr
+
+    let toJson (term: obj) =
+        Fable.TypedJson.Json.Encode.toJson python term

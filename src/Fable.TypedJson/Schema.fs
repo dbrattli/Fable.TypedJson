@@ -131,8 +131,7 @@ type CodecRegistry = Map<string, CodecEntry>
 
 let emptyRegistry: CodecRegistry = Map.empty
 
-let registerEntry (fullName: string) (entry: CodecEntry) (registry: CodecRegistry) : CodecRegistry =
-    Map.add fullName entry registry
+let registerEntry (fullName: string) (entry: CodecEntry) (registry: CodecRegistry) : CodecRegistry = Map.add fullName entry registry
 
 /// Add a codec for type `'T` to a registry, returning a new registry with the entry.
 /// Pipeline-friendly: `emptyRegistry |> register Days.JsonCodec |> register Email.JsonCodec`.
@@ -149,8 +148,7 @@ let inline register<'T> (codec: IJsonCodec<'T>) (registry: CodecRegistry) : Code
 
     registerEntry typeof<'T>.FullName entry registry
 
-let tryGetCodecEntry (fullName: string) (registry: CodecRegistry) : CodecEntry option =
-    Map.tryFind fullName registry
+let tryGetCodecEntry (fullName: string) (registry: CodecRegistry) : CodecEntry option = Map.tryFind fullName registry
 
 // ============================================================================
 // Schema Type
@@ -194,12 +192,7 @@ let private joinErrors (errors: FieldError list) : string =
     |> List.map (fun e -> sprintf "%s: %s" e.path e.message)
     |> String.concat ", "
 
-let rec coerce
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (targetType: System.Type)
-    (fv: JsonValue)
-    : Result<obj, string> =
+let rec coerce (backend: IJsonBackend) (registry: CodecRegistry) (targetType: System.Type) (fv: JsonValue) : Result<obj, string> =
     let targetFullName = targetType.FullName
 
     match targetFullName, fv with
@@ -321,24 +314,14 @@ and private coerceElements
         | Some msg -> Error msg
         | None -> Ok(List.rev acc)
 
-and coerceList
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (elementType: System.Type)
-    (fv: JsonValue)
-    : Result<obj, string> =
+and coerceList (backend: IJsonBackend) (registry: CodecRegistry) (elementType: System.Type) (fv: JsonValue) : Result<obj, string> =
     // Fable erases generics at runtime, so `obj list` and `'T list` share
     // representation. Box and let the consumer pattern-match.
     match coerceElements backend registry elementType fv with
     | Ok xs -> Ok(box xs)
     | Error msg -> Error msg
 
-and coerceArray
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (elementType: System.Type)
-    (fv: JsonValue)
-    : Result<obj, string> =
+and coerceArray (backend: IJsonBackend) (registry: CodecRegistry) (elementType: System.Type) (fv: JsonValue) : Result<obj, string> =
     match coerceElements backend registry elementType fv with
     | Ok xs -> Ok(box (List.toArray xs))
     | Error msg -> Error msg
@@ -352,7 +335,8 @@ and resolveRecord
     let fields = FSharpType.GetRecordFields recordType
 
     let results =
-        fields |> Array.map (fun fi -> resolveField backend registry fi lookup)
+        fields
+        |> Array.map (fun fi -> resolveField backend registry fi lookup)
 
     let errors =
         results
@@ -398,8 +382,16 @@ and resolveRequiredField
     (value: JsonValue option)
     : Result<obj, FieldError> =
     match value with
-    | None -> Error { path = name; message = sprintf "missing field (expected %s)" fi.PropertyType.Name }
-    | Some JNull -> Error { path = name; message = sprintf "null value (expected %s)" fi.PropertyType.Name }
+    | None ->
+        Error {
+            path = name
+            message = sprintf "missing field (expected %s)" fi.PropertyType.Name
+        }
+    | Some JNull ->
+        Error {
+            path = name
+            message = sprintf "null value (expected %s)" fi.PropertyType.Name
+        }
     | Some fv ->
         match coerce backend registry fi.PropertyType fv with
         | Ok v -> Ok v
@@ -474,11 +466,7 @@ let inline validateMap<'T> (backend: IJsonBackend) (map: Map<string, string>) : 
     (auto<'T> backend emptyRegistry) (stringMapAdapter map)
 
 /// Validate from a string map with a custom codec registry.
-let inline validateMapWith<'T>
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (map: Map<string, string>)
-    : Result<'T, FieldError list> =
+let inline validateMapWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
     (auto<'T> backend registry) (stringMapAdapter map)
 
 /// Validate from a backend-native JSON map. Uses an empty codec registry.
@@ -486,11 +474,7 @@ let inline validateJson<'T> (backend: IJsonBackend) (map: obj) : Result<'T, Fiel
     (auto<'T> backend emptyRegistry) (jsonMapAdapter backend map)
 
 /// Validate from a backend-native JSON map with a custom codec registry.
-let inline validateJsonWith<'T>
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (map: obj)
-    : Result<'T, FieldError list> =
+let inline validateJsonWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: obj) : Result<'T, FieldError list> =
     (auto<'T> backend registry) (jsonMapAdapter backend map)
 
 /// Dump a record to a backend-native JSON map (e.g., for inter-process messaging).

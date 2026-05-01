@@ -13,9 +13,11 @@ open Fable.TypedJson.Json
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+
 let backend = python
 #else
 open Fable.TypedJson.Beam.Json
+
 let backend = beam
 #endif
 
@@ -89,8 +91,7 @@ let ``test validateMap all fields missing`` () =
 
     match validateMap<SimpleInput> input with
     | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 2
+    | Error errors -> errors.Length |> equal 2
 
 [<Fact>]
 let ``test validateMap optional present`` () =
@@ -121,7 +122,9 @@ let ``test validateMap invalid int string`` () =
     | Error errors ->
         errors.Length |> equal 1
         errors.[0].path |> equal "age"
-        (errors.[0].message.Contains("cannot parse")) |> equal true
+
+        (errors.[0].message.Contains("cannot parse"))
+        |> equal true
 
 [<Fact>]
 let ``test validateMap invalid float string`` () =
@@ -145,7 +148,8 @@ let ``test validateMap invalid bool string`` () =
 
 [<Fact>]
 let ``test validateMap mixed types all from strings`` () =
-    let input = Map.ofList [ "label", "test"; "count", "5"; "score", "9.5"; "enabled", "true" ]
+    let input =
+        Map.ofList [ "label", "test"; "count", "5"; "score", "9.5"; "enabled", "true" ]
 
     match validateMap<MixedInput> input with
     | Ok r ->
@@ -300,8 +304,14 @@ let ``test coercion invalid string to bool`` () =
 [<Fact>]
 let ``test formatErrors produces readable string`` () =
     let errors = [
-        { path = "name"; message = "missing field (expected String)" }
-        { path = "age"; message = "cannot parse 'xyz' as int" }
+        {
+            path = "name"
+            message = "missing field (expected String)"
+        }
+        {
+            path = "age"
+            message = "cannot parse 'xyz' as int"
+        }
     ]
 
     let result = formatErrors errors
@@ -323,7 +333,11 @@ let ``test dump simple record`` () =
 
 [<Fact>]
 let ``test dump record with option some`` () =
-    let record = { Name = "Alice"; Email = Some "a@b.com" }
+    let record = {
+        Name = "Alice"
+        Email = Some "a@b.com"
+    }
+
     let map = dump record
     let name = unbox<string> (backend.Get(map, "name"))
     let email = unbox<string> (backend.Get(map, "email"))

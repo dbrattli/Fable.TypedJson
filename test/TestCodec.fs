@@ -161,7 +161,12 @@ let ``test withModel accepts valid cross-field invariant`` () =
             if r.Start <= r.Until then
                 Ok r
             else
-                Error [ { path = ""; message = "start must precede end" } ])
+                Error [
+                    {
+                        path = ""
+                        message = "start must precede end"
+                    }
+                ])
 
     let map = parseRaw """{"start":1, "until":10}"""
 
@@ -179,7 +184,12 @@ let ``test withModel rejects invalid cross-field invariant`` () =
             if r.Start <= r.Until then
                 Ok r
             else
-                Error [ { path = ""; message = "start must precede end" } ])
+                Error [
+                    {
+                        path = ""
+                        message = "start must precede end"
+                    }
+                ])
 
     let map = parseRaw """{"start":10, "until":1}"""
 
@@ -187,4 +197,6 @@ let ``test withModel rejects invalid cross-field invariant`` () =
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
-        formatted.Contains("start must precede end") |> equal true
+
+        formatted.Contains("start must precede end")
+        |> equal true

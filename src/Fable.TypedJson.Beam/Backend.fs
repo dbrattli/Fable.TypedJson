@@ -61,7 +61,8 @@ type private BeamBackendImpl() =
 
         member _.ContainsKey(map, key) = maps.is_key (key, unbox map)
 
-        member _.Get(map, key) = maps.get (key, unbox<BeamMap<string, obj>> map)
+        member _.Get(map, key) =
+            maps.get (key, unbox<BeamMap<string, obj>> map)
 
         member _.Put(map, key, value) =
             box (maps.put (key, value, unbox<BeamMap<string, obj>> map))
@@ -73,7 +74,10 @@ type private BeamBackendImpl() =
         // BEAM type tests — Erlang is_* type guards. Note: is_boolean must be checked
         // before is_atom-style checks since booleans are atoms (`true`, `false`).
         member _.IsString(value) = isErlBinary value
-        member _.IsInt(value) = isErlInteger value && not (isErlBoolean value)
+
+        member _.IsInt(value) =
+            isErlInteger value && not (isErlBoolean value)
+
         member _.IsFloat(value) = isErlFloat value
         member _.IsBool(value) = isErlBoolean value
         member _.IsNull(value) = isErlNull value

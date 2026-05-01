@@ -39,14 +39,44 @@ check:
 format:
     dotnet fantomas src/ test/
 
-# Setup tooling
-restore:
+# Check formatting without modifying — used in CI to fail PRs with bad formatting
+format-check:
+    dotnet fantomas src/ test/ --check
+
+# Setup tooling — restore .NET tools (no NuGet restore yet)
+setup:
     dotnet tool restore
+
+# Setup tooling + restore Paket deps + sync uv venv
+restore: setup
     dotnet paket install
     uv sync
 
 # Build and check
 all: check build
+
+# --- Release ---
+
+# Build NuGet packages with versions extracted from each package's CHANGELOG.md
+pack:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    get_version() { grep -m1 '^## ' "$1" | sed 's/^## \([^ ]*\).*/\1/'; }
+    CORE_VERSION=$(get_version src/Fable.TypedJson/CHANGELOG.md)
+    BEAM_VERSION=$(get_version src/Fable.TypedJson.Beam/CHANGELOG.md)
+    PYTHON_VERSION=$(get_version src/Fable.TypedJson.Python/CHANGELOG.md)
+    rm -rf ./nupkgs
+    dotnet pack src/Fable.TypedJson        -c Release -o ./nupkgs -p:PackageVersion=$CORE_VERSION   -p:InformationalVersion=$CORE_VERSION
+    dotnet pack src/Fable.TypedJson.Beam   -c Release -o ./nupkgs -p:PackageVersion=$BEAM_VERSION   -p:InformationalVersion=$BEAM_VERSION
+    dotnet pack src/Fable.TypedJson.Python -c Release -o ./nupkgs -p:PackageVersion=$PYTHON_VERSION -p:InformationalVersion=$PYTHON_VERSION
+
+# Pack and push every package to NuGet (CI-only — needs $NUGET_KEY)
+release: pack
+    dotnet nuget push './nupkgs/*.nupkg' -s https://api.nuget.org/v3/index.json -k $NUGET_KEY --skip-duplicate
+
+# Run EasyBuild.ShipIt for release management. Pass extra flags after `--`.
+shipit *args:
+    dotnet shipit --pre-release rc {{args}}
 
 # --- Test ---
 

@@ -15,9 +15,11 @@ open Fable.TypedJson.Json
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+
 let backend = python
 #else
 open Fable.TypedJson.Beam.Json
+
 let backend = beam
 #endif
 
@@ -62,8 +64,12 @@ let ``test alias redirects encode output`` () =
     let parsed = parseRaw json
 
     backend.ContainsKey(parsed, "loc") |> equal true
-    backend.ContainsKey(parsed, "location") |> equal false
-    unbox<string> (backend.Get(parsed, "loc")) |> equal "Oslo"
+
+    backend.ContainsKey(parsed, "location")
+    |> equal false
+
+    unbox<string> (backend.Get(parsed, "loc"))
+    |> equal "Oslo"
 
 [<Fact>]
 let ``test alias falls through to case rule for unaliased fields`` () =
@@ -73,7 +79,9 @@ let ``test alias falls through to case rule for unaliased fields`` () =
 
     // "Days" wasn't aliased, so it follows the SnakeCase rule.
     backend.ContainsKey(parsed, "days") |> equal true
-    unbox<int> (backend.Get(parsed, "days")) |> equal 5
+
+    unbox<int> (backend.Get(parsed, "days"))
+    |> equal 5
 
 [<Fact>]
 let ``test alias propagates to JSON schema property keys`` () =
@@ -88,7 +96,10 @@ let ``test alias propagates to JSON schema property keys`` () =
     let props = backend.Get(parsed, "properties")
     backend.ContainsKey(props, "loc") |> equal true
     backend.ContainsKey(props, "n") |> equal true
-    backend.ContainsKey(props, "location") |> equal false
+
+    backend.ContainsKey(props, "location")
+    |> equal false
+
     backend.ContainsKey(props, "days") |> equal false
 
     // `required` must list the aliased keys too.
@@ -111,7 +122,12 @@ let ``test alias preserves withModel composition`` () =
             if r.Days > 0 then
                 Ok r
             else
-                Error [ { path = ""; message = "days must be positive" } ])
+                Error [
+                    {
+                        path = ""
+                        message = "days must be positive"
+                    }
+                ])
         |> alias "Location" "loc"
 
     let map = parseRaw """{"loc":"Oslo","days":3}"""
@@ -129,4 +145,6 @@ let ``test alias preserves withModel composition`` () =
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
-        formatted.Contains("must be positive") |> equal true
+
+        formatted.Contains("must be positive")
+        |> equal true

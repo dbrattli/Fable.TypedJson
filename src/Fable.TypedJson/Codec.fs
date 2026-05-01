@@ -28,11 +28,7 @@ open Fable.TypedJson.Schema
 // Constructor helpers
 // ============================================================================
 
-let mk
-    (decode: JsonValue -> Result<'T, string>)
-    (encode: 'T -> JsonValue)
-    (schema: JsonSchema)
-    : IJsonCodec<'T> =
+let mk (decode: JsonValue -> Result<'T, string>) (encode: 'T -> JsonValue) (schema: JsonSchema) : IJsonCodec<'T> =
     { new IJsonCodec<'T> with
         member _.Decode jv = decode jv
         member _.Encode v = encode v
@@ -50,10 +46,7 @@ let chain (validate: 'T -> Result<'T, string>) (inner: IJsonCodec<'T>) : IJsonCo
 
 /// Add or overwrite a single key in a codec's JSON Schema fragment.
 let withSchemaKey (key: string) (value: JsonSchemaValue) (codec: IJsonCodec<'T>) : IJsonCodec<'T> =
-    mk
-        (fun jv -> codec.Decode jv)
-        (fun v -> codec.Encode v)
-        (Map.add key value codec.Schema)
+    mk (fun jv -> codec.Decode jv) (fun v -> codec.Encode v) (Map.add key value codec.Schema)
 
 // ============================================================================
 // Primitive codecs
@@ -135,22 +128,46 @@ let bool: IJsonCodec<bool> =
 /// Greater-than constraint. `Codec.int |> Codec.gt 0` rejects values ≤ 0.
 /// JSON Schema: `exclusiveMinimum`.
 let inline gt (threshold: ^a) (codec: IJsonCodec< ^a >) : IJsonCodec< ^a > when ^a: comparison =
-    chain (fun v -> if v > threshold then Ok v else Error(sprintf "must be > %A" threshold)) codec
+    chain
+        (fun v ->
+            if v > threshold then
+                Ok v
+            else
+                Error(sprintf "must be > %A" threshold))
+        codec
     |> withSchemaKey "exclusiveMinimum" (SVFloat(Operators.float threshold))
 
 /// Greater-than-or-equal constraint. JSON Schema: `minimum`.
 let inline ge (threshold: ^a) (codec: IJsonCodec< ^a >) : IJsonCodec< ^a > when ^a: comparison =
-    chain (fun v -> if v >= threshold then Ok v else Error(sprintf "must be >= %A" threshold)) codec
+    chain
+        (fun v ->
+            if v >= threshold then
+                Ok v
+            else
+                Error(sprintf "must be >= %A" threshold))
+        codec
     |> withSchemaKey "minimum" (SVFloat(Operators.float threshold))
 
 /// Less-than constraint. JSON Schema: `exclusiveMaximum`.
 let inline lt (threshold: ^a) (codec: IJsonCodec< ^a >) : IJsonCodec< ^a > when ^a: comparison =
-    chain (fun v -> if v < threshold then Ok v else Error(sprintf "must be < %A" threshold)) codec
+    chain
+        (fun v ->
+            if v < threshold then
+                Ok v
+            else
+                Error(sprintf "must be < %A" threshold))
+        codec
     |> withSchemaKey "exclusiveMaximum" (SVFloat(Microsoft.FSharp.Core.Operators.float threshold))
 
 /// Less-than-or-equal constraint. JSON Schema: `maximum`.
 let inline le (threshold: ^a) (codec: IJsonCodec< ^a >) : IJsonCodec< ^a > when ^a: comparison =
-    chain (fun v -> if v <= threshold then Ok v else Error(sprintf "must be <= %A" threshold)) codec
+    chain
+        (fun v ->
+            if v <= threshold then
+                Ok v
+            else
+                Error(sprintf "must be <= %A" threshold))
+        codec
     |> withSchemaKey "maximum" (SVFloat(Microsoft.FSharp.Core.Operators.float threshold))
 
 /// String minimum length constraint. JSON Schema: `minLength`.

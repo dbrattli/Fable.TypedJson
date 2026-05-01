@@ -16,9 +16,11 @@ open Fable.TypedJson.Json
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+
 let backend = python
 #else
 open Fable.TypedJson.Beam.Json
+
 let backend = beam
 #endif
 
@@ -33,17 +35,24 @@ let ``test schema of simple record`` () =
     let json = jsonSchemaOf<Simple> emptyRegistry CaseRules.SnakeCase
     let parsed = parseRaw json
 
-    unbox<string> (backend.Get(parsed, "type")) |> equal "object"
-    unbox<string> (backend.Get(parsed, "title")) |> equal "Simple"
+    unbox<string> (backend.Get(parsed, "type"))
+    |> equal "object"
+
+    unbox<string> (backend.Get(parsed, "title"))
+    |> equal "Simple"
 
     let props = backend.Get(parsed, "properties")
     backend.IsMap props |> equal true
 
     let nameSchema = backend.Get(props, "name")
-    unbox<string> (backend.Get(nameSchema, "type")) |> equal "string"
+
+    unbox<string> (backend.Get(nameSchema, "type"))
+    |> equal "string"
 
     let ageSchema = backend.Get(props, "age")
-    unbox<string> (backend.Get(ageSchema, "type")) |> equal "integer"
+
+    unbox<string> (backend.Get(ageSchema, "type"))
+    |> equal "integer"
 
     // Required: both fields, since neither is optional.
     let required = backend.Get(parsed, "required")
@@ -59,7 +68,9 @@ let ``test schema omits optional field from required`` () =
 
     let required = backend.Get(parsed, "required")
     backend.ArrayLength required |> equal 1
-    unbox<string> (backend.ArrayAt(required, 0)) |> equal "name"
+
+    unbox<string> (backend.ArrayAt(required, 0))
+    |> equal "name"
 
     // Email field still present in properties, just not required.
     let props = backend.Get(parsed, "properties")
@@ -81,12 +92,17 @@ let ``test schema of nested record`` () =
     let props = backend.Get(parsed, "properties")
     let addressSchema = backend.Get(props, "address")
 
-    unbox<string> (backend.Get(addressSchema, "type")) |> equal "object"
-    unbox<string> (backend.Get(addressSchema, "title")) |> equal "Address"
+    unbox<string> (backend.Get(addressSchema, "type"))
+    |> equal "object"
+
+    unbox<string> (backend.Get(addressSchema, "title"))
+    |> equal "Address"
 
     let innerProps = backend.Get(addressSchema, "properties")
     let cityField = backend.Get(innerProps, "city")
-    unbox<string> (backend.Get(cityField, "type")) |> equal "string"
+
+    unbox<string> (backend.Get(cityField, "type"))
+    |> equal "string"
 
 // ============================================================================
 // Lists
@@ -102,29 +118,44 @@ let ``test schema of list field`` () =
     let props = backend.Get(parsed, "properties")
     let tagsSchema = backend.Get(props, "tags")
 
-    unbox<string> (backend.Get(tagsSchema, "type")) |> equal "array"
+    unbox<string> (backend.Get(tagsSchema, "type"))
+    |> equal "array"
+
     let items = backend.Get(tagsSchema, "items")
-    unbox<string> (backend.Get(items, "type")) |> equal "string"
+
+    unbox<string> (backend.Get(items, "type"))
+    |> equal "string"
 
 // ============================================================================
 // CaseRules applied to property keys
 // ============================================================================
 
-type Weather = { AirTemperature: float; WindSpeed: float }
+type Weather = {
+    AirTemperature: float
+    WindSpeed: float
+}
 
 [<Fact>]
 let ``test schema property names follow case rule`` () =
     let snakeJson = jsonSchemaOf<Weather> emptyRegistry CaseRules.SnakeCase
     let snakeParsed = parseRaw snakeJson
     let snakeProps = backend.Get(snakeParsed, "properties")
-    backend.ContainsKey(snakeProps, "air_temperature") |> equal true
-    backend.ContainsKey(snakeProps, "wind_speed") |> equal true
+
+    backend.ContainsKey(snakeProps, "air_temperature")
+    |> equal true
+
+    backend.ContainsKey(snakeProps, "wind_speed")
+    |> equal true
 
     let camelJson = jsonSchemaOf<Weather> emptyRegistry CaseRules.LowerFirst
     let camelParsed = parseRaw camelJson
     let camelProps = backend.Get(camelParsed, "properties")
-    backend.ContainsKey(camelProps, "airTemperature") |> equal true
-    backend.ContainsKey(camelProps, "windSpeed") |> equal true
+
+    backend.ContainsKey(camelProps, "airTemperature")
+    |> equal true
+
+    backend.ContainsKey(camelProps, "windSpeed")
+    |> equal true
 
 // ============================================================================
 // Refined types pull their schema (with constraints) through the registry
@@ -132,7 +163,10 @@ let ``test schema property names follow case rule`` () =
 
 open Fable.TypedJson.Refined
 
-type Account = { Username: NonEmptyString; Email: Email }
+type Account = {
+    Username: NonEmptyString
+    Email: Email
+}
 
 [<Fact>]
 let ``test schema of refined type fields includes constraints`` () =
@@ -144,10 +178,18 @@ let ``test schema of refined type fields includes constraints`` () =
 
     // NonEmptyString carries `minLength: 1` (from `Codec.nonEmpty`).
     let usernameSchema = backend.Get(props, "username")
-    unbox<string> (backend.Get(usernameSchema, "type")) |> equal "string"
-    unbox<int> (backend.Get(usernameSchema, "minLength")) |> equal 1
+
+    unbox<string> (backend.Get(usernameSchema, "type"))
+    |> equal "string"
+
+    unbox<int> (backend.Get(usernameSchema, "minLength"))
+    |> equal 1
 
     // Email carries `pattern` (from `Codec.pattern`).
     let emailSchema = backend.Get(props, "email")
-    unbox<string> (backend.Get(emailSchema, "type")) |> equal "string"
-    backend.ContainsKey(emailSchema, "pattern") |> equal true
+
+    unbox<string> (backend.Get(emailSchema, "type"))
+    |> equal "string"
+
+    backend.ContainsKey(emailSchema, "pattern")
+    |> equal true

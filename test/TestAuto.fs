@@ -12,9 +12,11 @@ open Fable.TypedJson.Json
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+
 let backend = python
 #else
 open Fable.TypedJson.Beam.Json
+
 let backend = beam
 #endif
 
@@ -29,10 +31,7 @@ type RecordWithFloat = {
     RelativeHumidity: float
 }
 
-type RecordWithOption = {
-    Name: string
-    Email: string option
-}
+type RecordWithOption = { Name: string; Email: string option }
 
 type RecordWithBool = { Active: bool; Count: int }
 
@@ -49,8 +48,7 @@ let ``test auto decode simple record`` () =
     | Ok record ->
         record.Name |> equal "Alice"
         record.Age |> equal 30
-    | Error errors ->
-        equal "Ok" (sprintf "Error: %A" errors)
+    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
 
 [<Fact>]
 let ``test auto decode float record`` () =
@@ -61,8 +59,7 @@ let ``test auto decode float record`` () =
     | Ok record ->
         record.AirTemperature |> equal 22.5
         record.RelativeHumidity |> equal 65.0
-    | Error errors ->
-        equal "Ok" (sprintf "Error: %A" errors)
+    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
 
 [<Fact>]
 let ``test auto decode with option some`` () =
@@ -73,8 +70,7 @@ let ``test auto decode with option some`` () =
     | Ok record ->
         record.Name |> equal "Alice"
         record.Email |> equal (Some "a@b.com")
-    | Error errors ->
-        equal "Ok" (sprintf "Error: %A" errors)
+    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
 
 [<Fact>]
 let ``test auto decode with option none`` () =
@@ -85,8 +81,7 @@ let ``test auto decode with option none`` () =
     | Ok record ->
         record.Name |> equal "Alice"
         record.Email |> equal None
-    | Error errors ->
-        equal "Ok" (sprintf "Error: %A" errors)
+    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
 
 [<Fact>]
 let ``test auto decode missing required field`` () =
@@ -106,8 +101,7 @@ let ``test auto decode accumulates all errors`` () =
 
     match codec.decode CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 2
+    | Error errors -> errors.Length |> equal 2
 
 // ============================================================================
 // Encode Tests
@@ -171,8 +165,7 @@ let ``test auto round-trip simple record`` () =
     | Ok decoded ->
         decoded.Name |> equal original.Name
         decoded.Age |> equal original.Age
-    | Error errors ->
-        equal "Ok" (sprintf "Error: %A" errors)
+    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
 
 [<Fact>]
 let ``test auto round-trip float record`` () =
@@ -188,7 +181,9 @@ let ``test auto round-trip float record`` () =
 
     match codec.decode CaseRules.SnakeCase map with
     | Ok decoded ->
-        decoded.AirTemperature |> equal original.AirTemperature
-        decoded.RelativeHumidity |> equal original.RelativeHumidity
-    | Error errors ->
-        equal "Ok" (sprintf "Error: %A" errors)
+        decoded.AirTemperature
+        |> equal original.AirTemperature
+
+        decoded.RelativeHumidity
+        |> equal original.RelativeHumidity
+    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)

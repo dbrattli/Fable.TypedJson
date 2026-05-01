@@ -28,11 +28,7 @@ let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
 let inline validate<'T> (caseRules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validate<'T> beam caseRules map
 
-let inline validateWith<'T>
-    (registry: CodecRegistry)
-    (caseRules: CaseRules)
-    (map: JsonMap)
-    : Result<'T, FieldError list> =
+let inline validateWith<'T> (registry: CodecRegistry) (caseRules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateWith<'T> beam registry caseRules map
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
@@ -41,7 +37,8 @@ let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
 let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError list> =
     Fable.TypedJson.Schema.validateMap<'T> beam map
 
-let inline dump<'T> (record: 'T) : obj = Fable.TypedJson.Schema.dump<'T> beam record
+let inline dump<'T> (record: 'T) : obj =
+    Fable.TypedJson.Schema.dump<'T> beam record
 
 /// Generate a JSON Schema document for record type `'T`. Uses the supplied
 /// `CodecRegistry` for custom-codec types and `caseRules` to map F# field
@@ -51,11 +48,7 @@ let inline jsonSchemaOf<'T> (registry: CodecRegistry) (caseRules: CaseRules) : s
 
 /// Generate a JSON Schema document from a `TypedJson<'T>` codec. Honors any
 /// aliases attached via `TypedJson.alias`.
-let inline jsonSchemaOfCodec<'T>
-    (registry: CodecRegistry)
-    (caseRules: CaseRules)
-    (codec: TypedJson<'T>)
-    : string =
+let inline jsonSchemaOfCodec<'T> (registry: CodecRegistry) (caseRules: CaseRules) (codec: TypedJson<'T>) : string =
     Fable.TypedJson.JsonSchemaGen.jsonSchemaOfCodec<'T> beam registry caseRules codec
 
 module Encode =
@@ -63,8 +56,18 @@ module Encode =
     let inline int n = Fable.TypedJson.Json.Encode.int n
     let inline float f = Fable.TypedJson.Json.Encode.float f
     let inline bool b = Fable.TypedJson.Json.Encode.bool b
-    let inline list (encoder: 'T -> obj) (items: 'T list) = Fable.TypedJson.Json.Encode.list beam encoder items
-    let inline optional (encoder: 'T -> obj) (v: 'T option) = Fable.TypedJson.Json.Encode.optional beam encoder v
-    let object (fields: (string * obj) list) = Fable.TypedJson.Json.Encode.object beam fields
-    let raw (jsonStr: string) = Fable.TypedJson.Json.Encode.raw beam jsonStr
-    let toJson (term: obj) = Fable.TypedJson.Json.Encode.toJson beam term
+
+    let inline list (encoder: 'T -> obj) (items: 'T list) =
+        Fable.TypedJson.Json.Encode.list beam encoder items
+
+    let inline optional (encoder: 'T -> obj) (v: 'T option) =
+        Fable.TypedJson.Json.Encode.optional beam encoder v
+
+    let object (fields: (string * obj) list) =
+        Fable.TypedJson.Json.Encode.object beam fields
+
+    let raw (jsonStr: string) =
+        Fable.TypedJson.Json.Encode.raw beam jsonStr
+
+    let toJson (term: obj) =
+        Fable.TypedJson.Json.Encode.toJson beam term

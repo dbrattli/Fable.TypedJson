@@ -63,8 +63,7 @@ let private pyEmptyDict () : obj = nativeOnly
 let private pyListOf (xs: obj) : obj = nativeOnly
 
 // `key in dict` — Python's `in` is a syntactic operator with no Fable wrapper.
-let private contains (map: obj) (key: string) : bool =
-    emitPyExpr (key, map) "$0 in $1"
+let private contains (map: obj) (key: string) : bool = emitPyExpr (key, map) "$0 in $1"
 
 // Native int / float wrapping at the read boundary.
 // `int v` / `float v` in F# compile to `int32(v)` / `float64(v)` on the
@@ -100,7 +99,11 @@ type private PythonBackendImpl() =
         // `json.loads` (native int/str/etc.) dispatch correctly. Bool subclasses
         // int in Python, so the int test excludes bools explicitly.
         member _.IsString(value) = pyInstanceof value pyStr
-        member _.IsInt(value) = pyInstanceof value pyInt && not (pyInstanceof value pyBool)
+
+        member _.IsInt(value) =
+            pyInstanceof value pyInt
+            && not (pyInstanceof value pyBool)
+
         member _.IsFloat(value) = pyInstanceof value pyFloat
         member _.IsBool(value) = pyInstanceof value pyBool
         member _.IsNull(value) = emitPyExpr value "$0 is None"

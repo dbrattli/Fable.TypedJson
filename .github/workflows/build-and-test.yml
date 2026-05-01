@@ -1,0 +1,55 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.x
+          cache: true
+          cache-dependency-path: 'paket.lock'
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27'
+          rebar3-version: '3'
+
+      - name: Setup uv (Python)
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'uv.lock'
+
+      - name: Cache rebar3 dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/rebar3
+          key: rebar3-${{ hashFiles('**/rebar.config') }}
+          restore-keys: rebar3-
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Restore dependencies
+        run: just restore
+
+      - name: Type check (.NET build)
+        run: just check
+
+      - name: Test (BEAM)
+        run: just test-beam
+
+      - name: Test (Python)
+        run: just test-python

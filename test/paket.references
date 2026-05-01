@@ -1,2 +1,6 @@
-FSharp.Core
-Fable.Core
+group Test
+    FSharp.Core
+    Fable.Core
+    Fable.Beam
+    Fable.Beam.Jsx
+    Fable.Python

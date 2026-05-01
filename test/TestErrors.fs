@@ -20,13 +20,13 @@ open Fable.TypedJson.Beam.Json
 // Test Record Types
 // ============================================================================
 
-type User = { Name: string; Age: int; Email: string }
-
-type Config = {
-    Host: string
-    Port: int
-    Debug: bool
+type User = {
+    Name: string
+    Age: int
+    Email: string
 }
+
+type Config = { Host: string; Port: int; Debug: bool }
 
 type WithOptional = {
     Required: string
@@ -60,7 +60,8 @@ let ``test error on single missing field has descriptive message`` () =
     | Error errors ->
         let msg = errors.[0].message
         // Message should mention the expected type
-        (msg.Contains("String") || msg.Contains("missing")) |> equal true
+        (msg.Contains("String") || msg.Contains("missing"))
+        |> equal true
 
 [<Fact>]
 let ``test all missing fields are reported`` () =
@@ -110,8 +111,7 @@ let ``test missing optional field is not an error`` () =
     | Ok record ->
         record.Required |> equal "hello"
         record.Optional |> equal None
-    | Error errors ->
-        equal "Ok" (sprintf "Error: %A" errors)
+    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
 
 [<Fact>]
 let ``test missing required field with optional present`` () =
@@ -176,8 +176,7 @@ let ``test decode empty object reports all required fields`` () =
 
     match codec.decode CaseRules.SnakeCase map with
     | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 3
+    | Error errors -> errors.Length |> equal 3
 
 [<Fact>]
 let ``test error paths use json key names not field names`` () =
@@ -195,7 +194,9 @@ let ``test error paths use json key names not field names`` () =
 [<Fact>]
 let ``test extra fields in json are ignored`` () =
     let codec = auto<Nested> ()
-    let map = parseRaw """{"label":"test","value":1.5,"extra":"ignored","another":true}"""
+
+    let map =
+        parseRaw """{"label":"test","value":1.5,"extra":"ignored","another":true}"""
 
     match codec.decode CaseRules.SnakeCase map with
     | Ok record ->

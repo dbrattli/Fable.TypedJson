@@ -29,7 +29,9 @@ type User = { Name: string; Address: Address }
 [<Fact>]
 let ``test nested record decodes valid input`` () =
     let codec = auto<User> ()
-    let map = parseRaw """{"name":"Alice","address":{"street":"Main 1","city":"Oslo"}}"""
+
+    let map =
+        parseRaw """{"name":"Alice","address":{"street":"Main 1","city":"Oslo"}}"""
 
     match codec.decode CaseRules.SnakeCase map with
     | Ok r ->
@@ -48,8 +50,8 @@ let ``test nested record reports inner missing field`` () =
     | Error errs ->
         let formatted = formatErrors errs
         // Outer field is "address"; inner failure is "city: ..."
-        formatted.Contains("address") |> equal true
-        formatted.Contains("city") |> equal true
+        formatted.Contains "address" |> equal true
+        formatted.Contains "city" |> equal true
 
 // ============================================================================
 // List of primitives

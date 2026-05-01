@@ -136,7 +136,11 @@ let ``test Uuid rejects malformed`` () =
 // End-to-end with auto<'T>: refined types as record fields
 // ============================================================================
 
-type Account = { Username: NonEmptyString; Age: NonNegativeInt; Contact: Email }
+type Account = {
+    Username: NonEmptyString
+    Age: NonNegativeInt
+    Contact: Email
+}
 
 let private codecs: CodecRegistry = emptyRegistry |> registerAll
 
@@ -164,7 +168,9 @@ let ``test auto with refined types rejects empty username`` () =
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
-        formatted.Contains("must be non-empty") |> equal true
+
+        formatted.Contains("must be non-empty")
+        |> equal true
 
 [<Fact>]
 let ``test auto with refined types rejects negative age`` () =
@@ -186,4 +192,6 @@ let ``test auto with refined types rejects malformed email`` () =
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
-        formatted.Contains("must match pattern") |> equal true
+
+        formatted.Contains("must match pattern")
+        |> equal true

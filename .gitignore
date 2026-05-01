@@ -18,9 +18,11 @@ paket-files/
 # NuGet Packages
 *.nupkg
 *.snupkg
+nupkgs/
 
 .fake
 
 # Python
 .venv
 **/__pycache__/
+.pytest_cache

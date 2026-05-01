@@ -52,7 +52,8 @@ let private lowerFirst (name: string) : string =
     if name.Length = 0 then
         name
     else
-        string (System.Char.ToLowerInvariant(name.[0])) + name.[1..]
+        string (System.Char.ToLowerInvariant(name.[0]))
+        + name.[1..]
 
 let private dashify (separator: string) (name: string) : string =
     let mutable result = ""
@@ -79,7 +80,8 @@ let fromSnakeCase (name: string) : string =
         if part.Length = 0 then
             part
         else
-            string (System.Char.ToUpperInvariant(part.[0])) + part.[1..])
+            string (System.Char.ToUpperInvariant(part.[0]))
+            + part.[1..])
     |> String.concat ""
 
 /// True if the name contains any uppercase letter (i.e., looks like Pascal/camelCase
@@ -251,7 +253,8 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                     else
                         Some(jsonKey, v))
 
-            Encode.object backend entries |> Encode.toJson backend
+            Encode.object backend entries
+            |> Encode.toJson backend
 
         {
             decode = decode
@@ -289,10 +292,7 @@ let inline validateWith<'T>
 ///           else Error [{ path = ""; message = "Start must precede Until" }])
 ///
 /// Pydantic equivalent: `@model_validator(mode="after")`.
-let withModel
-    (validator: 'T -> Result<'T, FieldError list>)
-    (codec: TypedJson<'T>)
-    : TypedJson<'T> =
+let withModel (validator: 'T -> Result<'T, FieldError list>) (codec: TypedJson<'T>) : TypedJson<'T> =
     // Wrap the inner codec's decode with the model validator. We rebuild
     // recursively so a subsequent `alias` call still rebuilds the inner
     // codec via the original `withAliases` and re-applies the model validator.

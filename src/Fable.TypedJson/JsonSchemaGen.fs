@@ -52,22 +52,14 @@ let primitive (typeName: string) : JsonSchemaValue =
 /// case-rule-derived form (matches what the codec's decode/encode does).
 /// Aliases are stored canonicalized to PascalCase so the same lookup works
 /// regardless of how the backend's reflection spells the field.
-let resolveJsonKey
-    (aliases: Map<string, string>)
-    (caseRules: Json.CaseRules)
-    (fieldName: string)
-    : string =
+let resolveJsonKey (aliases: Map<string, string>) (caseRules: Json.CaseRules) (fieldName: string) : string =
     let canonical = Json.applyCaseRule Json.CaseRules.PascalCase fieldName
 
     match Map.tryFind canonical aliases with
     | Some alias -> alias
     | None -> Json.applyCaseRule caseRules fieldName
 
-let rec schemaForType
-    (registry: CodecRegistry)
-    (caseRules: Json.CaseRules)
-    (t: System.Type)
-    : JsonSchemaValue =
+let rec schemaForType (registry: CodecRegistry) (caseRules: Json.CaseRules) (t: System.Type) : JsonSchemaValue =
     let fullName = t.FullName
 
     // 1. User-registered custom codec wins — its schema was stored at
@@ -97,12 +89,7 @@ let rec schemaForType
                     else
                         getGenericInnerType t
 
-                SVDict(
-                    Map.ofList [
-                        "type", SVStr "array"
-                        "items", schemaForType registry caseRules elementType
-                    ]
-                )
+                SVDict(Map.ofList [ "type", SVStr "array"; "items", schemaForType registry caseRules elementType ])
 
             // 5. F# record → recursive object schema (no aliases — only the
             //    top-level codec's aliases are honored; nested records use
@@ -158,11 +145,7 @@ and schemaForRecord
 /// custom codecs and the case rule used for field-name → JSON-key mapping.
 /// Returns the schema as a JSON string (via the supplied backend). For alias
 /// support, prefer `jsonSchemaOfCodec` which reads aliases off a TypedJson.
-let inline jsonSchemaOf<'T>
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (caseRules: Json.CaseRules)
-    : string =
+let inline jsonSchemaOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (caseRules: Json.CaseRules) : string =
     let t = typeof<'T>
 
     let schemaValue = schemaForRecord registry Map.empty caseRules t
