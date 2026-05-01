@@ -14,8 +14,10 @@ open Fable.TypedJson.Json
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+let backend = python
 #else
 open Fable.TypedJson.Beam.Json
+let backend = beam
 #endif
 
 // ============================================================================
@@ -124,3 +126,71 @@ let ``test list of records reports element index in error`` () =
         formatted.Contains("members") |> equal true
         formatted.Contains("[1]") |> equal true
         formatted.Contains("address") |> equal true
+
+// ============================================================================
+// CaseRules apply recursively on encode
+// Multi-word field names so the rule is visible (snake_case → snake_case is
+// only a no-op when names are single words).
+// ============================================================================
+
+type Postal = { PostalCode: string; CountryName: string }
+type Customer = { CustomerName: string; ShippingAddress: Postal }
+
+[<Fact>]
+let ``test encode applies case rule to nested record keys`` () =
+    let codec = auto<Customer> () |> withCaseRules CaseRules.SnakeCase
+
+    let json =
+        codec.encode {
+            CustomerName = "Alice"
+            ShippingAddress = { PostalCode = "0150"; CountryName = "Norway" }
+        }
+
+    let parsed = parseRaw json
+    // Outer keys
+    backend.ContainsKey(parsed, "customer_name") |> equal true
+    backend.ContainsKey(parsed, "shipping_address") |> equal true
+
+    // Inner keys must follow the same rule.
+    let inner = backend.Get(parsed, "shipping_address")
+    backend.ContainsKey(inner, "postal_code") |> equal true
+    backend.ContainsKey(inner, "country_name") |> equal true
+
+type Route = { Vendor: string; Stops: Postal list }
+
+[<Fact>]
+let ``test encode applies case rule to record-list element keys`` () =
+    let codec = auto<Route> () |> withCaseRules CaseRules.SnakeCase
+
+    let json =
+        codec.encode {
+            Vendor = "Acme"
+            Stops = [ { PostalCode = "0150"; CountryName = "Norway" } ]
+        }
+
+    let parsed = parseRaw json
+    let stops = backend.Get(parsed, "stops")
+    backend.IsArray stops |> equal true
+    backend.ArrayLength stops |> equal 1
+    let first = backend.ArrayAt(stops, 0)
+    backend.ContainsKey(first, "postal_code") |> equal true
+    backend.ContainsKey(first, "country_name") |> equal true
+
+[<Fact>]
+let ``test encode round-trips nested record under snake_case`` () =
+    let codec = auto<Customer> () |> withCaseRules CaseRules.SnakeCase
+
+    let original = {
+        CustomerName = "Alice"
+        ShippingAddress = { PostalCode = "0150"; CountryName = "Norway" }
+    }
+
+    let json = codec.encode original
+    let map = parseRaw json
+
+    match codec.decode map with
+    | Ok r ->
+        r.CustomerName |> equal "Alice"
+        r.ShippingAddress.PostalCode |> equal "0150"
+        r.ShippingAddress.CountryName |> equal "Norway"
+    | Error errs -> equal "Ok" (formatErrors errs)

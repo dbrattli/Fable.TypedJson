@@ -251,6 +251,64 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
 
             schemaFn lookup
 
+        // Recursively transform a value into a backend-native form so that
+        // any nested records have their keys mapped through the same
+        // CaseRules/aliases the outer record uses. Without this, nested F#
+        // records would be Stringify'd by the backend using its default
+        // reflection casing (Python: PascalCase, BEAM: lowercase) and leak
+        // through to the JSON output. Lists/arrays of records are walked
+        // element-wise and rebuilt as backend-native arrays. Primitives,
+        // already-encoded option payloads, and unknown types pass through.
+        let rec transformValue (rules: CaseRules) (t: System.Type) (v: obj) : obj =
+            if isNull v then
+                v
+            elif isOptionType t.FullName then
+                match unbox<obj option> v with
+                | Some inner -> transformValue rules (getGenericInnerType t) inner
+                | None -> backend.Null
+            elif isFSharpListType t.FullName then
+                let elementType = getGenericInnerType t
+                let xs = unbox<obj list> v
+
+                xs
+                |> List.map (fun item -> transformValue rules elementType item)
+                |> backend.BuildArray
+            elif t.IsArray then
+                let elementType = t.GetElementType()
+                let arr = unbox<obj[]> v
+
+                arr
+                |> Array.toList
+                |> List.map (fun item -> transformValue rules elementType item)
+                |> backend.BuildArray
+            elif FSharpType.IsRecord t then
+                // Use FSharpValue.GetRecordField (per-field) rather than
+                // FSharpValue.GetRecordFields (whole record). The latter
+                // requires recovering the F# record type from a boxed obj
+                // and Fable BEAM can't — it lowers `box record`'s type to
+                // `System.Object` at runtime, which has no `fields` key.
+                // Reading per-field uses the PropertyInfo we already have
+                // from the static `t`, so it works on every backend.
+                let innerFields = FSharpType.GetRecordFields t
+
+                let entries =
+                    innerFields
+                    |> Array.toList
+                    |> List.choose (fun fi ->
+                        let fv = FSharpValue.GetRecordField(v, fi)
+                        let jsonKey = resolveKey aliases rules fi.Name
+
+                        if isOptionType fi.PropertyType.FullName then
+                            match unbox<obj option> fv with
+                            | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
+                            | None -> None
+                        else
+                            Some(jsonKey, transformValue rules fi.PropertyType fv))
+
+                Encode.object backend entries
+            else
+                v
+
         let encodeWith (rules: CaseRules) (record: 'T) : string =
             let values = FSharpValue.GetRecordFields(box record)
 
@@ -262,10 +320,10 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
 
                     if isOptionType fi.PropertyType.FullName then
                         match unbox<obj option> v with
-                        | Some inner -> Some(jsonKey, inner)
+                        | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
                         | None -> None
                     else
-                        Some(jsonKey, v))
+                        Some(jsonKey, transformValue rules fi.PropertyType v))
 
             Encode.object backend entries |> Encode.toJson backend
 
