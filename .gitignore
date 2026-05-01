@@ -1,0 +1,26 @@
+.DS_Store
+.claude/
+*.ez
+erl_crash.dump
+**/bin/
+**/obj/
+**/build/
+apps/
+_build/
+
+# Ignore compiled BEAM files
+*.beam
+
+# Paket
+paket-files/
+.paket/
+
+# NuGet Packages
+*.nupkg
+*.snupkg
+
+.fake
+
+# Python
+.venv
+**/__pycache__/

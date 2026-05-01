@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>false</GenerateProgramFile>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+    <LangVersion>preview</LangVersion>
+    <OutputType>Exe</OutputType>
+    <DefineConstants>FABLE_COMPILER</DefineConstants>
+    <!-- Set FableTarget=python from the command line to switch the backend
+         reference to the Python shim and activate the `PYTHON` define. -->
+    <FableTarget Condition="'$(FableTarget)' == ''">beam</FableTarget>
+    <DefineConstants Condition="'$(FableTarget)' == 'python'">PYTHON;$(DefineConstants)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
+    <ProjectReference Include="../src/Fable.TypedJson.Beam/Fable.TypedJson.Beam.fsproj"
+                      Condition="'$(FableTarget)' != 'python'" />
+    <ProjectReference Include="../src/Fable.TypedJson.Python/Fable.TypedJson.Python.fsproj"
+                      Condition="'$(FableTarget)' == 'python'" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Testing.fs" />
+    <Compile Include="TestEncode.fs" />
+    <Compile Include="TestAuto.fs" />
+    <Compile Include="TestCaseRules.fs" />
+    <Compile Include="TestErrors.fs" />
+    <Compile Include="TestErasedDU.fs" />
+    <Compile Include="TestSchema.fs" />
+    <Compile Include="TestCodec.fs" />
+    <Compile Include="TestRefined.fs" />
+    <Compile Include="TestNested.fs" />
+    <Compile Include="TestJsonSchema.fs" />
+    <Compile Include="TestAlias.fs" />
+    <Compile Include="Main.fs" />
+  </ItemGroup>
+  <Import Project="..\.paket\Paket.Restore.targets" />
+</Project>

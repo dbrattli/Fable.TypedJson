@@ -1,0 +1,40 @@
+# https://fsprojects.github.io/Paket/nuget-dependencies.html
+#
+# Dependencies are split by Fable target. Each project picks ONE group via
+# its `paket.references` to keep version resolution consistent within that
+# project (Paket can't reconcile mixed groups inside a single fsproj).
+#
+#   Main   → Fable.TypedJson (backend-agnostic core)
+#   Beam   → Fable.TypedJson.Beam
+#   Python → Fable.TypedJson.Python
+#
+# Each group declares its full deps (including FSharp.Core and Fable.Core)
+# rather than inheriting from Main, so resolution is self-contained.
+
+source https://api.nuget.org/v3/index.json
+storage: none
+framework: net10.0
+
+nuget FSharp.Core >= 5.0.0 lowest_matching: true
+nuget Fable.Core >= 5.0.0
+
+# BEAM (Erlang) backend
+group Beam
+    source https://api.nuget.org/v3/index.json
+    storage: none
+    framework: net10.0
+
+    nuget FSharp.Core >= 5.0.0 lowest_matching: true
+    nuget Fable.Core >= 5.0.0
+    nuget Fable.Beam >= 5.0.0-rc.27
+    nuget Fable.Beam.Jsx >= 5.0.0-rc.8
+
+# Python backend
+group Python
+    source https://api.nuget.org/v3/index.json
+    storage: none
+    framework: net10.0
+
+    nuget FSharp.Core >= 5.0.0 lowest_matching: true
+    nuget Fable.Core >= 5.0.0
+    nuget Fable.Python >= 5.1.0

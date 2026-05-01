@@ -1,0 +1,14 @@
+[project]
+name = "fable-typedjson"
+version = "0.1.0"
+description = "Fable.TypedJson — Python runtime support and tests"
+requires-python = ">= 3.12, < 4"
+license = "MIT"
+dependencies = [
+    "fable-library==5.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0,<10",
+]

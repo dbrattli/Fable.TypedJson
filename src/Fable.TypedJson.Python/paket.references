@@ -1,0 +1,4 @@
+group Python
+    FSharp.Core
+    Fable.Core
+    Fable.Python

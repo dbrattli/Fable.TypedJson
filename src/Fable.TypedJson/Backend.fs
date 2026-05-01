@@ -1,0 +1,74 @@
+(**
+# IJsonBackend — Cross-target JSON map abstraction
+
+Each Fable target (BEAM, JS, Python, .NET) provides a concrete IJsonBackend
+implementation. The core Schema and TypedJson layers operate through this
+interface so the same codec works across all backends.
+
+principle: format-agnostic core, backend-specific shims
+adr: `obj` for the native map type — each backend casts internally
+*)
+
+module Fable.TypedJson.Backend
+
+/// A JSON map abstraction over the backend's native representation:
+///   - JS: a plain object `{ ... }`
+///   - Python: a `dict`
+///   - BEAM: a `BeamMap<string, obj>`
+///   - .NET: a `Dictionary<string, obj>` or similar
+///
+/// Each backend also supplies type-test methods so the schema's `coerce`
+/// can dispatch on a parsed value's runtime type without pattern-matching
+/// the erased `JsonValue` DU. This is required because the runtime
+/// representation of "an integer" differs across targets — Python in
+/// particular wraps F# `int` in an `int32` class, so an `isinstance(x, int32)`
+/// check (the F# pattern-match shape) misses native ints from `json.loads`.
+type IJsonBackend =
+    // --- Map operations ---
+    /// Create a fresh, empty map.
+    abstract member NewMap: unit -> obj
+    /// True if `key` exists in `map`.
+    abstract member ContainsKey: map: obj * key: string -> bool
+    /// Get the raw value at `key`. Behavior is undefined if the key is missing —
+    /// callers should use `ContainsKey` first.
+    abstract member Get: map: obj * key: string -> obj
+    /// Return a new map with `key` set to `value`.
+    abstract member Put: map: obj * key: string * value: obj -> obj
+    /// Parse a JSON string into the backend's native map representation.
+    /// Named `ParseRaw` to emphasize the result is the raw native value
+    /// (Erlang map, Python dict, ...), not a validated record.
+    abstract member ParseRaw: json: string -> obj
+    /// Serialize a value (typically a map produced by NewMap/Put) to a JSON string.
+    abstract member Stringify: value: obj -> string
+    /// The backend's representation of JSON null. F# `null` is not portable —
+    /// on BEAM it compiles to the `undefined` atom, which jsx serializes as
+    /// the string `"undefined"` instead of JSON null. Backends supply the
+    /// right sentinel here.
+    abstract member Null: obj
+
+    // --- Type tests (used by coerce / primitive codecs) ---
+    /// True if `value` is the backend's representation of a JSON string.
+    abstract member IsString: value: obj -> bool
+    /// True if `value` is an integer (and not a bool, where backends conflate them).
+    abstract member IsInt: value: obj -> bool
+    /// True if `value` is a floating-point number.
+    abstract member IsFloat: value: obj -> bool
+    /// True if `value` is a boolean.
+    abstract member IsBool: value: obj -> bool
+    /// True if `value` is the backend's representation of JSON null.
+    abstract member IsNull: value: obj -> bool
+    /// True if `value` is a JSON array (list).
+    abstract member IsArray: value: obj -> bool
+    /// True if `value` is a JSON object (map / dict).
+    abstract member IsMap: value: obj -> bool
+    /// Length of a JSON array. Used for iterating without committing to a
+    /// particular F# list/array runtime shape — Python's `json.loads` returns
+    /// a native list while BEAM's `jsx.decode` returns an Erlang list, and
+    /// neither aligns with Fable's `FSharpList` cons-cell representation.
+    abstract member ArrayLength: array: obj -> int
+    /// Element at `index` in a JSON array (0-based).
+    abstract member ArrayAt: array: obj * index: int -> obj
+    /// Build a JSON array from F# list of values. Each backend produces its
+    /// native sequence form so the subsequent `Stringify` emits a JSON array
+    /// rather than an internal F# list representation.
+    abstract member BuildArray: items: obj list -> obj
