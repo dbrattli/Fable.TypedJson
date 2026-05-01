@@ -112,4 +112,3 @@ test-python: build-test-python
 build-test-python:
     FableTarget=python dotnet build test
     FableTarget=python {{fable}} test --define PYTHON --exclude Fable.Core --lang python --outDir build/python_test
-    cp test_python/conftest.py build/python_test/conftest.py

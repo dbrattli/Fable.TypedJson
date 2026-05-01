@@ -256,8 +256,7 @@ Fable.TypedJson.Python (Python shim)
 - `src/Fable.TypedJson/` — backend-agnostic core
 - `src/Fable.TypedJson.Beam/` — BEAM backend shim
 - `src/Fable.TypedJson.Python/` — Python backend shim
-- `test/` — F# test sources, transpiled to Erlang (BEAM) or Python via `#if PYTHON` conditional
-- `test_python/` — pytest harness (`conftest.py`) that picks up the Fable-emitted `test_*.py` files
+- `test/` — F# test sources, transpiled to Erlang (BEAM) or Python via `#if PYTHON` conditional. pytest picks up the Fable-emitted `test_*.py` files in `build/python_test/` directly — no extra harness needed.
 
 ## Prerequisites
 
