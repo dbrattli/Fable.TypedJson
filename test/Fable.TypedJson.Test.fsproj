@@ -33,6 +33,7 @@
     <Compile Include="TestNested.fs" />
     <Compile Include="TestJsonSchema.fs" />
     <Compile Include="TestAlias.fs" />
+    <Compile Include="TestUnion.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />

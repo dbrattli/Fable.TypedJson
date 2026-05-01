@@ -224,9 +224,16 @@ adr: inline required for typeof<'T> resolution on Fable backends
 *)
 
 let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : TypedJson<'T> =
-    let schemaFn = Fable.TypedJson.Schema.auto<'T> backend registry
     let typ = typeof<'T>
-    let fields = FSharpType.GetRecordFields typ
+
+    // Records have a stable list of fields known at codec-construction time;
+    // unions don't (the case is value-dependent). Compute the record fields
+    // lazily so this codec works for top-level union types too.
+    let fields =
+        if FSharpType.IsRecord typ then
+            FSharpType.GetRecordFields typ
+        else
+            [||]
 
     /// Resolve the JSON key for a given F# field name: alias if present,
     /// otherwise the case-rule-derived form. Lookup is keyed by the field's
@@ -245,8 +252,14 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
     // allows `let rec` for nested values that capture each other.
     let rec build (aliases: Map<string, string>) (caseRules: CaseRules) : TypedJson<'T> =
         let decodeWith (rules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
+            // Rebuild the Schema function on each call so the key transform
+            // (which depends on `rules` + `aliases`) is current. The schema
+            // layer threads it into nested record / list / union sub-lookups.
+            let keyTransform = resolveKey aliases rules
+            let schemaFn = Fable.TypedJson.Schema.auto<'T> backend registry keyTransform
+
             let lookup (fieldName: string) : JsonValue option =
-                let jsonKey = resolveKey aliases rules fieldName
+                let jsonKey = keyTransform fieldName
                 jsonMapAdapter backend map jsonKey
 
             schemaFn lookup
@@ -306,26 +319,98 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                             Some(jsonKey, transformValue rules fi.PropertyType fv))
 
                 Encode.object backend entries
+
+            elif FSharpType.IsUnion t then
+                // Tagged DU: emit `{type: "<caseName>", ...payload}`.
+                // For a fieldless case, just `{type: "..."}`. For a single
+                // record-field case, flatten the record's keys alongside the
+                // discriminator. Other shapes are unsupported in v1 (matches
+                // the decode side in Schema.coerceUnion).
+                let caseInfo, caseValues = FSharpValue.GetUnionFields(v, t)
+                let tag = tagOfCaseName caseInfo.Name
+                let caseFields = caseInfo.GetFields()
+                let baseEntry = (discriminatorKey, box tag)
+
+                // `caseValues : obj[]` has a different runtime shape on each
+                // Fable backend (process-dict ref on BEAM, GenericArray on
+                // Python, native array on .NET). Going through `backend.ArrayAt`
+                // / `ArrayLength` gives uniform access.
+                let payloadCount = backend.ArrayLength(box caseValues)
+
+                let payload =
+                    if payloadCount > 0 then
+                        Some(backend.ArrayAt(box caseValues, 0))
+                    else
+                        None
+
+                match caseFields.Length, payload with
+                | 0, _
+                | _, None -> Encode.object backend [ baseEntry ]
+                | 1, Some payloadValue ->
+                    let payloadType = caseFields.[0].PropertyType
+
+                    if FSharpType.IsRecord payloadType then
+                        // Walk the payload's fields the same way we walk a
+                        // top-level record, so caseRules + aliases apply.
+                        let payloadFields = FSharpType.GetRecordFields payloadType
+
+                        let payloadEntries =
+                            payloadFields
+                            |> Array.toList
+                            |> List.choose (fun fi ->
+                                let fv = FSharpValue.GetRecordField(payloadValue, fi)
+                                let jsonKey = resolveKey aliases rules fi.Name
+
+                                if isOptionType fi.PropertyType.FullName then
+                                    match unbox<obj option> fv with
+                                    | Some inner ->
+                                        Some(
+                                            jsonKey,
+                                            transformValue
+                                                rules
+                                                (getGenericInnerType fi.PropertyType)
+                                                inner
+                                        )
+                                    | None -> None
+                                else
+                                    Some(jsonKey, transformValue rules fi.PropertyType fv))
+
+                        Encode.object backend (baseEntry :: payloadEntries)
+                    else
+                        // Non-record single-field cases not supported in v1.
+                        Encode.object backend [ baseEntry ]
+                | _ ->
+                    // Multi-positional-field cases not supported in v1.
+                    Encode.object backend [ baseEntry ]
             else
                 v
 
         let encodeWith (rules: CaseRules) (record: 'T) : string =
-            let values = FSharpValue.GetRecordFields(box record)
+            // Top-level dispatch mirrors decode (Schema.auto): record →
+            // field-by-field encode; union → discriminator + payload via
+            // transformValue. Anything else: hand off to the backend's
+            // Stringify and hope for the best.
+            if FSharpType.IsRecord typ then
+                let entries =
+                    fields
+                    |> Array.toList
+                    |> List.choose (fun fi ->
+                        let v = FSharpValue.GetRecordField(box record, fi)
+                        let jsonKey = resolveKey aliases rules fi.Name
 
-            let entries =
-                Array.zip fields values
-                |> Array.toList
-                |> List.choose (fun (fi, v) ->
-                    let jsonKey = resolveKey aliases rules fi.Name
+                        if isOptionType fi.PropertyType.FullName then
+                            match unbox<obj option> v with
+                            | Some inner ->
+                                Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
+                            | None -> None
+                        else
+                            Some(jsonKey, transformValue rules fi.PropertyType v))
 
-                    if isOptionType fi.PropertyType.FullName then
-                        match unbox<obj option> v with
-                        | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
-                        | None -> None
-                    else
-                        Some(jsonKey, transformValue rules fi.PropertyType v))
-
-            Encode.object backend entries |> Encode.toJson backend
+                Encode.object backend entries |> Encode.toJson backend
+            elif FSharpType.IsUnion typ then
+                transformValue rules typ (box record) |> Encode.toJson backend
+            else
+                Encode.toJson backend (box record)
 
         {
             decode = decodeWith caseRules
