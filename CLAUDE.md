@@ -9,10 +9,10 @@ See `GRIT.md` for the annotation convention used in this codebase. New/changed c
 All workflows go through `just` (see `justfile`). Builds run Fable to transpile F# to Erlang, then `rebar3 compile`.
 
 - `just restore` — restore .NET tools (Fable, Paket, Fantomas) and Paket deps. Run once after clone.
-- `just build` — clean, transpile `src/Fable.TypedJson` and `src/Fable.TypedJson.Beam` to `apps/`, run `rebar3 compile`.
-- `just check` — `dotnet build` of both src projects (type-check only, no Fable).
-- `just test` — transpile tests to Erlang in `build/tests/`, compile, run BEAM test suite via `test_runner.erl`.
-- `just build-test` — only the test build; useful when debugging compile failures.
+- `just build` — clean, then `build-beam` (Fable + rebar3 to `apps/`), `build-python` (Fable to `build/python/`), and `build-js` (Fable to `build/js/`).
+- `just check` — `dotnet build` of every src project (type-check only, no Fable).
+- `just test` — runs `test-beam` and `test-python` (no JS test runner yet).
+- `just build-test-beam` / `build-test-python` — transpile tests to a single backend; useful when debugging compile failures.
 - `just format` — Fantomas over `src/` and `test/`.
 - `just dev=true build` — use a local Fable repo at `../Fable` instead of the `dotnet fable` tool. Same flag works for `test`.
 
@@ -49,7 +49,7 @@ Implement `IJsonBackend` in a new `Fable.TypedJson.<Target>` project, plus a `<T
 
 - Attribute reflection at runtime is out — Fable erases attributes in generated code. Design APIs around `IJsonCodec`/registries and combinator pipelines, not attributes on types.
 - `Fable.AST` `Field` interface lacks `Attributes`, so plugin work cannot read field-level attributes either. (See `Feliz.CompilerPlugins` for canonical plugin examples if plugin work becomes necessary.)
-- This library is intended to run on multiple Fable backends (BEAM today; JS, Python, .NET planned). Keep the core format-agnostic; backend-specific code lives only behind `IJsonBackend`.
+- This library is intended to run on multiple Fable backends (BEAM, Python, JS today; .NET planned). Keep the core format-agnostic; backend-specific code lives only behind `IJsonBackend`.
 
 ## Tests
 
