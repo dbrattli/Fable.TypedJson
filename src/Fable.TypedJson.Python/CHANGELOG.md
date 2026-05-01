@@ -1,6 +1,6 @@
 ---
+last_commit_released: fcd1e23d9e94e4527dd68dbba0e0bc82d7e4f158
 name: Fable.TypedJson.Python
-# last_commit_released will be set by ShipIt on the first published release.
 ---
 
 # Changelog
@@ -12,6 +12,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 0.2.0-rc.1 - 2026-05-01
+
+### 🚀 Features
+
+* Initial release ([09a20d5](https://github.com/dbrattli/Fable.TypedJson/commit/09a20d5e29120de4c9051403039656e325351422))
+* Bake CaseRules into TypedJson codec (default LowerFirst) ([70b65c3](https://github.com/dbrattli/Fable.TypedJson/commit/70b65c3a9467a83431ce5d42c3329cc609805209))
 
 ## 0.1.0
 
