@@ -8,6 +8,7 @@
 #   Main   → Fable.TypedJson (backend-agnostic core, netstandard2.0)
 #   Beam   → Fable.TypedJson.Beam (netstandard2.0)
 #   Python → Fable.TypedJson.Python (netstandard2.0)
+#   JS     → Fable.TypedJson.JS (netstandard2.0)
 #   Test   → Fable.TypedJson.Test (net10.0)
 #
 # Each project's `paket.references` opts into its single group.
@@ -39,6 +40,16 @@ group Python
     nuget FSharp.Core >= 5.0.0 lowest_matching: true
     nuget Fable.Core >= 5.0.0 lowest_matching: true
     nuget Fable.Python >= 5.1.0
+
+# JavaScript backend -- only Fable.Core is needed; the shim uses raw
+# [<Emit>] for JSON.parse / JSON.stringify and JS native type tests.
+group JS
+    source https://api.nuget.org/v3/index.json
+    storage: none
+    framework: netstandard2.0
+
+    nuget FSharp.Core >= 5.0.0 lowest_matching: true
+    nuget Fable.Core >= 5.0.0 lowest_matching: true
 
 # Test runner (host process). Tests transpile the same F# source to BOTH
 # BEAM and Python via #if PYTHON, so this group includes every backend's

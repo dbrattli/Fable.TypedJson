@@ -16,8 +16,8 @@ clean:
 
 # --- Build ---
 
-# Build Fable.TypedJson + Fable.TypedJson.Beam to Erlang, then compile with rebar3
-build: clean build-beam build-python
+# Build all backend shims (BEAM via Fable + rebar3, Python via Fable, JS via Fable)
+build: clean build-beam build-python build-js
 
 # Transpile core + BEAM shim to Erlang and compile with rebar3
 build-beam:
@@ -29,11 +29,16 @@ build-beam:
 build-python:
     {{fable}} src/Fable.TypedJson.Python --exclude Fable.Core --lang python --outDir build/python --noCache
 
+# Transpile core + JS shim to JavaScript (no further compile step needed)
+build-js:
+    {{fable}} src/Fable.TypedJson.JS --exclude Fable.Core --lang javascript --outDir build/js --noCache
+
 # Type check via dotnet build
 check:
     dotnet build src/Fable.TypedJson
     dotnet build src/Fable.TypedJson.Beam
     dotnet build src/Fable.TypedJson.Python
+    dotnet build src/Fable.TypedJson.JS
 
 # Format source files
 format:
@@ -47,9 +52,12 @@ format-check:
 setup:
     dotnet tool restore
 
-# Setup tooling + restore Paket deps + sync uv venv
-restore: setup
+# Setup tooling + restore Paket deps (no uv — see `restore` for the full set)
+restore-net: setup
     dotnet paket install
+
+# Setup tooling + restore Paket deps + sync uv venv (Python target only)
+restore: restore-net
     uv sync
 
 # Build and check
@@ -65,10 +73,12 @@ pack:
     CORE_VERSION=$(get_version src/Fable.TypedJson/CHANGELOG.md)
     BEAM_VERSION=$(get_version src/Fable.TypedJson.Beam/CHANGELOG.md)
     PYTHON_VERSION=$(get_version src/Fable.TypedJson.Python/CHANGELOG.md)
+    JS_VERSION=$(get_version src/Fable.TypedJson.JS/CHANGELOG.md)
     rm -rf ./nupkgs
     dotnet pack src/Fable.TypedJson        -c Release -o ./nupkgs -p:PackageVersion=$CORE_VERSION   -p:InformationalVersion=$CORE_VERSION
     dotnet pack src/Fable.TypedJson.Beam   -c Release -o ./nupkgs -p:PackageVersion=$BEAM_VERSION   -p:InformationalVersion=$BEAM_VERSION
     dotnet pack src/Fable.TypedJson.Python -c Release -o ./nupkgs -p:PackageVersion=$PYTHON_VERSION -p:InformationalVersion=$PYTHON_VERSION
+    dotnet pack src/Fable.TypedJson.JS     -c Release -o ./nupkgs -p:PackageVersion=$JS_VERSION     -p:InformationalVersion=$JS_VERSION
 
 # Pack and push every package to NuGet (CI-only — needs $NUGET_KEY)
 release: pack
@@ -83,7 +93,7 @@ shipit *args:
 build_test_path := justfile_directory() / "build/tests"
 
 # Run all backend test suites
-test: test-beam test-python
+test: test-beam test-python test-js
 
 # Build and run Fable.TypedJson tests on BEAM
 test-beam: build-test-beam
@@ -112,3 +122,14 @@ test-python: build-test-python
 build-test-python:
     FableTarget=python dotnet build test
     FableTarget=python {{fable}} test --define PYTHON --exclude Fable.Core --lang python --outDir build/python_test
+
+# Run the full F# test suite as JavaScript via a Node runner.
+test-js: build-test-js
+    node test_js/runner.mjs
+
+# Transpile the test project to JavaScript. Mirrors `build-test-python`:
+# FableTarget=js routes the test fsproj to the JS shim, and `--define JS`
+# activates the matching `#if JS` blocks in F#.
+build-test-js:
+    FableTarget=js dotnet build test
+    FableTarget=js {{fable}} test --define JS --exclude Fable.Core --lang javascript --outDir build/js_test

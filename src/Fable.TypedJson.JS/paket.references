@@ -1,0 +1,3 @@
+group JS
+    FSharp.Core
+    Fable.Core

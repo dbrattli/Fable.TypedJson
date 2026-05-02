@@ -15,9 +15,15 @@ open Fable.TypedJson.Python.Json
 
 let backend = python
 #else
+#if JS
+open Fable.TypedJson.JS.Json
+
+let backend = js
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 
 // ============================================================================
@@ -41,7 +47,10 @@ type RecordWithBool = { Active: bool; Count: int }
 
 [<Fact>]
 let ``test auto decode simple record`` () =
-    let codec = auto<SimpleRecord> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<SimpleRecord> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"name":"Alice","age":30}"""
 
     match codec.decode map with
@@ -52,7 +61,10 @@ let ``test auto decode simple record`` () =
 
 [<Fact>]
 let ``test auto decode float record`` () =
-    let codec = auto<RecordWithFloat> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<RecordWithFloat> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"air_temperature":22.5,"relative_humidity":65.0}"""
 
     match codec.decode map with
@@ -63,7 +75,10 @@ let ``test auto decode float record`` () =
 
 [<Fact>]
 let ``test auto decode with option some`` () =
-    let codec = auto<RecordWithOption> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<RecordWithOption> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"name":"Alice","email":"a@b.com"}"""
 
     match codec.decode map with
@@ -74,7 +89,10 @@ let ``test auto decode with option some`` () =
 
 [<Fact>]
 let ``test auto decode with option none`` () =
-    let codec = auto<RecordWithOption> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<RecordWithOption> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"name":"Alice"}"""
 
     match codec.decode map with
@@ -85,7 +103,10 @@ let ``test auto decode with option none`` () =
 
 [<Fact>]
 let ``test auto decode missing required field`` () =
-    let codec = auto<SimpleRecord> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<SimpleRecord> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"name":"Alice"}"""
 
     match codec.decode map with
@@ -96,7 +117,10 @@ let ``test auto decode missing required field`` () =
 
 [<Fact>]
 let ``test auto decode accumulates all errors`` () =
-    let codec = auto<SimpleRecord> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<SimpleRecord> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{}"""
 
     match codec.decode map with
@@ -109,7 +133,10 @@ let ``test auto decode accumulates all errors`` () =
 
 [<Fact>]
 let ``test auto encode simple record`` () =
-    let codec = auto<SimpleRecord> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<SimpleRecord> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let record = { Name = "Bob"; Age = 25 }
     let json = codec.encode record
     let map = parseRaw json
@@ -120,7 +147,9 @@ let ``test auto encode simple record`` () =
 
 [<Fact>]
 let ``test auto encode float record`` () =
-    let codec = auto<RecordWithFloat> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<RecordWithFloat> ()
+        |> withCaseRules CaseRules.SnakeCase
 
     let record = {
         AirTemperature = 22.5
@@ -136,7 +165,9 @@ let ``test auto encode float record`` () =
 
 [<Fact>]
 let ``test auto encode with option some`` () =
-    let codec = auto<RecordWithOption> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<RecordWithOption> ()
+        |> withCaseRules CaseRules.SnakeCase
 
     let record = {
         Name = "Alice"
@@ -156,7 +187,10 @@ let ``test auto encode with option some`` () =
 
 [<Fact>]
 let ``test auto round-trip simple record`` () =
-    let codec = auto<SimpleRecord> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<SimpleRecord> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let original = { Name = "Charlie"; Age = 40 }
     let json = codec.encode original
     let map = parseRaw json
@@ -169,7 +203,9 @@ let ``test auto round-trip simple record`` () =
 
 [<Fact>]
 let ``test auto round-trip float record`` () =
-    let codec = auto<RecordWithFloat> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<RecordWithFloat> ()
+        |> withCaseRules CaseRules.SnakeCase
 
     let original = {
         AirTemperature = -5.3

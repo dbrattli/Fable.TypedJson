@@ -18,7 +18,11 @@ open Fable.TypedJson.Json
 #if PYTHON
 open Fable.TypedJson.Python.Json
 #else
+#if JS
+open Fable.TypedJson.JS.Json
+#else
 open Fable.TypedJson.Beam.Json
+#endif
 #endif
 
 // Note: we deliberately do NOT `open Fable.TypedJson.Codec` because its
@@ -110,7 +114,10 @@ type Req = { Days: DayCount; Name: string }
 
 [<Fact>]
 let ``test auto with custom codec accepts valid value`` () =
-    let codec = autoWith<Req> codecs |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        autoWith<Req> codecs
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"days":7, "name":"hello"}"""
 
     match codec.decode map with
@@ -122,7 +129,10 @@ let ``test auto with custom codec accepts valid value`` () =
 
 [<Fact>]
 let ``test auto with custom codec rejects out-of-range value`` () =
-    let codec = autoWith<Req> codecs |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        autoWith<Req> codecs
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"days":15, "name":"hello"}"""
 
     match codec.decode map with
@@ -135,7 +145,10 @@ let ``test auto with custom codec rejects out-of-range value`` () =
 
 [<Fact>]
 let ``test auto with custom codec rejects zero`` () =
-    let codec = autoWith<Req> codecs |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        autoWith<Req> codecs
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"days":0, "name":"hello"}"""
 
     match codec.decode map with

@@ -157,11 +157,7 @@ let inline jsonSchemaOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (c
 /// Generate a JSON Schema document from a `TypedJson<'T>` codec. Reads the
 /// codec's configured `caseRules` and any `alias`-attached overrides so the
 /// emitted schema matches what the codec actually accepts and produces.
-let inline jsonSchemaOfCodec<'T>
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (codec: Json.TypedJson<'T>)
-    : string =
+let inline jsonSchemaOfCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (codec: Json.TypedJson<'T>) : string =
     let t = typeof<'T>
 
     let schemaValue = schemaForRecord registry codec.aliases codec.caseRules t

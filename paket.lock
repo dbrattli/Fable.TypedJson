@@ -21,6 +21,15 @@ NUGET
       FSharp.Core (>= 4.7.2)
     FSharp.Core (11.0.100)
 
+GROUP JS
+STORAGE: NONE
+RESTRICTION: == netstandard2.0
+NUGET
+  remote: https://api.nuget.org/v3/index.json
+    Fable.Core (5.0)
+      FSharp.Core (>= 4.7.2)
+    FSharp.Core (5.0)
+
 GROUP Python
 STORAGE: NONE
 RESTRICTION: == netstandard2.0

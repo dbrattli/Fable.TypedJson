@@ -8,17 +8,20 @@
     <LangVersion>preview</LangVersion>
     <OutputType>Exe</OutputType>
     <DefineConstants>FABLE_COMPILER</DefineConstants>
-    <!-- Set FableTarget=python from the command line to switch the backend
-         reference to the Python shim and activate the `PYTHON` define. -->
+    <!-- Set FableTarget=python|js from the command line to switch the
+         backend reference and activate the matching `#if PYTHON|JS` block. -->
     <FableTarget Condition="'$(FableTarget)' == ''">beam</FableTarget>
     <DefineConstants Condition="'$(FableTarget)' == 'python'">PYTHON;$(DefineConstants)</DefineConstants>
+    <DefineConstants Condition="'$(FableTarget)' == 'js'">JS;$(DefineConstants)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
     <ProjectReference Include="../src/Fable.TypedJson.Beam/Fable.TypedJson.Beam.fsproj"
-                      Condition="'$(FableTarget)' != 'python'" />
+                      Condition="'$(FableTarget)' != 'python' AND '$(FableTarget)' != 'js'" />
     <ProjectReference Include="../src/Fable.TypedJson.Python/Fable.TypedJson.Python.fsproj"
                       Condition="'$(FableTarget)' == 'python'" />
+    <ProjectReference Include="../src/Fable.TypedJson.JS/Fable.TypedJson.JS.fsproj"
+                      Condition="'$(FableTarget)' == 'js'" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Testing.fs" />
