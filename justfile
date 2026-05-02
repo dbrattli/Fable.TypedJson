@@ -90,7 +90,7 @@ shipit *args:
 build_test_path := justfile_directory() / "build/tests"
 
 # Run all backend test suites
-test: test-beam test-python
+test: test-beam test-python test-js
 
 # Build and run Fable.TypedJson tests on BEAM
 test-beam: build-test-beam
@@ -119,3 +119,14 @@ test-python: build-test-python
 build-test-python:
     FableTarget=python dotnet build test
     FableTarget=python {{fable}} test --define PYTHON --exclude Fable.Core --lang python --outDir build/python_test
+
+# Run the full F# test suite as JavaScript via a Node runner.
+test-js: build-test-js
+    node test_js/runner.mjs
+
+# Transpile the test project to JavaScript. Mirrors `build-test-python`:
+# FableTarget=js routes the test fsproj to the JS shim, and `--define JS`
+# activates the matching `#if JS` blocks in F#.
+build-test-js:
+    FableTarget=js dotnet build test
+    FableTarget=js {{fable}} test --define JS --exclude Fable.Core --lang javascript --outDir build/js_test

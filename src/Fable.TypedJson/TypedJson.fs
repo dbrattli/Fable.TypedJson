@@ -258,11 +258,9 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
             let keyTransform = resolveKey aliases rules
             let schemaFn = Fable.TypedJson.Schema.auto<'T> backend registry keyTransform
 
-            let lookup (fieldName: string) : JsonValue option =
-                let jsonKey = keyTransform fieldName
-                jsonMapAdapter backend map jsonKey
-
-            schemaFn lookup
+            // Schema.resolveField applies `keyTransform` itself before looking
+            // up; passing a raw adapter avoids double-transforming the key.
+            schemaFn (jsonMapAdapter backend map)
 
         // Recursively transform a value into a backend-native form so that
         // any nested records have their keys mapped through the same
@@ -363,14 +361,7 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
 
                                 if isOptionType fi.PropertyType.FullName then
                                     match unbox<obj option> fv with
-                                    | Some inner ->
-                                        Some(
-                                            jsonKey,
-                                            transformValue
-                                                rules
-                                                (getGenericInnerType fi.PropertyType)
-                                                inner
-                                        )
+                                    | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
                                     | None -> None
                                 else
                                     Some(jsonKey, transformValue rules fi.PropertyType fv))
@@ -400,15 +391,16 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
 
                         if isOptionType fi.PropertyType.FullName then
                             match unbox<obj option> v with
-                            | Some inner ->
-                                Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
+                            | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
                             | None -> None
                         else
                             Some(jsonKey, transformValue rules fi.PropertyType v))
 
-                Encode.object backend entries |> Encode.toJson backend
+                Encode.object backend entries
+                |> Encode.toJson backend
             elif FSharpType.IsUnion typ then
-                transformValue rules typ (box record) |> Encode.toJson backend
+                transformValue rules typ (box record)
+                |> Encode.toJson backend
             else
                 Encode.toJson backend (box record)
 
@@ -430,15 +422,10 @@ let inline auto<'T> (backend: IJsonBackend) : TypedJson<'T> =
     autoWith<'T> backend Fable.TypedJson.Schema.emptyRegistry
 
 /// Shorthand: create auto codec and decode in one call (uses the codec's default `LowerFirst`).
-let inline validate<'T> (backend: IJsonBackend) (map: JsonMap) : Result<'T, FieldError list> =
-    (auto<'T> backend).decode map
+let inline validate<'T> (backend: IJsonBackend) (map: JsonMap) : Result<'T, FieldError list> = (auto<'T> backend).decode map
 
 /// Shorthand: create autoWith codec (with custom registry) and decode in one call.
-let inline validateWith<'T>
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (map: JsonMap)
-    : Result<'T, FieldError list> =
+let inline validateWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: JsonMap) : Result<'T, FieldError list> =
     (autoWith<'T> backend registry).decode map
 
 /// Compose a cross-field model validator onto a codec. Runs after the per-field
@@ -481,8 +468,7 @@ let withModel (validator: 'T -> Result<'T, FieldError list>) (codec: TypedJson<'
 ///   let codec = auto<WeatherRequest> beam |> withCaseRules CaseRules.SnakeCase
 ///
 /// Per-field overrides via `alias` still take precedence.
-let withCaseRules (caseRules: CaseRules) (codec: TypedJson<'T>) : TypedJson<'T> =
-    codec.withCaseRules caseRules
+let withCaseRules (caseRules: CaseRules) (codec: TypedJson<'T>) : TypedJson<'T> = codec.withCaseRules caseRules
 
 /// Override the JSON key for a single F# record field, replacing whatever
 /// the active `CaseRules` would have produced. Affects decode lookup,

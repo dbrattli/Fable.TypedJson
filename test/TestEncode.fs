@@ -15,9 +15,15 @@ open Fable.TypedJson.Python.Json
 
 let backend = python
 #else
+#if JS
+open Fable.TypedJson.JS.Json
+
+let backend = js
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 
 

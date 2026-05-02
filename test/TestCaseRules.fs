@@ -15,9 +15,15 @@ open Fable.TypedJson.Python.Json
 
 let backend = python
 #else
+#if JS
+open Fable.TypedJson.JS.Json
+
+let backend = js
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 
 
@@ -185,12 +191,20 @@ let ``test default case rule is LowerFirst`` () =
 [<Fact>]
 let ``test default codec encodes and decodes camelCase`` () =
     let codec = auto<Weather> ()
-    let record = { AirTemperature = 22.5; WindSpeed = 3.0 }
+
+    let record = {
+        AirTemperature = 22.5
+        WindSpeed = 3.0
+    }
     // No CaseRules argument — uses the codec's default (LowerFirst).
     let json = codec.encode record
     let map = parseRaw json
-    backend.ContainsKey(map, "airTemperature") |> equal true
-    backend.ContainsKey(map, "windSpeed") |> equal true
+
+    backend.ContainsKey(map, "airTemperature")
+    |> equal true
+
+    backend.ContainsKey(map, "windSpeed")
+    |> equal true
 
     match codec.decode map with
     | Ok w ->
@@ -200,12 +214,20 @@ let ``test default codec encodes and decodes camelCase`` () =
 
 [<Fact>]
 let ``test withCaseRules switches default for round-trip`` () =
-    let codec = auto<Weather> () |> withCaseRules CaseRules.SnakeCase
-    let record = { AirTemperature = 22.5; WindSpeed = 3.0 }
+    let codec =
+        auto<Weather> ()
+        |> withCaseRules CaseRules.SnakeCase
+
+    let record = {
+        AirTemperature = 22.5
+        WindSpeed = 3.0
+    }
+
     let json = codec.encode record
     let map = parseRaw json
 
-    backend.ContainsKey(map, "air_temperature") |> equal true
+    backend.ContainsKey(map, "air_temperature")
+    |> equal true
 
     match codec.decode map with
     | Ok w -> w.AirTemperature |> equal 22.5
@@ -220,7 +242,13 @@ let ``test withCaseRules survives withModel composition`` () =
 
     codec.caseRules |> equal CaseRules.SnakeCase
 
-    let record = { AirTemperature = 22.5; WindSpeed = 3.0 }
+    let record = {
+        AirTemperature = 22.5
+        WindSpeed = 3.0
+    }
+
     let json = codec.encode record
     let map = parseRaw json
-    backend.ContainsKey(map, "air_temperature") |> equal true
+
+    backend.ContainsKey(map, "air_temperature")
+    |> equal true

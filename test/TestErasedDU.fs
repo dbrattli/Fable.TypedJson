@@ -35,9 +35,13 @@ let ``test erased DU match on string`` () =
 [<Fact>]
 let ``test erased DU match on int`` () = classify (JInt 42) |> equal "int:42"
 
+#if !JS
+// JS has no runtime int vs. float distinction (all `number`), so the JInt
+// guard matches a JFloat value first and the test would compare float to int.
 [<Fact>]
 let ``test erased DU match on float`` () =
     classify (JFloat 3.14) |> equal "float:3.1"
+#endif
 
 [<Fact>]
 let ``test erased DU match on bool`` () =

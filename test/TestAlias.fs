@@ -18,9 +18,15 @@ open Fable.TypedJson.Python.Json
 
 let backend = python
 #else
+#if JS
+open Fable.TypedJson.JS.Json
+
+let backend = js
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 
 type WeatherRequest = { Location: string; Days: int }
@@ -54,12 +60,11 @@ let ``test alias affects error path on missing key`` () =
     match codec.decode map with
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
-        // The schema looked up "loc" and missed it. The FieldError's `path`
-        // is the field name as reflection sees it (BEAM lowercases, Python
-        // preserves), so we check case-insensitively.
+        // The error path uses the resolved JSON key — alias if defined,
+        // otherwise the case-rule-derived form. Missing "loc" produces
+        // path "loc", not the F# field name "Location".
         errs.Length |> equal 1
-        let path = errs.[0].path.ToLower()
-        path |> equal "location"
+        errs.[0].path |> equal "loc"
 
 [<Fact>]
 let ``test alias redirects encode output`` () =
@@ -72,8 +77,12 @@ let ``test alias redirects encode output`` () =
     let parsed = parseRaw json
 
     backend.ContainsKey(parsed, "loc") |> equal true
-    backend.ContainsKey(parsed, "location") |> equal false
-    unbox<string> (backend.Get(parsed, "loc")) |> equal "Oslo"
+
+    backend.ContainsKey(parsed, "location")
+    |> equal false
+
+    unbox<string> (backend.Get(parsed, "loc"))
+    |> equal "Oslo"
 
 [<Fact>]
 let ``test alias falls through to case rule for unaliased fields`` () =
@@ -87,7 +96,9 @@ let ``test alias falls through to case rule for unaliased fields`` () =
 
     // "Days" wasn't aliased, so it follows the codec's SnakeCase rule.
     backend.ContainsKey(parsed, "days") |> equal true
-    unbox<int> (backend.Get(parsed, "days")) |> equal 5
+
+    unbox<int> (backend.Get(parsed, "days"))
+    |> equal 5
 
 [<Fact>]
 let ``test alias propagates to JSON schema property keys`` () =
@@ -103,7 +114,10 @@ let ``test alias propagates to JSON schema property keys`` () =
     let props = backend.Get(parsed, "properties")
     backend.ContainsKey(props, "loc") |> equal true
     backend.ContainsKey(props, "n") |> equal true
-    backend.ContainsKey(props, "location") |> equal false
+
+    backend.ContainsKey(props, "location")
+    |> equal false
+
     backend.ContainsKey(props, "days") |> equal false
 
     // `required` must list the aliased keys too.
@@ -150,4 +164,6 @@ let ``test alias preserves withModel composition`` () =
     | Ok _ -> equal "Error" "Ok"
     | Error errs ->
         let formatted = formatErrors errs
-        formatted.Contains("must be positive") |> equal true
+
+        formatted.Contains("must be positive")
+        |> equal true

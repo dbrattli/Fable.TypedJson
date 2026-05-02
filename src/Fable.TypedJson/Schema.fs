@@ -192,9 +192,29 @@ let private joinErrors (errors: FieldError list) : string =
     |> List.map (fun e -> sprintf "%s: %s" e.path e.message)
     |> String.concat ", "
 
-/// Identity key transform — used when there's no case rule (e.g.
-/// validateMap consuming a string Map whose keys ARE the F# field names).
+/// Identity key transform — passes the F# field name through unchanged.
+/// Useful when callers control both the lookup keys and the F# field names
+/// (rare). Most call sites should use `lowerFirstTransform` so the JSON key
+/// is consistent across backends (BEAM and Python lowercase F# field
+/// names in reflection; JS preserves PascalCase).
 let identityTransform (s: string) : string = s
+
+/// Default key transform — `LowerFirst` (camelCase). Lowercases the first
+/// character; if the input is already snake_case (no uppercase letters)
+/// returns it unchanged. Stable across BEAM/Python (already lowercase) and
+/// JS (PascalCase → camelCase).
+let lowerFirstTransform (s: string) : string =
+    let mutable hasUpper = false
+
+    for i = 0 to s.Length - 1 do
+        if System.Char.IsUpper(s.[i]) then
+            hasUpper <- true
+
+    if not hasUpper || s.Length = 0 then
+        s
+    else
+        string (System.Char.ToLowerInvariant s.[0])
+        + s.[1..]
 
 /// `coerce` walks the type tree to convert a `JsonValue` into the target F#
 /// type. The `keyTransform` parameter encapsulates the codec's case rule +
@@ -260,14 +280,11 @@ let rec coerce
             if FSharpType.IsRecord targetType then
                 if backend.IsMap(box fv) then
                     let inner = unbox<obj> fv
-
-                    // Apply the SAME key transform the outer record used so
-                    // multi-word field names match across nesting levels.
+                    // resolveField applies keyTransform before calling the
+                    // lookup, so the key here is already in JSON form.
                     let lookup (key: string) : JsonValue option =
-                        let jsonKey = keyTransform key
-
-                        if backend.ContainsKey(inner, jsonKey) then
-                            Some(unbox<JsonValue> (backend.Get(inner, jsonKey)))
+                        if backend.ContainsKey(inner, key) then
+                            Some(unbox<JsonValue> (backend.Get(inner, key)))
                         else
                             None
 
@@ -415,7 +432,8 @@ and tagOfCaseName (caseName: string) : string =
     if caseName.Length = 0 then
         caseName
     else
-        string (System.Char.ToLowerInvariant caseName.[0]) + caseName.[1..]
+        string (System.Char.ToLowerInvariant caseName.[0])
+        + caseName.[1..]
 
 /// Resolve a tagged DU from a key→JsonValue lookup. Used both by the
 /// top-level `Schema.auto` (which only has a lookup) and indirectly via
@@ -445,7 +463,10 @@ and resolveUnionFromLookup
     | Some(JString tag) ->
         let cases = FSharpType.GetUnionCases unionType
 
-        match cases |> Array.tryFind (fun c -> tagOfCaseName c.Name = tag) with
+        match
+            cases
+            |> Array.tryFind (fun c -> tagOfCaseName c.Name = tag)
+        with
         | None ->
             Error [
                 {
@@ -470,10 +491,7 @@ and resolveUnionFromLookup
                         {
                             path = caseInfo.Name
                             message =
-                                sprintf
-                                    "union case %s has a non-record payload (%s); not supported in v1"
-                                    caseInfo.Name
-                                    payloadType.Name
+                                sprintf "union case %s has a non-record payload (%s); not supported in v1" caseInfo.Name payloadType.Name
                         }
                     ]
             | n ->
@@ -481,10 +499,7 @@ and resolveUnionFromLookup
                     {
                         path = caseInfo.Name
                         message =
-                            sprintf
-                                "union case %s has %d positional fields; multi-field cases are not supported in v1"
-                                caseInfo.Name
-                                n
+                            sprintf "union case %s has %d positional fields; multi-field cases are not supported in v1" caseInfo.Name n
                     }
                 ]
     | Some _ ->
@@ -504,11 +519,11 @@ and coerceUnion
     (unionType: System.Type)
     (jsonMap: obj)
     : Result<obj, string> =
+    // resolveField applies keyTransform before calling the lookup, so the
+    // key here is already in JSON form.
     let lookup (key: string) : JsonValue option =
-        let jsonKey = keyTransform key
-
-        if backend.ContainsKey(jsonMap, jsonKey) then
-            Some(unbox<JsonValue> (backend.Get(jsonMap, jsonKey)))
+        if backend.ContainsKey(jsonMap, key) then
+            Some(unbox<JsonValue> (backend.Get(jsonMap, key)))
         else
             None
 
@@ -565,7 +580,11 @@ and resolveField
     (fi: System.Reflection.PropertyInfo)
     (lookup: string -> JsonValue option)
     : Result<obj, FieldError> =
-    let name = fi.Name
+    // Use the case-rule-derived JSON key as the error path so messages
+    // match what the user sees in their JSON, and so the path is consistent
+    // across backends (BEAM lowercases `fi.Name`, Python and JS preserve
+    // PascalCase — we route them all through the same transform).
+    let name = keyTransform fi.Name
     let value = lookup name
 
     if isOptionType fi.PropertyType.FullName then
@@ -587,11 +606,7 @@ invariant: all fields validated, errors accumulated (not fail-fast)
 adr: inline required so Fable resolves typeof<'T> at each call site
 *)
 
-let inline auto<'T>
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (keyTransform: string -> string)
-    : Schema<'T> =
+let inline auto<'T> (backend: IJsonBackend) (registry: CodecRegistry) (keyTransform: string -> string) : Schema<'T> =
     let typ = typeof<'T>
 
     fun (lookup: string -> JsonValue option) ->
@@ -646,28 +661,20 @@ let jsonMapAdapter (backend: IJsonBackend) (map: obj) (key: string) : JsonValue 
 /// registry and the identity key transform — keys in the input are treated
 /// as the F# field names verbatim.
 let inline validateMap<'T> (backend: IJsonBackend) (map: Map<string, string>) : Result<'T, FieldError list> =
-    (auto<'T> backend emptyRegistry identityTransform) (stringMapAdapter map)
+    (auto<'T> backend emptyRegistry lowerFirstTransform) (stringMapAdapter map)
 
 /// Validate from a string map with a custom codec registry.
-let inline validateMapWith<'T>
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (map: Map<string, string>)
-    : Result<'T, FieldError list> =
-    (auto<'T> backend registry identityTransform) (stringMapAdapter map)
+let inline validateMapWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
+    (auto<'T> backend registry lowerFirstTransform) (stringMapAdapter map)
 
 /// Validate from a backend-native JSON map. Uses an empty codec registry and
 /// the identity key transform — JSON keys are treated as F# field names.
 let inline validateJson<'T> (backend: IJsonBackend) (map: obj) : Result<'T, FieldError list> =
-    (auto<'T> backend emptyRegistry identityTransform) (jsonMapAdapter backend map)
+    (auto<'T> backend emptyRegistry lowerFirstTransform) (jsonMapAdapter backend map)
 
 /// Validate from a backend-native JSON map with a custom codec registry.
-let inline validateJsonWith<'T>
-    (backend: IJsonBackend)
-    (registry: CodecRegistry)
-    (map: obj)
-    : Result<'T, FieldError list> =
-    (auto<'T> backend registry identityTransform) (jsonMapAdapter backend map)
+let inline validateJsonWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: obj) : Result<'T, FieldError list> =
+    (auto<'T> backend registry lowerFirstTransform) (jsonMapAdapter backend map)
 
 /// Dump a record to a backend-native JSON map (e.g., for inter-process messaging).
 let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
@@ -675,15 +682,30 @@ let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
     let fields = FSharpType.GetRecordFields typ
     let values = FSharpValue.GetRecordFields(box record)
 
+    // BEAM lowercases F# field names in reflection; Python and JS preserve
+    // PascalCase. Going through Schema's identity transform here would mean
+    // dump produces different keys per backend — confusing and not portable.
+    // Hardcode the canonical-PascalCase round-trip so the dumped map's keys
+    // are stable across all targets.
+    let normalize (n: string) : string =
+        // PascalCase → LowerFirst-ish. Match what BEAM already produces.
+        if n.Length = 0 then
+            n
+        else
+            string (System.Char.ToLowerInvariant n.[0])
+            + n.[1..]
+
     Array.zip fields values
     |> Array.fold
         (fun acc (fi, v) ->
+            let key = normalize fi.Name
+
             if isOptionType fi.PropertyType.FullName then
                 match unbox<obj option> v with
-                | Some inner -> backend.Put(acc, fi.Name, inner)
+                | Some inner -> backend.Put(acc, key, inner)
                 | None -> acc
             else
-                backend.Put(acc, fi.Name, v))
+                backend.Put(acc, key, v))
         (backend.NewMap())
 
 /// Format errors into a human-readable string for LLM feedback.

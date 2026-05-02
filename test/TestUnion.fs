@@ -23,9 +23,15 @@ open Fable.TypedJson.Python.Json
 
 let backend = python
 #else
+#if JS
+open Fable.TypedJson.JS.Json
+
+let backend = js
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 
 // ============================================================================
@@ -101,9 +107,14 @@ let ``test encode tagged union — search case`` () =
     let json = codec.encode value
     let parsed = parseRaw json
 
-    unbox<string> (backend.Get(parsed, "type")) |> equal "search"
-    unbox<string> (backend.Get(parsed, "query")) |> equal "hello"
-    unbox<int> (backend.Get(parsed, "maxResults")) |> equal 5
+    unbox<string> (backend.Get(parsed, "type"))
+    |> equal "search"
+
+    unbox<string> (backend.Get(parsed, "query"))
+    |> equal "hello"
+
+    unbox<int> (backend.Get(parsed, "maxResults"))
+    |> equal 5
 
 [<Fact>]
 let ``test encode tagged union — fieldless case`` () =
@@ -111,7 +122,8 @@ let ``test encode tagged union — fieldless case`` () =
     let json = codec.encode Ping
     let parsed = parseRaw json
 
-    unbox<string> (backend.Get(parsed, "type")) |> equal "ping"
+    unbox<string> (backend.Get(parsed, "type"))
+    |> equal "ping"
 
 [<Fact>]
 let ``test round-trip tagged union — every case`` () =
@@ -139,7 +151,12 @@ type Envelope = { Id: int; Tool: Tool }
 [<Fact>]
 let ``test tagged union as record field — round-trip`` () =
     let codec = auto<Envelope> ()
-    let original = { Id = 42; Tool = Search { Query = "fsharp"; MaxResults = 10 } }
+
+    let original = {
+        Id = 42
+        Tool = Search { Query = "fsharp"; MaxResults = 10 }
+    }
+
     let json = codec.encode original
 
     match codec.decode (parseRaw json) with

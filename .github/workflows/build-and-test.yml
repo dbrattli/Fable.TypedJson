@@ -7,8 +7,33 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.x
+          cache: true
+          cache-dependency-path: 'paket.lock'
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Restore dependencies
+        run: just restore
+
+      - name: Type check (.NET build)
+        run: just check
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [beam, python, js]
 
     steps:
       - uses: actions/checkout@v6
@@ -21,18 +46,27 @@ jobs:
           cache-dependency-path: 'paket.lock'
 
       - name: Setup Erlang/OTP
+        if: matrix.target == 'beam'
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27'
           rebar3-version: '3'
 
       - name: Setup uv (Python)
+        if: matrix.target == 'python'
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: 'uv.lock'
 
+      - name: Setup Node.js
+        if: matrix.target == 'js'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Cache rebar3 dependencies
+        if: matrix.target == 'beam'
         uses: actions/cache@v5
         with:
           path: ~/.cache/rebar3
@@ -45,11 +79,5 @@ jobs:
       - name: Restore dependencies
         run: just restore
 
-      - name: Type check (.NET build)
-        run: just check
-
-      - name: Test (BEAM)
-        run: just test-beam
-
-      - name: Test (Python)
-        run: just test-python
+      - name: Test
+        run: just test-${{ matrix.target }}

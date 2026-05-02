@@ -15,7 +15,11 @@ open Fable.TypedJson.Json
 #if PYTHON
 open Fable.TypedJson.Python.Json
 #else
+#if JS
+open Fable.TypedJson.JS.Json
+#else
 open Fable.TypedJson.Beam.Json
+#endif
 #endif
 
 // ============================================================================
@@ -146,7 +150,10 @@ let private codecs: CodecRegistry = emptyRegistry |> registerAll
 
 [<Fact>]
 let ``test auto with refined types accepts valid record`` () =
-    let codec = autoWith<Account> codecs |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        autoWith<Account> codecs
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"username":"alice","age":30,"contact":"alice@example.com"}"""
 
     match codec.decode map with
@@ -161,7 +168,10 @@ let ``test auto with refined types accepts valid record`` () =
 
 [<Fact>]
 let ``test auto with refined types rejects empty username`` () =
-    let codec = autoWith<Account> codecs |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        autoWith<Account> codecs
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"username":"","age":30,"contact":"alice@example.com"}"""
 
     match codec.decode map with
@@ -174,7 +184,10 @@ let ``test auto with refined types rejects empty username`` () =
 
 [<Fact>]
 let ``test auto with refined types rejects negative age`` () =
-    let codec = autoWith<Account> codecs |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        autoWith<Account> codecs
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"username":"alice","age":-1,"contact":"alice@example.com"}"""
 
     match codec.decode map with
@@ -185,7 +198,10 @@ let ``test auto with refined types rejects negative age`` () =
 
 [<Fact>]
 let ``test auto with refined types rejects malformed email`` () =
-    let codec = autoWith<Account> codecs |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        autoWith<Account> codecs
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"username":"alice","age":30,"contact":"not-an-email"}"""
 
     match codec.decode map with
