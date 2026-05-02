@@ -13,103 +13,87 @@ adr: `Put` is non-mutating -- builds a fresh object via spread so the
 adr: numbers in JS are all double -- `IsInt` uses `Number.isInteger` to
      distinguish whole-valued numbers from fractional ones, matching the
      coercion expectations of the core (`JString "42"` -> `int 42`).
+adr: prefer `Fable.Core.JS` and `Fable.Core.JsInterop` over raw `[<Emit>]`
+     where possible. Only the spread literal (`Put`) and the `null`
+     sentinel still need raw emit -- everything else routes through
+     blessed bindings.
 *)
 
 module Fable.TypedJson.JS.Backend
 
 open Fable.Core
+open Fable.Core.JsInterop
 open Fable.TypedJson.Backend
 
-// JS native type tests via typeof / Number / Array / instanceof.
-[<Emit("typeof $0 === 'string'")>]
-let private isJsString (v: obj) : bool = nativeOnly
-
-[<Emit("typeof $0 === 'number' && Number.isInteger($0)")>]
-let private isJsInt (v: obj) : bool = nativeOnly
-
-[<Emit("typeof $0 === 'number' && !Number.isInteger($0)")>]
-let private isJsFloat (v: obj) : bool = nativeOnly
-
-[<Emit("typeof $0 === 'boolean'")>]
-let private isJsBool (v: obj) : bool = nativeOnly
-
-[<Emit("$0 === null")>]
-let private isJsNull (v: obj) : bool = nativeOnly
-
-[<Emit("Array.isArray($0)")>]
-let private isJsArray (v: obj) : bool = nativeOnly
-
-[<Emit("typeof $0 === 'object' && $0 !== null && !Array.isArray($0)")>]
-let private isJsObject (v: obj) : bool = nativeOnly
-
-[<Emit("{}")>]
-let private jsEmptyObject () : obj = nativeOnly
-
-[<Emit("$1 in $0")>]
-let private jsHasKey (map: obj) (key: string) : bool = nativeOnly
-
-[<Emit("$0[$1]")>]
-let private jsGet (map: obj) (key: string) : obj = nativeOnly
-
+// Object-spread + computed-key insertion isn't expressible in
+// Fable.Core.JsInterop, so this stays as raw emit. Keeping it functional
+// (non-mutating) matches the IJsonBackend.Put contract.
 [<Emit("({...$0, [$1]: $2})")>]
-let private jsPut (map: obj) (key: string) (value: obj) : obj = nativeOnly
+let private jsSpreadPut (map: obj) (key: string) (value: obj) : obj = nativeOnly
 
-[<Emit("JSON.parse($0)")>]
-let private jsParse (json: string) : obj = nativeOnly
-
-[<Emit("JSON.stringify($0)")>]
-let private jsStringify (value: obj) : string = nativeOnly
-
-[<Emit("$0.length")>]
-let private jsArrayLength (arr: obj) : int = nativeOnly
-
-[<Emit("$0[$1]")>]
-let private jsArrayAt (arr: obj) (i: int) : obj = nativeOnly
-
-// F# `obj list` on Fable's JS target is a linked-list structure (not a JS array),
-// which `JSON.stringify` would render as a record-like object instead of a JSON
-// array. Walk to a fresh JS array.
-[<Emit("(() => { const r = []; let xs = $0; while (xs && xs.tail) { r.push(xs.head); xs = xs.tail; } return r; })()")>]
-let private jsArrayFromFSharpList (xs: obj list) : obj = nativeOnly
-
-[<Emit("null")>]
-let private jsNull: obj = nativeOnly
+// `Fable.Core.JS.NumberConstructor` exposes `isNaN` and `isSafeInteger`
+// but not `isInteger` (yet). Bind it directly until upstream catches up.
+[<Emit("Number.isInteger($0)")>]
+let private isInteger (v: obj) : bool = nativeOnly
 
 type private JSBackendImpl() =
     interface IJsonBackend with
-        member _.NewMap() = jsEmptyObject ()
+        // `createEmpty<obj>` lowers to `{}`.
+        member _.NewMap() = createEmpty<obj>
 
-        member _.ContainsKey(map, key) = jsHasKey map key
+        // `key in map` — `JsInterop.jsIn` is the blessed wrapper.
+        member _.ContainsKey(map, key) = jsIn key map
 
-        member _.Get(map, key) = jsGet map key
+        // `JsInterop.(?)` lowers to `map[key]`.
+        member _.Get(map, key) = map?(key)
 
-        member _.Put(map, key, value) = jsPut map key value
+        member _.Put(map, key, value) = jsSpreadPut map key value
 
-        member _.ParseRaw(json) = jsParse json
+        member _.ParseRaw(json) = JS.JSON.parse json
 
-        member _.Stringify(value) = jsStringify value
+        member _.Stringify(value) = JS.JSON.stringify value
 
-        member _.IsString(value) = isJsString value
+        // `JsInterop.jsTypeof` lowers to `typeof v`.
+        member _.IsString(value) = jsTypeof value = "string"
 
-        member _.IsInt(value) = isJsInt value
+        member _.IsInt(value) =
+            jsTypeof value = "number" && isInteger value
 
-        member _.IsFloat(value) = isJsFloat value
+        member _.IsFloat(value) =
+            jsTypeof value = "number" && not (isInteger value)
 
-        member _.IsBool(value) = isJsBool value
+        member _.IsBool(value) = jsTypeof value = "boolean"
 
-        member _.IsNull(value) = isJsNull value
+        // `box value = null` works because Fable lowers F#-side `null` for
+        // an `obj` reference to JS `null`. (Inside an F# function body —
+        // contrast with a `[<Global>]` value binding, where F# `null` is
+        // `undefined`.)
+        member _.IsNull(value) = isNull value
 
-        member _.IsArray(value) = isJsArray value
+        member _.IsArray(value) = JS.Constructors.Array.isArray value
 
-        member _.IsMap(value) = isJsObject value
+        member _.IsMap(value) =
+            jsTypeof value = "object"
+            && not (isNull value)
+            && not (JS.Constructors.Array.isArray value)
 
-        member _.ArrayLength(arr) = jsArrayLength arr
+        // Dynamic property access via `?`. Cast the result through `unbox`
+        // because `?` returns generic `'a` and `length` is `int`.
+        member _.ArrayLength(arr) = unbox<int> arr?length
+        member _.ArrayAt(arr, i) = arr?(i)
 
-        member _.ArrayAt(arr, i) = jsArrayAt arr i
+        // F# `obj list` on Fable's JS target is a linked-list structure (not
+        // a JS array), which `JSON.stringify` would render as a record-like
+        // object instead of a JSON array. Walk to a fresh JS array.
+        member _.BuildArray(items) =
+            // `List.toArray` produces a `obj[]` whose JS shape is a real
+            // `Array` — exactly what JSON.stringify emits as a JSON array.
+            box (List.toArray items)
 
-        member _.BuildArray(items) = jsArrayFromFSharpList items
-
-        member _.Null = jsNull
+        // F# `null` for the `obj` type lowers to JS `null` (not `undefined`)
+        // on Fable's JavaScript backend — exactly the JSON-null sentinel
+        // `JSON.stringify` emits as JSON null.
+        member _.Null = null
 
 /// Singleton JSBackend instance -- pass to TypedJson.auto / Schema.validateJson.
 let js: IJsonBackend = JSBackendImpl() :> IJsonBackend
