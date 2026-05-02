@@ -52,9 +52,12 @@ format-check:
 setup:
     dotnet tool restore
 
-# Setup tooling + restore Paket deps + sync uv venv
-restore: setup
+# Setup tooling + restore Paket deps (no uv — see `restore` for the full set)
+restore-net: setup
     dotnet paket install
+
+# Setup tooling + restore Paket deps + sync uv venv (Python target only)
+restore: restore-net
     uv sync
 
 # Build and check

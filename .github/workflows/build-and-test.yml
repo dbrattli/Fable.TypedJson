@@ -23,7 +23,7 @@ jobs:
         uses: extractions/setup-just@v4
 
       - name: Restore dependencies
-        run: just restore
+        run: just restore-net
 
       - name: Type check (.NET build)
         run: just check
@@ -77,7 +77,7 @@ jobs:
         uses: extractions/setup-just@v4
 
       - name: Restore dependencies
-        run: just restore
+        run: just ${{ matrix.target == 'python' && 'restore' || 'restore-net' }}
 
       - name: Test
         run: just test-${{ matrix.target }}
