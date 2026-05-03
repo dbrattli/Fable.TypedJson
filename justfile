@@ -75,11 +75,13 @@ pack:
     BEAM_VERSION=$(get_version src/Fable.TypedJson.Beam/CHANGELOG.md)
     PYTHON_VERSION=$(get_version src/Fable.TypedJson.Python/CHANGELOG.md)
     JS_VERSION=$(get_version src/Fable.TypedJson.JS/CHANGELOG.md)
+    DOTNET_VERSION=$(get_version src/Fable.TypedJson.DotNet/CHANGELOG.md)
     rm -rf ./nupkgs
     dotnet pack src/Fable.TypedJson        -c Release -o ./nupkgs -p:PackageVersion=$CORE_VERSION   -p:InformationalVersion=$CORE_VERSION
     dotnet pack src/Fable.TypedJson.Beam   -c Release -o ./nupkgs -p:PackageVersion=$BEAM_VERSION   -p:InformationalVersion=$BEAM_VERSION
     dotnet pack src/Fable.TypedJson.Python -c Release -o ./nupkgs -p:PackageVersion=$PYTHON_VERSION -p:InformationalVersion=$PYTHON_VERSION
     dotnet pack src/Fable.TypedJson.JS     -c Release -o ./nupkgs -p:PackageVersion=$JS_VERSION     -p:InformationalVersion=$JS_VERSION
+    dotnet pack src/Fable.TypedJson.DotNet -c Release -o ./nupkgs -p:PackageVersion=$DOTNET_VERSION -p:InformationalVersion=$DOTNET_VERSION
 
 # Pack and push every package to NuGet (CI-only — needs $NUGET_KEY)
 release: pack
