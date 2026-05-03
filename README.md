@@ -1,6 +1,6 @@
 # Fable.TypedJson
 
-Pydantic-flavored JSON validation and serialization for F# records, designed for Fable's multi-backend output. **BEAM (Erlang), Python, and JavaScript work today**; a .NET shim is a small addition away on top of the same `IJsonBackend` abstraction.
+Pydantic-flavored JSON validation and serialization for F# records, designed for Fable's multi-backend output. **BEAM (Erlang), Python, JavaScript, and .NET all work today**, sharing a single `IJsonBackend` abstraction.
 
 The headline idea: **validation lives with the type**. Define a wrapper DU, ship a `JsonCodec` static member on it, and `auto<'T>()` discovers it and dispatches through it — the F# answer to Pydantic's "custom types with embedded validators."
 
@@ -11,8 +11,8 @@ open Fable.TypedJson.Schema      // IJsonCodec, emptyRegistry, register, formatE
 open Fable.TypedJson.Refined     // NonEmptyString, PositiveInt, Email, Url, Uuid
 open Fable.TypedJson.Json        // CaseRules, withModel, alias
 
-// Pick the backend convenience module for your Fable target.
-open Fable.TypedJson.Beam.Json   // or  Fable.TypedJson.Python.Json  or  Fable.TypedJson.JS.Json
+// Pick the backend convenience module for your target.
+open Fable.TypedJson.Beam.Json   // or .Python.Json / .JS.Json (Fable targets) / .DotNet.Json (native CLR)
 
 // We don't `open Fable.TypedJson.Codec`: its `int`, `string`, `bool` codec values
 // would shadow F#'s primitive type conversions. Use the qualified `Codec.` prefix.
@@ -141,7 +141,7 @@ inputs in Pydantic.
 - **Pipeline combinators**: `Codec.gt`, `Codec.lt`, `Codec.ge`, `Codec.le`, `Codec.minLength`, `Codec.maxLength`, `Codec.nonEmpty`, `Codec.pattern`, `Codec.refine`, `Codec.map`, `Codec.describe`. Apply to any `IJsonCodec<'T>`.
 - **Reflection-driven `auto<'T>`**: walks F# record fields, recurses into nested records, handles `'T list` / `'T[]` / `'T option`, and looks up custom-typed fields via the registry. No per-record boilerplate.
 - **Bundled refined types**: `NonEmptyString`, `PositiveInt`, `NonNegativeInt`, `Email`, `Url`, `Uuid` — register them all in one call (`Refined.registerAll`) or pick à la carte.
-- **Multi-backend by design**: an `IJsonBackend` abstraction in the core, with concrete shims for BEAM (jsx), Python (`json`), and JavaScript (`JSON.parse` / `JSON.stringify`). A .NET shim is a small addition.
+- **Multi-backend by design**: an `IJsonBackend` abstraction in the core, with concrete shims for BEAM (jsx), Python (`json`), JavaScript (`JSON.parse` / `JSON.stringify`), and .NET (`System.Text.Json`).
 - **Errors accumulate**: a single `Error` result lists every per-field problem with a `path`, not just the first.
 - **String-coerced primitives**: `JString "42"` decodes as `int 42`. Useful for LLM tool calls and shell input where everything arrives as strings.
 - **JSON Schema generation**: `jsonSchemaOf<'T>` / `jsonSchemaOfCodec codec` walks reflection + the registry to produce a JSON Schema doc, with combinator constraints (`minLength`, `pattern`, `exclusiveMinimum`, ...) folded in.
@@ -222,7 +222,7 @@ Thoth is the established F#/Fable JSON library and the closest neighbor. Both le
 | Constraint composition | Compose decoders with `andThen` / custom code                          | Pipeline combinators (`gt`, `lt`, `minLength`, ...) — direct Pydantic Annotated equivalent |
 | Error mode             | Fail-fast (first error)                                                | Accumulating (all per-field errors at once)                                                |
 | JSON Schema generation | Not built in                                                           | `jsonSchemaOf<'T>` walks reflection + registry                                             |
-| Backends               | JS, Python (Thoth.Json 10+), .NET                                      | BEAM, Python, JS today; .NET planned                                                       |
+| Backends               | JS, Python (Thoth.Json 10+), .NET                                      | BEAM, Python, JS, .NET                                                                     |
 | Coercion               | Strict (types must match)                                              | `"42" → int 42` etc. (a Strict mode is planned)                                            |
 | Maturity               | Years of production use, large user base                               | New                                                                                        |
 
@@ -238,7 +238,7 @@ SimpleJson sits one rung lower: it parses JSON into a recursive `Json` AST and l
 | Validation rules       | Whatever you write after parsing                                               | Encoded in the type via wrapper DUs and combinators |
 | Errors                 | JSON parse errors only                                                         | Per-field validation errors with paths              |
 | JSON Schema generation | Not built in                                                                   | Yes (constraint-aware)                              |
-| Backends               | JS, .NET                                                                       | BEAM, Python, JS today; .NET planned                |
+| Backends               | JS, .NET                                                                       | BEAM, Python, JS, .NET                              |
 
 If you want a low-level JSON AST to inspect or you need maximum control over decoding, use SimpleJson. If you want type-driven validation with Pydantic-like ergonomics, use this.
 
@@ -252,8 +252,8 @@ Two design axes, each independent:
    call or a dict from elsewhere — see [Schema vs TypedJson](#schema-vs-typedjson--validate-dicts-and-maps-too) above.
 2. **Backend-agnostic core vs per-target shims** (horizontal) — `IJsonBackend`
    abstracts the actual JSON parser and the native map type. Concrete shims
-   ship for BEAM (jsx), Python (`json`), and JavaScript (`JSON.parse` /
-   `JSON.stringify`); a .NET shim is a similarly sized addition.
+   ship for BEAM (jsx), Python (`json`), JavaScript (`JSON.parse` /
+   `JSON.stringify`), and .NET (`System.Text.Json`).
 
 ```text
 Fable.TypedJson (core, no backend deps)
@@ -276,6 +276,10 @@ Fable.TypedJson.Python (Python shim)
 Fable.TypedJson.JS (JavaScript shim)
 ├── Backend        JSBackend implementing IJsonBackend (JSON.parse / JSON.stringify, native object/array)
 └── Json           same convenience surface as the BEAM shim, with js pre-applied
+
+Fable.TypedJson.DotNet (.NET shim — runs natively on the CLR, no Fable transpile)
+├── Backend        DotNetBackend implementing IJsonBackend (System.Text.Json: JsonDocument + Utf8JsonWriter)
+└── Json           same convenience surface, with dotnet pre-applied
 ```
 
 `IJsonBackend` exposes both map operations (`NewMap`, `Get`, `Put`, `ContainsKey`, `Parse`/`Stringify`) and runtime type tests (`IsString`, `IsInt`, `IsFloat`, `IsBool`, `IsNull`, `IsArray`, `IsMap`) so the schema layer can dispatch correctly across backends without depending on `[<Erase>]` JsonValue patterns surviving codegen.
@@ -286,13 +290,14 @@ Fable.TypedJson.JS (JavaScript shim)
 - `src/Fable.TypedJson.Beam/` — BEAM backend shim
 - `src/Fable.TypedJson.Python/` — Python backend shim
 - `src/Fable.TypedJson.JS/` — JavaScript backend shim
-- `test/` — F# test sources, transpiled to Erlang (BEAM) or Python via `#if PYTHON` conditional. pytest picks up the Fable-emitted `test_*.py` files in `build/python_test/` directly — no extra harness needed. The JS shim is currently library-only — a Node test runner is not yet wired up.
+- `src/Fable.TypedJson.DotNet/` — .NET backend shim (System.Text.Json, runs natively on the CLR)
+- `test/` — F# test sources. Compile to Erlang (`#if !DOTNET && !PYTHON && !JS` → BEAM), Python (`#if PYTHON`), JavaScript (`#if JS`), or run natively on the CLR (`#if DOTNET`, no Fable transpile). The .NET path uses a reflection-based runner in `Main.fs` that walks the assembly for `[<Fact>]`-tagged statics; pytest picks up the Fable-emitted `test_*.py` files directly.
 
 ## Prerequisites
 
 ### Using the library (NuGet consumer)
 
-The published packages target **netstandard2.0**, so any .NET runtime that supports netstandard2.0 works — .NET 6 / 7 / 8 / 9 / 10, .NET Core 2.0+, .NET Framework 4.6.1+, Mono 5.4+. Plus the Fable toolchain in your project for the actual transpilation to BEAM / Python / JS / .NET.
+The core and the Fable shims (Beam, Python, JS) target **netstandard2.0**, so any .NET runtime that supports netstandard2.0 works — .NET 6 / 7 / 8 / 9 / 10, .NET Core 2.0+, .NET Framework 4.6.1+, Mono 5.4+. The .NET shim (`Fable.TypedJson.DotNet`) targets **net8.0** because it runs natively on the CLR (no Fable transpile) and pulls in `System.Text.Json`. For the Fable shims, you also need the Fable toolchain to transpile to BEAM / Python / JS.
 
 ### Building this repo from source
 
@@ -307,26 +312,29 @@ The published packages target **netstandard2.0**, so any .NET runtime that suppo
 just restore        # dotnet tools (Fable, Paket, Fantomas) + Paket deps + uv venv
 ```
 
-Paket deps are split into four groups (`Main`, `Beam`, `Python`, `JS`) so each backend project pulls in only what it needs — see `paket.dependencies`.
+Paket deps are split into five groups (`Main`, `Beam`, `Python`, `JS`, `DotNet`) so each backend project pulls in only what it needs — see `paket.dependencies`.
 
 ## Build
 
 ```sh
-just build          # transpile core + Beam to Erlang, transpile core + Python to Python
+just build          # transpile core + Beam to Erlang, core + Python to Python, core + JS to JavaScript
 just build-beam     # only the BEAM pipeline (Fable + rebar3)
 just build-python   # only the Python pipeline (Fable, no further compile step)
-just check          # type-check all three projects via `dotnet build`
+just build-js       # only the JavaScript pipeline (Fable, no further compile step)
+just check          # type-check all five projects via `dotnet build` (DotNet is the only one that also runs natively)
 ```
 
 ## Test
 
 ```sh
-just test           # run both backend test suites (143 tests each, identical sources)
+just test           # run all four backend test suites from the same F# sources
 just test-beam      # transpile tests to Erlang, run via test_runner.erl on BEAM
 just test-python    # transpile tests to Python, run via pytest
+just test-js        # transpile tests to JavaScript, run via the Node runner
+just test-dotnet    # build tests for net10.0 with FableTarget=dotnet, run the reflection-based runner natively
 ```
 
-The same F# test sources compile to both targets via `#if PYTHON` blocks that swap a few backend-specific imports. `Fable.Core.Testing.Assert.AreEqual` doesn't throw on Fable BEAM, so the test helpers in `test/Testing.fs` raise explicitly on inequality — making both runners report real failures.
+The same F# test sources compile to all four targets via `#if PYTHON | JS | DOTNET` blocks that swap a few backend-specific imports. `Fable.Core.Testing.Assert.AreEqual` doesn't throw on Fable BEAM, so the test helpers in `test/Testing.fs` raise explicitly on inequality — making every runner report real failures.
 
 ## Format
 

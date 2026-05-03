@@ -24,9 +24,15 @@ open Fable.TypedJson.JS.Json
 
 let backend = js
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 #endif
 
@@ -41,23 +47,20 @@ let ``test schema of simple record`` () =
     let json = jsonSchemaOf<Simple> emptyRegistry CaseRules.SnakeCase
     let parsed = parseRaw json
 
-    unbox<string> (backend.Get(parsed, "type"))
-    |> equal "object"
-
-    unbox<string> (backend.Get(parsed, "title"))
-    |> equal "Simple"
+    getString backend parsed "type" |> equal "object"
+    getString backend parsed "title" |> equal "Simple"
 
     let props = backend.Get(parsed, "properties")
     backend.IsMap props |> equal true
 
     let nameSchema = backend.Get(props, "name")
 
-    unbox<string> (backend.Get(nameSchema, "type"))
+    getString backend nameSchema "type"
     |> equal "string"
 
     let ageSchema = backend.Get(props, "age")
 
-    unbox<string> (backend.Get(ageSchema, "type"))
+    getString backend ageSchema "type"
     |> equal "integer"
 
     // Required: both fields, since neither is optional.
@@ -75,8 +78,7 @@ let ``test schema omits optional field from required`` () =
     let required = backend.Get(parsed, "required")
     backend.ArrayLength required |> equal 1
 
-    unbox<string> (backend.ArrayAt(required, 0))
-    |> equal "name"
+    arrayAtString backend required 0 |> equal "name"
 
     // Email field still present in properties, just not required.
     let props = backend.Get(parsed, "properties")
@@ -98,16 +100,16 @@ let ``test schema of nested record`` () =
     let props = backend.Get(parsed, "properties")
     let addressSchema = backend.Get(props, "address")
 
-    unbox<string> (backend.Get(addressSchema, "type"))
+    getString backend addressSchema "type"
     |> equal "object"
 
-    unbox<string> (backend.Get(addressSchema, "title"))
+    getString backend addressSchema "title"
     |> equal "Address"
 
     let innerProps = backend.Get(addressSchema, "properties")
     let cityField = backend.Get(innerProps, "city")
 
-    unbox<string> (backend.Get(cityField, "type"))
+    getString backend cityField "type"
     |> equal "string"
 
 // ============================================================================
@@ -124,13 +126,11 @@ let ``test schema of list field`` () =
     let props = backend.Get(parsed, "properties")
     let tagsSchema = backend.Get(props, "tags")
 
-    unbox<string> (backend.Get(tagsSchema, "type"))
+    getString backend tagsSchema "type"
     |> equal "array"
 
     let items = backend.Get(tagsSchema, "items")
-
-    unbox<string> (backend.Get(items, "type"))
-    |> equal "string"
+    getString backend items "type" |> equal "string"
 
 // ============================================================================
 // CaseRules applied to property keys
@@ -185,16 +185,16 @@ let ``test schema of refined type fields includes constraints`` () =
     // NonEmptyString carries `minLength: 1` (from `Codec.nonEmpty`).
     let usernameSchema = backend.Get(props, "username")
 
-    unbox<string> (backend.Get(usernameSchema, "type"))
+    getString backend usernameSchema "type"
     |> equal "string"
 
-    unbox<int> (backend.Get(usernameSchema, "minLength"))
+    getInt backend usernameSchema "minLength"
     |> equal 1
 
     // Email carries `pattern` (from `Codec.pattern`).
     let emailSchema = backend.Get(props, "email")
 
-    unbox<string> (backend.Get(emailSchema, "type"))
+    getString backend emailSchema "type"
     |> equal "string"
 
     backend.ContainsKey(emailSchema, "pattern")

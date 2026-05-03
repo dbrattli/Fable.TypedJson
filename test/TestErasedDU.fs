@@ -91,8 +91,14 @@ let ``test erased DU in Map missing key`` () =
 
 // ============================================================================
 // Simulating jsx.decode output: unbox raw BEAM values to erased DU
+//
+// These tests assert Fable-specific erasure semantics: `unbox<JsonValue>
+// (box "hello")` works because Fable erases JsonValue and the boxed string
+// IS the JsonValue at runtime. The CLR doesn't erase, so the cast fails
+// with InvalidCastException — skip on the .NET target.
 // ============================================================================
 
+#if !DOTNET
 [<Fact>]
 let ``test unbox string to erased DU`` () =
     let raw: obj = box "hello"
@@ -128,3 +134,4 @@ let ``test unbox bool to erased DU`` () =
     match v with
     | JBool b -> b |> equal true
     | _ -> equal "JBool" "other"
+#endif

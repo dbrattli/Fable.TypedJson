@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [beam, python, js]
+        target: [beam, python, js, dotnet]
 
     steps:
       - uses: actions/checkout@v6

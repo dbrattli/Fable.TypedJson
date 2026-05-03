@@ -22,9 +22,15 @@ open Fable.TypedJson.JS.Json
 
 let backend = js
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 #endif
 

@@ -274,12 +274,12 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
             if isNull v then
                 v
             elif isOptionType t.FullName then
-                match unbox<obj option> v with
+                match extractOption v with
                 | Some inner -> transformValue rules (getGenericInnerType t) inner
                 | None -> backend.Null
             elif isFSharpListType t.FullName then
                 let elementType = getGenericInnerType t
-                let xs = unbox<obj list> v
+                let xs = extractList v
 
                 xs
                 |> List.map (fun item -> transformValue rules elementType item)
@@ -310,7 +310,7 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                         let jsonKey = resolveKey aliases rules fi.Name
 
                         if isOptionType fi.PropertyType.FullName then
-                            match unbox<obj option> fv with
+                            match extractOption fv with
                             | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
                             | None -> None
                         else
@@ -360,7 +360,7 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                                 let jsonKey = resolveKey aliases rules fi.Name
 
                                 if isOptionType fi.PropertyType.FullName then
-                                    match unbox<obj option> fv with
+                                    match extractOption fv with
                                     | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
                                     | None -> None
                                 else
@@ -390,7 +390,7 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                         let jsonKey = resolveKey aliases rules fi.Name
 
                         if isOptionType fi.PropertyType.FullName then
-                            match unbox<obj option> v with
+                            match extractOption v with
                             | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
                             | None -> None
                         else

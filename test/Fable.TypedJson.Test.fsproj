@@ -7,21 +7,26 @@
     <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
     <LangVersion>preview</LangVersion>
     <OutputType>Exe</OutputType>
-    <DefineConstants>FABLE_COMPILER</DefineConstants>
-    <!-- Set FableTarget=python|js from the command line to switch the
-         backend reference and activate the matching `#if PYTHON|JS` block. -->
+    <!-- Set FableTarget=python|js|dotnet from the command line to switch
+         the backend reference and activate the matching `#if PYTHON|JS|DOTNET`
+         block. The dotnet target compiles for native CLR execution (no Fable
+         transpile step) so it drops FABLE_COMPILER. -->
     <FableTarget Condition="'$(FableTarget)' == ''">beam</FableTarget>
+    <DefineConstants Condition="'$(FableTarget)' != 'dotnet'">FABLE_COMPILER</DefineConstants>
     <DefineConstants Condition="'$(FableTarget)' == 'python'">PYTHON;$(DefineConstants)</DefineConstants>
     <DefineConstants Condition="'$(FableTarget)' == 'js'">JS;$(DefineConstants)</DefineConstants>
+    <DefineConstants Condition="'$(FableTarget)' == 'dotnet'">DOTNET</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
     <ProjectReference Include="../src/Fable.TypedJson.Beam/Fable.TypedJson.Beam.fsproj"
-                      Condition="'$(FableTarget)' != 'python' AND '$(FableTarget)' != 'js'" />
+                      Condition="'$(FableTarget)' != 'python' AND '$(FableTarget)' != 'js' AND '$(FableTarget)' != 'dotnet'" />
     <ProjectReference Include="../src/Fable.TypedJson.Python/Fable.TypedJson.Python.fsproj"
                       Condition="'$(FableTarget)' == 'python'" />
     <ProjectReference Include="../src/Fable.TypedJson.JS/Fable.TypedJson.JS.fsproj"
                       Condition="'$(FableTarget)' == 'js'" />
+    <ProjectReference Include="../src/Fable.TypedJson.DotNet/Fable.TypedJson.DotNet.fsproj"
+                      Condition="'$(FableTarget)' == 'dotnet'" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Testing.fs" />

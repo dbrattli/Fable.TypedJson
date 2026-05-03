@@ -180,6 +180,86 @@ let isOptionType (fullName: string) : bool =
 let isFSharpListType (fullName: string) : bool =
     fullName.StartsWith("Microsoft.FSharp.Collections.FSharpList")
 
+(**
+## Variance helpers — `extractOption` / `extractList`
+
+Fable backends compile F# generics with type erasure, so `unbox<obj option>
+(box (Some "x"))` round-trips by runtime identity. The CLR keeps `'T option`
+generic-invariant, so the same `unbox` raises `InvalidCastException` on the
+.NET shim. These helpers go through `FSharpValue.GetUnionFields`, which is
+provided uniformly by both Fable's reflection and the CLR.
+
+assumption: `Option<'T>` Tag 1 = `Some`, Tag 0 = `None`; `List<'T>` Tag 1
+            = `Cons`, Tag 0 = `Empty`. Both are stable parts of the F#
+            runtime contract.
+*)
+
+#if FABLE_COMPILER
+let inline extractOption (v: obj) : obj option = unbox<obj option> v
+
+let inline extractList (v: obj) : obj list = unbox<obj list> v
+
+/// Build an `'innerType option` from an inner value. On Fable this is just
+/// `box (Some v)` because erasure makes all option cells share a runtime
+/// representation; on the CLR we need to construct the typed union case.
+let inline buildOption (_innerType: System.Type) (v: obj) : obj = box (Some v)
+
+/// Build a `'elementType list` from an `obj list`. Same erasure rationale
+/// as `buildOption`.
+let inline buildList (_elementType: System.Type) (xs: obj list) : obj = box xs
+#else
+let extractOption (v: obj) : obj option =
+    if isNull v then
+        None
+    else
+        let case, fields = FSharpValue.GetUnionFields(v, v.GetType())
+
+        if case.Tag = 1 then Some fields.[0] else None
+
+let extractList (v: obj) : obj list =
+    let typ = v.GetType()
+    let mutable current = v
+    let mutable acc: obj list = []
+    let mutable finished = false
+
+    while not finished do
+        let case, fields = FSharpValue.GetUnionFields(current, typ)
+        // FSharpList: Empty has Tag 0 (Nil), Cons has Tag 1 (head :: tail).
+        if case.Tag = 1 then
+            acc <- fields.[0] :: acc
+            current <- fields.[1]
+        else
+            finished <- true
+
+    List.rev acc
+
+/// Build an `'innerType option` by reflecting the option's `Some` case for
+/// the target generic. `Option<'T>` is invariant on the CLR, so a plain
+/// `box (Some v)` produces `Option<obj>` and assigning it to a typed
+/// record field via reflection raises `ArgumentException`. Fable erases
+/// the generic so its `box (Some v)` is enough.
+let buildOption (innerType: System.Type) (v: obj) : obj =
+    let optType = typedefof<_ option>.MakeGenericType([| innerType |])
+    let cases = FSharpType.GetUnionCases(optType)
+    let someCase = cases |> Array.find (fun c -> c.Tag = 1)
+    FSharpValue.MakeUnion(someCase, [| v |])
+
+/// Build a `'elementType list` by walking `xs` and constructing a chain of
+/// typed `Cons` cells terminating in the typed `Empty`. Same invariance
+/// rationale as `buildOption`.
+let buildList (elementType: System.Type) (xs: obj list) : obj =
+    let listType = typedefof<_ list>.MakeGenericType([| elementType |])
+    let cases = FSharpType.GetUnionCases(listType)
+    let emptyCase = cases |> Array.find (fun c -> c.Tag = 0)
+    let consCase = cases |> Array.find (fun c -> c.Tag = 1)
+    let mutable acc = FSharpValue.MakeUnion(emptyCase, [||])
+
+    for x in List.rev xs do
+        acc <- FSharpValue.MakeUnion(consCase, [| x; acc |])
+
+    acc
+#endif
+
 let getOptionInnerFullName (fi: System.Reflection.PropertyInfo) : string =
     fi.PropertyType.GenericTypeArguments.[0].FullName
 
@@ -294,7 +374,17 @@ let rec coerce
                 else
                     Error(sprintf "expected JSON object for %s" targetType.Name)
 
-            // 3. Tagged discriminated union: dispatch on a "type" key.
+            // 3. F# list (`'T list`). MUST come before the `IsUnion` check —
+            //    `FSharpList<'T>` is itself a DU (Cons | Nil), so on the
+            //    CLR, `IsUnion` returns true for it and would mis-route to
+            //    the tagged-union path. Fable backends happen to skip this
+            //    misclassification because their reflection treats lists
+            //    as a primitive sequence type.
+            elif isFSharpListType targetFullName then
+                let elementType = getGenericInnerType targetType
+                coerceList backend registry keyTransform elementType fv
+
+            // 4. Tagged discriminated union: dispatch on a "type" key.
             //    Single-record-field cases flatten the payload into the same
             //    object (Pydantic style); fieldless cases just have the tag.
             //    Multi-positional-field cases are not supported in v1.
@@ -303,11 +393,6 @@ let rec coerce
                     coerceUnion backend registry keyTransform targetType (unbox<obj> fv)
                 else
                     Error(sprintf "expected JSON object for %s" targetType.Name)
-
-            // 4. F# list (`'T list`).
-            elif isFSharpListType targetFullName then
-                let elementType = getGenericInnerType targetType
-                coerceList backend registry keyTransform elementType fv
 
             // 5. .NET array (`'T[]`).
             elif targetType.IsArray then
@@ -370,10 +455,11 @@ and coerceList
     (elementType: System.Type)
     (fv: JsonValue)
     : Result<obj, string> =
-    // Fable erases generics at runtime, so `obj list` and `'T list` share
-    // representation. Box and let the consumer pattern-match.
+    // Build a typed `'elementType list` so the boxed result can be assigned
+    // to a record field via reflection. Fable erases generics so the helper
+    // is just `box xs`; on the CLR it constructs the typed union cells.
     match coerceElements backend registry keyTransform elementType fv with
-    | Ok xs -> Ok(box xs)
+    | Ok xs -> Ok(buildList elementType xs)
     | Error msg -> Error msg
 
 and coerceArray
@@ -546,7 +632,7 @@ and resolveOptionalField
         let innerType = getGenericInnerType fi.PropertyType
 
         match coerce backend registry keyTransform innerType fv with
-        | Ok v -> Ok(box (Some v))
+        | Ok v -> Ok(buildOption innerType v)
         | Error msg -> Error { path = name; message = msg }
 
 and resolveRequiredField
@@ -701,7 +787,7 @@ let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
             let key = normalize fi.Name
 
             if isOptionType fi.PropertyType.FullName then
-                match unbox<obj option> v with
+                match extractOption v with
                 | Some inner -> backend.Put(acc, key, inner)
                 | None -> acc
             else
