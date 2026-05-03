@@ -97,9 +97,11 @@ let codec =
 Internally there are two layers, and you can stop at the bottom one:
 
 - **`Schema`** — format-agnostic. A `Schema<'T>` is just a function from a
-  `string -> JsonValue option` lookup to `Result<'T, FieldError list>`. It
+  `string -> obj option` lookup to `Result<'T, FieldError list>`. It
   walks the F# record's reflection, applies the registered codecs, and
-  accumulates errors. It doesn't know anything about JSON.
+  accumulates errors. It doesn't know anything about JSON; the lookup
+  hands back native values (Erlang binary, Python `str`, JS string, …)
+  and the schema dispatches via the backend's `IsX` / `AsX` methods.
 - **`TypedJson`** — JSON-specific shell on top: adds `CaseRules`, the
   encode side, `alias`, `withModel`, and the `Encode.toJson` / `parseRaw`
   plumbing.
@@ -143,7 +145,7 @@ inputs in Pydantic.
 - **Bundled refined types**: `NonEmptyString`, `PositiveInt`, `NonNegativeInt`, `Email`, `Url`, `Uuid` — register them all in one call (`Refined.registerAll`) or pick à la carte.
 - **Multi-backend by design**: an `IJsonBackend` abstraction in the core, with concrete shims for BEAM (jsx), Python (`json`), JavaScript (`JSON.parse` / `JSON.stringify`), and .NET (`System.Text.Json`).
 - **Errors accumulate**: a single `Error` result lists every per-field problem with a `path`, not just the first.
-- **String-coerced primitives**: `JString "42"` decodes as `int 42`. Useful for LLM tool calls and shell input where everything arrives as strings.
+- **String-coerced primitives**: a JSON `"42"` decodes as `int 42`. Useful for LLM tool calls and shell input where everything arrives as strings.
 - **JSON Schema generation**: `jsonSchemaOf<'T>` / `jsonSchemaOfCodec codec` walks reflection + the registry to produce a JSON Schema doc, with combinator constraints (`minLength`, `pattern`, `exclusiveMinimum`, ...) folded in.
 - **Cross-field validators**: `withModel (fun r -> ...)` for invariants that span fields.
 - **Field aliases**: `alias "FieldName" "json_key"` overrides the JSON-key derivation per field. Reflected in decode, encode, and the generated schema.
@@ -257,7 +259,7 @@ Two design axes, each independent:
 
 ```text
 Fable.TypedJson (core, no backend deps)
-├── Backend        IJsonBackend interface (Parse, Stringify, Get, Put, IsX, ArrayLength, ...)
+├── Backend        IJsonBackend interface — map operations, IsX type tests, AsX accessors
 ├── Schema         format-agnostic validation: coerce, resolveField, auto, registry, refined
 ├── Codec          IJsonCodec primitives + pipeline combinators (gt, lt, minLength, ...)
 ├── Refined        bundled refined types (NonEmptyString, PositiveInt, Email, Url, Uuid)
@@ -282,7 +284,11 @@ Fable.TypedJson.DotNet (.NET shim — runs natively on the CLR, no Fable transpi
 └── Json           same convenience surface, with dotnet pre-applied
 ```
 
-`IJsonBackend` exposes both map operations (`NewMap`, `Get`, `Put`, `ContainsKey`, `Parse`/`Stringify`) and runtime type tests (`IsString`, `IsInt`, `IsFloat`, `IsBool`, `IsNull`, `IsArray`, `IsMap`) so the schema layer can dispatch correctly across backends without depending on `[<Erase>]` JsonValue patterns surviving codegen.
+`IJsonBackend` exposes three groups of operations:
+
+- **Map ops:** `NewMap`, `Get`, `Put`, `ContainsKey`, `ParseRaw`, `Stringify`, `Null`.
+- **Type tests:** `IsString` / `IsInt` / `IsFloat` / `IsBool` / `IsNull` / `IsArray` / `IsMap`.
+- **Typed accessors:** `AsString` / `AsInt` / `AsFloat` / `AsBool` — paired with the type tests so the schema can dispatch directly on the backend's native shape (Erlang binary, Python `str`, JS `string`, or a CLR `JsonValue` case) without going through a shared `[<Erase>]` DU pattern. The `JsonValue` DU is reserved for the user-facing `IJsonCodec` API; the internal hot path operates entirely on `obj` + the backend's accessor pair.
 
 ## Layout
 
@@ -297,7 +303,7 @@ Fable.TypedJson.DotNet (.NET shim — runs natively on the CLR, no Fable transpi
 
 ### Using the library (NuGet consumer)
 
-The core and the Fable shims (Beam, Python, JS) target **netstandard2.0**, so any .NET runtime that supports netstandard2.0 works — .NET 6 / 7 / 8 / 9 / 10, .NET Core 2.0+, .NET Framework 4.6.1+, Mono 5.4+. The .NET shim (`Fable.TypedJson.DotNet`) targets **net8.0** because it runs natively on the CLR (no Fable transpile) and pulls in `System.Text.Json`. For the Fable shims, you also need the Fable toolchain to transpile to BEAM / Python / JS.
+The core and the Fable shims (Beam, Python, JS) target **netstandard2.0**, so any .NET runtime that supports netstandard2.0 works — .NET 6 / 7 / 8 / 9 / 10, .NET Core 2.0+, .NET Framework 4.6.1+, Mono 5.4+. The .NET shim (`Fable.TypedJson.DotNet`) targets **net10.0** because it runs natively on the CLR (no Fable transpile) and pulls in `System.Text.Json`. For the Fable shims, you also need the Fable toolchain to transpile to BEAM / Python / JS.
 
 ### Building this repo from source
 

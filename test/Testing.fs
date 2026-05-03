@@ -5,19 +5,17 @@ Cross-backend test helpers. `equal` raises when expected ≠ actual so that
 both BEAM (whose `Fable.Core.Testing.Assert.AreEqual` silently returns a
 bool) and Python's pytest see real failures.
 
-The `getString`/`getInt`/`getFloat`/`getBool` helpers route through
-`unbox<JsonValue>` + pattern match. On Fable backends `JsonValue` is
-`[<Erase>]` so the match compiles to a native type guard (zero cost); on
-the .NET backend `JsonValue` is a real DU and the match dispatches the
-DU case. Both paths give a portable way to extract a typed primitive
-from `backend.Get` / `backend.ArrayAt` without assuming the value's
-runtime shape.
+The `getString`/`getInt`/`getFloat`/`getBool` helpers go through
+`IJsonBackend.IsX` / `AsX` so they work on raw native values returned by
+`Get` (Erlang binary, Python str, JS string, .NET `JsonValue` case)
+without assuming a particular wrapping. This mirrors the production
+schema layer, which switched off pattern-matching `JsonValue` for the
+same portability reason.
 *)
 
 module Fable.TypedJson.Testing
 
 open Fable.TypedJson.Backend
-open Fable.TypedJson.Schema
 
 type FactAttribute() =
     inherit System.Attribute()
@@ -35,28 +33,39 @@ let inline notEqual expected actual : unit =
 // ----------------------------------------------------------------------------
 
 let getString (backend: IJsonBackend) (map: obj) (key: string) : string =
-    match unbox<JsonValue> (backend.Get(map, key)) with
-    | JString s -> s
-    | other -> failwithf "expected string at '%s', got %A" key other
+    let v = backend.Get(map, key)
+
+    if backend.IsString v then
+        backend.AsString v
+    else
+        failwithf "expected string at '%s', got %A" key v
 
 let getInt (backend: IJsonBackend) (map: obj) (key: string) : int =
-    match unbox<JsonValue> (backend.Get(map, key)) with
-    | JInt n -> n
-    | JFloat f -> int f
-    | other -> failwithf "expected int at '%s', got %A" key other
+    let v = backend.Get(map, key)
+
+    if backend.IsInt v then backend.AsInt v
+    elif backend.IsFloat v then int (backend.AsFloat v)
+    else failwithf "expected int at '%s', got %A" key v
 
 let getFloat (backend: IJsonBackend) (map: obj) (key: string) : float =
-    match unbox<JsonValue> (backend.Get(map, key)) with
-    | JFloat f -> f
-    | JInt n -> float n
-    | other -> failwithf "expected float at '%s', got %A" key other
+    let v = backend.Get(map, key)
+
+    if backend.IsFloat v then backend.AsFloat v
+    elif backend.IsInt v then float (backend.AsInt v)
+    else failwithf "expected float at '%s', got %A" key v
 
 let getBool (backend: IJsonBackend) (map: obj) (key: string) : bool =
-    match unbox<JsonValue> (backend.Get(map, key)) with
-    | JBool b -> b
-    | other -> failwithf "expected bool at '%s', got %A" key other
+    let v = backend.Get(map, key)
+
+    if backend.IsBool v then
+        backend.AsBool v
+    else
+        failwithf "expected bool at '%s', got %A" key v
 
 let arrayAtString (backend: IJsonBackend) (arr: obj) (i: int) : string =
-    match unbox<JsonValue> (backend.ArrayAt(arr, i)) with
-    | JString s -> s
-    | other -> failwithf "expected string at [%d], got %A" i other
+    let v = backend.ArrayAt(arr, i)
+
+    if backend.IsString v then
+        backend.AsString v
+    else
+        failwithf "expected string at [%d], got %A" i v
