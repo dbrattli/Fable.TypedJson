@@ -1,6 +1,7 @@
 ---
 last_commit_released: 6d52d3074b3a8fde66276ac5540ecd0cd1f08cd6
 name: Fable.TypedJson
+force_version: 0.3.0
 ---
 
 # Changelog
