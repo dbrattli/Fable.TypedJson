@@ -28,8 +28,8 @@ adr: `ParseRaw` returns a boxed `JMap` (or other `JsonValue` case for
 
 module Fable.TypedJson.DotNet.Backend
 
+open System.Buffers
 open System.Collections.Generic
-open System.IO
 open System.Text
 open System.Text.Json
 open Fable.TypedJson.Backend
@@ -141,11 +141,14 @@ let rec private writeJsonValue (w: Utf8JsonWriter) (jv: JsonValue) =
         w.WriteEndArray()
 
 let private stringifyJsonValue (jv: JsonValue) : string =
-    use ms = new MemoryStream()
-    use writer = new Utf8JsonWriter(ms)
+    // ArrayBufferWriter avoids the MemoryStream → ToArray copy → GetString
+    // triple-allocation: write directly into a pooled-style growable buffer
+    // and decode the written span in one pass.
+    let bw = ArrayBufferWriter<byte>()
+    use writer = new Utf8JsonWriter(bw)
     writeJsonValue writer jv
     writer.Flush()
-    Encoding.UTF8.GetString(ms.ToArray())
+    Encoding.UTF8.GetString(bw.WrittenSpan)
 
 // ----------------------------------------------------------------------------
 // IJsonBackend implementation
@@ -182,33 +185,41 @@ type private DotNetBackendImpl() =
         // extra type test (the wrap helper passes JsonValue through).
         member _.Null = box JNull
 
-        // Type tests — the core always calls these with a boxed JsonValue
-        // (the result of `Get` followed by `unbox<JsonValue>` then `box`).
-        // Pattern-match the DU directly; non-JsonValue inputs return false.
+        // Type tests handle BOTH boxed `JsonValue` cases (post-parse, decode
+        // hot path) AND raw native primitives (`stringMapAdapter` and the
+        // `Encode.string`/`Encode.int` helpers pass `box "x"` / `box 42`
+        // directly). Without the raw-value branch, decoders driven by the
+        // string-map adapter would see `IsString` return false for the
+        // strings actually in the map and fail with "<unknown>" errors.
         member _.IsString(value) =
             match value with
+            | :? string -> true
             | :? JsonValue as JString _ -> true
             | _ -> false
 
         member _.IsInt(value) =
             match value with
+            | :? bool -> false
+            | :? int -> true
             | :? JsonValue as JInt _ -> true
             | _ -> false
 
         member _.IsFloat(value) =
             match value with
+            | :? float -> true
             | :? JsonValue as JFloat _ -> true
             | _ -> false
 
         member _.IsBool(value) =
             match value with
+            | :? bool -> true
             | :? JsonValue as JBool _ -> true
             | _ -> false
 
         member _.IsNull(value) =
             match value with
-            | :? JsonValue as JNull -> true
             | null -> true
+            | :? JsonValue as JNull -> true
             | _ -> false
 
         member _.IsArray(value) =
@@ -220,6 +231,33 @@ type private DotNetBackendImpl() =
             match value with
             | :? JsonValue as JMap _ -> true
             | _ -> false
+
+        // Typed accessors — symmetric to the IsX checks: handle both the
+        // `JsonValue` case wrapping (parsed values) and the raw native type
+        // (string-map adapter / encode helpers).
+        member _.AsString(value) =
+            match value with
+            | :? string as s -> s
+            | :? JsonValue as JString s -> s
+            | other -> failwithf "AsString called on non-string: %A" other
+
+        member _.AsInt(value) =
+            match value with
+            | :? int as n -> n
+            | :? JsonValue as JInt n -> n
+            | other -> failwithf "AsInt called on non-int: %A" other
+
+        member _.AsFloat(value) =
+            match value with
+            | :? float as f -> f
+            | :? JsonValue as JFloat f -> f
+            | other -> failwithf "AsFloat called on non-float: %A" other
+
+        member _.AsBool(value) =
+            match value with
+            | :? bool as b -> b
+            | :? JsonValue as JBool b -> b
+            | other -> failwithf "AsBool called on non-bool: %A" other
 
         // ArrayLength/ArrayAt accept both a `JArray`-wrapped `JsonValue[]`
         // (the decode path, post-parse) and a raw .NET `obj[]` (the encode

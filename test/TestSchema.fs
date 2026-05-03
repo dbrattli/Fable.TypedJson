@@ -249,63 +249,68 @@ let ``test validateJson optional missing`` () =
 // Coercion Tests
 // ============================================================================
 
+// `coerce` operates on backend-native values (`obj`) — what the
+// adapters and `IJsonBackend.Get` actually produce — not on `JsonValue`
+// case wrappers. The DU is reserved for the `IJsonCodec` boundary.
+// Pass `box "42"` / `box 42` / etc. directly here.
+
 [<Fact>]
 let ``test coercion string to int`` () =
-    match coerce backend emptyRegistry identityTransform typeof<int> (JString "42") with
+    match coerce backend emptyRegistry identityTransform typeof<int> (box "42") with
     | Ok v -> (unbox<int> v) |> equal 42
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion string to float`` () =
-    match coerce backend emptyRegistry identityTransform typeof<float> (JString "3.14") with
+    match coerce backend emptyRegistry identityTransform typeof<float> (box "3.14") with
     | Ok v -> (unbox<float> v) |> equal 3.14
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion string to bool true`` () =
-    match coerce backend emptyRegistry identityTransform typeof<bool> (JString "true") with
+    match coerce backend emptyRegistry identityTransform typeof<bool> (box "true") with
     | Ok v -> (unbox<bool> v) |> equal true
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion string to bool false`` () =
-    match coerce backend emptyRegistry identityTransform typeof<bool> (JString "false") with
+    match coerce backend emptyRegistry identityTransform typeof<bool> (box "false") with
     | Ok v -> (unbox<bool> v) |> equal false
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion int to float`` () =
-    match coerce backend emptyRegistry identityTransform typeof<float> (JInt 42) with
+    match coerce backend emptyRegistry identityTransform typeof<float> (box 42) with
     | Ok v -> (unbox<float> v) |> equal 42.0
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion float to int`` () =
-    match coerce backend emptyRegistry identityTransform typeof<int> (JFloat 42.0) with
+    match coerce backend emptyRegistry identityTransform typeof<int> (box 42.0) with
     | Ok v -> (unbox<int> v) |> equal 42
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion int to string`` () =
-    match coerce backend emptyRegistry identityTransform typeof<string> (JInt 42) with
+    match coerce backend emptyRegistry identityTransform typeof<string> (box 42) with
     | Ok v -> (unbox<string> v) |> equal "42"
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion invalid string to int`` () =
-    match coerce backend emptyRegistry identityTransform typeof<int> (JString "not_a_number") with
+    match coerce backend emptyRegistry identityTransform typeof<int> (box "not_a_number") with
     | Ok _ -> equal "Error" "Ok"
     | Error msg -> (msg.Contains("cannot parse")) |> equal true
 
 [<Fact>]
 let ``test coercion invalid string to float`` () =
-    match coerce backend emptyRegistry identityTransform typeof<float> (JString "not_a_number") with
+    match coerce backend emptyRegistry identityTransform typeof<float> (box "not_a_number") with
     | Ok _ -> equal "Error" "Ok"
     | Error msg -> (msg.Contains("cannot parse")) |> equal true
 
 [<Fact>]
 let ``test coercion invalid string to bool`` () =
-    match coerce backend emptyRegistry identityTransform typeof<bool> (JString "maybe") with
+    match coerce backend emptyRegistry identityTransform typeof<bool> (box "maybe") with
     | Ok _ -> equal "Error" "Ok"
     | Error msg -> (msg.Contains("cannot parse")) |> equal true
 

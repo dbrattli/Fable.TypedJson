@@ -18,33 +18,53 @@ open FSharp.Reflection
 open Fable.TypedJson.Backend
 
 // ============================================================================
-// JsonValue — Erased DU for type-safe BEAM values
+// JsonValue — User-codec-facing JSON value DU
 // ============================================================================
 
 (**
 ## JsonValue
 
-Zero-cost erased DU over native BEAM types. At runtime, `JString "hello"`
-IS `<<"hello">>`, `JInt 42` IS `42`. Pattern matching compiles to Erlang
-type guards (`is_binary`, `is_integer`, `is_float`, `is_boolean`, `is_map`).
+The DU `IJsonCodec.Decode` / `Encode` exchange with user codecs. The
+internal `coerce` / schema layer never constructs or pattern-matches
+this — they go through `IJsonBackend.IsX` / `AsX` directly, so on the
+hot path no `JsonValue` ever exists. `toJsonValue` lazily wraps a
+backend-native value into the DU only when crossing into a user codec.
 
-adr: erased over obj -- compiler-checked exhaustive matching, zero allocation
+Was `[<Erase>]` historically — that gave Fable backends a zero-cost
+view over native values. After moving the schema dispatch to the
+backend's typed accessors, the DU is no longer on the hot path, so the
+erasure win doesn't matter and the erased form has design constraints
+(two `of obj` cases would now be rejected by Fable's stricter check
+since the case payloads can't be runtime-distinguished). `[<Struct>]`
+keeps the DU as a tagged value type on the CLR (no heap allocation per
+case construction); Fable ignores `[<Struct>]` and lowers the DU to
+its usual per-target representation, which is fine because user-codec
+calls are infrequent enough that the per-construction allocation isn't
+a hot-path concern.
 *)
 
-[<Erase>]
+[<Struct>]
 type JsonValue =
-    | JString of string
-    | JInt of int
-    | JFloat of float
-    | JBool of bool
+    | JString of stringValue: string
+    | JInt of intValue: int
+    | JFloat of floatValue: float
+    | JBool of boolValue: bool
     | JNull
-    | JArray of obj
-    | JMap of obj
+    | JArray of arrayValue: obj
+    | JMap of mapValue: obj
 
 // ============================================================================
 // Error Types
 // ============================================================================
 
+// Struct because FieldError is allocated per failing field on the error
+// path. For success-path workloads (the common case) this is dead weight,
+// but for validation-heavy LLM-tool-input workloads it cuts a heap alloc
+// per error. The struct is two references (16 bytes on x64), small enough
+// that copy cost is below alloc cost — and the typical use site stores it
+// in a `FieldError list` cons cell which already heap-allocates, so the
+// struct just inlines into the cons cell with no extra cost.
+[<Struct>]
 type FieldError = { path: string; message: string }
 
 // ============================================================================
@@ -154,7 +174,11 @@ let tryGetCodecEntry (fullName: string) (registry: CodecRegistry) : CodecEntry o
 // Schema Type
 // ============================================================================
 
-type Schema<'T> = (string -> JsonValue option) -> Result<'T, FieldError list>
+// `Schema<'T>` lookup hands back the backend-native value (`obj`) rather
+// than a `JsonValue`. Internal coerce uses `IJsonBackend.IsX` / `AsX` to
+// dispatch directly on the native shape; `JsonValue` is only constructed
+// (lazily, via `toJsonValue`) when crossing into user codecs that take it.
+type Schema<'T> = (string -> obj option) -> Result<'T, FieldError list>
 
 // ============================================================================
 // Coercion
@@ -296,75 +320,128 @@ let lowerFirstTransform (s: string) : string =
         string (System.Char.ToLowerInvariant s.[0])
         + s.[1..]
 
-/// `coerce` walks the type tree to convert a `JsonValue` into the target F#
-/// type. The `keyTransform` parameter encapsulates the codec's case rule +
-/// aliases so that nested-record / nested-union sub-lookups apply the same
-/// transformation the outer record did. Without it, decoding `{"name": ...,
-/// "address": {"streetName": "..."}}` under a camelCase codec would fail at
-/// the inner `streetName` because the sub-lookup would query the inner map
-/// for the F# field name `street_name` (BEAM) or `StreetName` (Python).
+/// Lazily wrap a backend-native value as a `JsonValue` for hand-off to
+/// user codecs (`IJsonCodec.Decode`). Internal `coerce` never calls this
+/// — it routes through `IJsonBackend.IsX` / `AsX` directly. On Fable
+/// backends each `JString s` etc. is identity (no allocation thanks to
+/// `[<Erase>]` legacy / Fable's representation of struct DUs); on the
+/// .NET shim each call allocates a small DU instance.
+let toJsonValue (backend: IJsonBackend) (fv: obj) : JsonValue =
+    if backend.IsString fv then JString(backend.AsString fv)
+    elif backend.IsInt fv then JInt(backend.AsInt fv)
+    elif backend.IsFloat fv then JFloat(backend.AsFloat fv)
+    elif backend.IsBool fv then JBool(backend.AsBool fv)
+    elif backend.IsNull fv then JNull
+    elif backend.IsArray fv then JArray fv
+    elif backend.IsMap fv then JMap fv
+    else
+        failwithf "toJsonValue: unrecognised value of type %s" (fv.GetType().FullName)
+
+/// Render a backend-native value as a short human-readable string for
+/// error messages — replaces the JsonValue pattern match the old
+/// coerce-error path used.
+let private describeValue (backend: IJsonBackend) (fv: obj) : string =
+    if backend.IsString fv then sprintf "string '%s'" (backend.AsString fv)
+    elif backend.IsInt fv then sprintf "int %d" (backend.AsInt fv)
+    elif backend.IsFloat fv then sprintf "float %f" (backend.AsFloat fv)
+    elif backend.IsBool fv then sprintf "bool %b" (backend.AsBool fv)
+    elif backend.IsNull fv then "null"
+    elif backend.IsArray fv then "array"
+    elif backend.IsMap fv then "map"
+    else "<unknown>"
+
+/// `coerce` walks the type tree to convert a backend-native value into
+/// the target F# type. Dispatches on `targetFullName` for primitives and
+/// on F# reflection (`FSharpType.IsRecord` / `IsUnion`, list/array
+/// detection) for compound types. The `keyTransform` parameter
+/// encapsulates the codec's case rule + aliases so nested-record /
+/// nested-union sub-lookups apply the same transformation the outer
+/// record did.
 let rec coerce
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
     (targetType: System.Type)
-    (fv: JsonValue)
+    (fv: obj)
     : Result<obj, string> =
     let targetFullName = targetType.FullName
 
-    match targetFullName, fv with
-    // String target — anything can become a string
-    | "System.String", JString s -> Ok(box s)
-    | "System.String", JInt n -> Ok(box (string n))
-    | "System.String", JFloat f -> Ok(box (string f))
-    | "System.String", JBool b -> Ok(box (if b then "true" else "false"))
+    // String target — anything primitive can become a string.
+    if targetFullName = "System.String" then
+        if backend.IsString fv then Ok(box (backend.AsString fv))
+        elif backend.IsInt fv then Ok(box (string (backend.AsInt fv)))
+        elif backend.IsFloat fv then Ok(box (string (backend.AsFloat fv)))
+        elif backend.IsBool fv then
+            Ok(box (if backend.AsBool fv then "true" else "false"))
+        else
+            Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
     // Int target
-    | "System.Int32", JInt n -> Ok(box n)
-    | "System.Int32", JFloat f -> Ok(box (int f))
-    | "System.Int32", JString s ->
-        match System.Int32.TryParse(s) with
-        | true, n -> Ok(box n)
-        | _ -> Error(sprintf "cannot parse '%s' as int" s)
+    elif targetFullName = "System.Int32" then
+        if backend.IsInt fv then Ok(box (backend.AsInt fv))
+        elif backend.IsFloat fv then Ok(box (int (backend.AsFloat fv)))
+        elif backend.IsString fv then
+            let s = backend.AsString fv
+
+            match System.Int32.TryParse(s) with
+            | true, n -> Ok(box n)
+            | _ -> Error(sprintf "cannot parse '%s' as int" s)
+        else
+            Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
     // Int64 target
-    | "System.Int64", JInt n -> Ok(box (int64 n))
-    | "System.Int64", JFloat f -> Ok(box (int64 f))
-    | "System.Int64", JString s ->
-        match System.Int64.TryParse(s) with
-        | true, n -> Ok(box n)
-        | _ -> Error(sprintf "cannot parse '%s' as int64" s)
+    elif targetFullName = "System.Int64" then
+        if backend.IsInt fv then Ok(box (int64 (backend.AsInt fv)))
+        elif backend.IsFloat fv then Ok(box (int64 (backend.AsFloat fv)))
+        elif backend.IsString fv then
+            let s = backend.AsString fv
+
+            match System.Int64.TryParse(s) with
+            | true, n -> Ok(box n)
+            | _ -> Error(sprintf "cannot parse '%s' as int64" s)
+        else
+            Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
     // Float target
-    | "System.Double", JFloat f -> Ok(box f)
-    | "System.Double", JInt n -> Ok(box (float n))
-    | "System.Double", JString s ->
-        match System.Double.TryParse(s) with
-        | true, f -> Ok(box f)
-        | _ -> Error(sprintf "cannot parse '%s' as float" s)
+    elif targetFullName = "System.Double" then
+        if backend.IsFloat fv then Ok(box (backend.AsFloat fv))
+        elif backend.IsInt fv then Ok(box (float (backend.AsInt fv)))
+        elif backend.IsString fv then
+            let s = backend.AsString fv
+
+            match System.Double.TryParse(s) with
+            | true, f -> Ok(box f)
+            | _ -> Error(sprintf "cannot parse '%s' as float" s)
+        else
+            Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
     // Bool target
-    | "System.Boolean", JBool b -> Ok(box b)
-    | "System.Boolean", JString s ->
-        match s.ToLower() with
-        | "true" -> Ok(box true)
-        | "false" -> Ok(box false)
-        | _ -> Error(sprintf "cannot parse '%s' as bool" s)
+    elif targetFullName = "System.Boolean" then
+        if backend.IsBool fv then Ok(box (backend.AsBool fv))
+        elif backend.IsString fv then
+            let s = backend.AsString fv
 
-    | _, _ ->
-        // 1. User-registered codec wins.
+            match s.ToLower() with
+            | "true" -> Ok(box true)
+            | "false" -> Ok(box false)
+            | _ -> Error(sprintf "cannot parse '%s' as bool" s)
+        else
+            Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
+
+    else
+        // Non-primitive dispatch: registry codec, nested record, list, union, array.
         match tryGetCodecEntry targetFullName registry with
-        | Some entry -> entry.decode fv
+        // 1. User-registered codec wins. Construct a JsonValue for it now.
+        | Some entry -> entry.decode (toJsonValue backend fv)
         | None ->
             // 2. Nested record: recurse via resolveRecord.
             if FSharpType.IsRecord targetType then
-                if backend.IsMap(box fv) then
-                    let inner = unbox<obj> fv
+                if backend.IsMap fv then
                     // resolveField applies keyTransform before calling the
                     // lookup, so the key here is already in JSON form.
-                    let lookup (key: string) : JsonValue option =
-                        if backend.ContainsKey(inner, key) then
-                            Some(unbox<JsonValue> (backend.Get(inner, key)))
+                    let lookup (key: string) : obj option =
+                        if backend.ContainsKey(fv, key) then
+                            Some(backend.Get(fv, key))
                         else
                             None
 
@@ -384,13 +461,10 @@ let rec coerce
                 let elementType = getGenericInnerType targetType
                 coerceList backend registry keyTransform elementType fv
 
-            // 4. Tagged discriminated union: dispatch on a "type" key.
-            //    Single-record-field cases flatten the payload into the same
-            //    object (Pydantic style); fieldless cases just have the tag.
-            //    Multi-positional-field cases are not supported in v1.
+            // 4. Tagged discriminated union.
             elif FSharpType.IsUnion targetType then
-                if backend.IsMap(box fv) then
-                    coerceUnion backend registry keyTransform targetType (unbox<obj> fv)
+                if backend.IsMap fv then
+                    coerceUnion backend registry keyTransform targetType fv
                 else
                     Error(sprintf "expected JSON object for %s" targetType.Name)
 
@@ -400,25 +474,14 @@ let rec coerce
                 coerceArray backend registry keyTransform elementType fv
 
             else
-                // Genuine type mismatch.
-                let valueDesc =
-                    match fv with
-                    | JString s -> sprintf "string '%s'" s
-                    | JInt n -> sprintf "int %d" n
-                    | JFloat f -> sprintf "float %f" f
-                    | JBool b -> sprintf "bool %b" b
-                    | JNull -> "null"
-                    | JArray _ -> "array"
-                    | JMap _ -> "map"
-
-                Error(sprintf "cannot coerce %s to %s" valueDesc targetFullName)
+                Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
 and private coerceElements
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
     (elementType: System.Type)
-    (fv: JsonValue)
+    (fv: obj)
     : Result<obj list, string> =
     // The native sequence shape varies per backend (Erlang list, Python list,
     // JS array, .NET array). We delegate length + index access to the backend
@@ -426,19 +489,18 @@ and private coerceElements
     // FSharpList cons cells (broken on Python's native lists), the latter
     // becomes a process-dictionary ref on BEAM. Backend-mediated indexing
     // handles all targets uniformly.
-    if not (backend.IsArray(box fv)) then
+    if not (backend.IsArray fv) then
         Error(sprintf "expected JSON array for %s[]" elementType.Name)
     else
-        let arr = box fv
-        let len = backend.ArrayLength arr
+        let len = backend.ArrayLength fv
         let mutable i = 0
         let mutable err: string option = None
         let mutable acc: obj list = []
 
         while i < len && err.IsNone do
-            let head = backend.ArrayAt(arr, i)
+            let head = backend.ArrayAt(fv, i)
 
-            match coerce backend registry keyTransform elementType (unbox<JsonValue> head) with
+            match coerce backend registry keyTransform elementType head with
             | Ok v -> acc <- v :: acc
             | Error msg -> err <- Some(sprintf "[%d] %s" i msg)
 
@@ -453,7 +515,7 @@ and coerceList
     (registry: CodecRegistry)
     (keyTransform: string -> string)
     (elementType: System.Type)
-    (fv: JsonValue)
+    (fv: obj)
     : Result<obj, string> =
     // Build a typed `'elementType list` so the boxed result can be assigned
     // to a record field via reflection. Fable erases generics so the helper
@@ -467,7 +529,7 @@ and coerceArray
     (registry: CodecRegistry)
     (keyTransform: string -> string)
     (elementType: System.Type)
-    (fv: JsonValue)
+    (fv: obj)
     : Result<obj, string> =
     match coerceElements backend registry keyTransform elementType fv with
     | Ok xs -> Ok(box (List.toArray xs))
@@ -478,7 +540,7 @@ and resolveRecord
     (registry: CodecRegistry)
     (keyTransform: string -> string)
     (recordType: System.Type)
-    (lookup: string -> JsonValue option)
+    (lookup: string -> obj option)
     : Result<obj, FieldError list> =
     let fields = FSharpType.GetRecordFields recordType
 
@@ -536,7 +598,7 @@ and resolveUnionFromLookup
     (registry: CodecRegistry)
     (keyTransform: string -> string)
     (unionType: System.Type)
-    (lookup: string -> JsonValue option)
+    (lookup: string -> obj option)
     : Result<obj, FieldError list> =
     match lookup discriminatorKey with
     | None ->
@@ -546,7 +608,8 @@ and resolveUnionFromLookup
                 message = sprintf "missing discriminator '%s' for %s" discriminatorKey unionType.Name
             }
         ]
-    | Some(JString tag) ->
+    | Some tagValue when backend.IsString tagValue ->
+        let tag = backend.AsString tagValue
         let cases = FSharpType.GetUnionCases unionType
 
         match
@@ -597,7 +660,7 @@ and resolveUnionFromLookup
         ]
 
 /// Coerce form: takes a backend-native JSON map (e.g., a nested union value
-/// inside a record). Builds a key→JsonValue lookup over the map and delegates.
+/// inside a record). Builds a key→obj lookup over the map and delegates.
 and coerceUnion
     (backend: IJsonBackend)
     (registry: CodecRegistry)
@@ -607,9 +670,9 @@ and coerceUnion
     : Result<obj, string> =
     // resolveField applies keyTransform before calling the lookup, so the
     // key here is already in JSON form.
-    let lookup (key: string) : JsonValue option =
+    let lookup (key: string) : obj option =
         if backend.ContainsKey(jsonMap, key) then
-            Some(unbox<JsonValue> (backend.Get(jsonMap, key)))
+            Some(backend.Get(jsonMap, key))
         else
             None
 
@@ -623,11 +686,11 @@ and resolveOptionalField
     (keyTransform: string -> string)
     (fi: System.Reflection.PropertyInfo)
     (name: string)
-    (value: JsonValue option)
+    (value: obj option)
     : Result<obj, FieldError> =
     match value with
-    | None
-    | Some JNull -> Ok(box None)
+    | None -> Ok(box None)
+    | Some fv when backend.IsNull fv -> Ok(box None)
     | Some fv ->
         let innerType = getGenericInnerType fi.PropertyType
 
@@ -641,7 +704,7 @@ and resolveRequiredField
     (keyTransform: string -> string)
     (fi: System.Reflection.PropertyInfo)
     (name: string)
-    (value: JsonValue option)
+    (value: obj option)
     : Result<obj, FieldError> =
     match value with
     | None ->
@@ -649,7 +712,7 @@ and resolveRequiredField
             path = name
             message = sprintf "missing field (expected %s)" fi.PropertyType.Name
         }
-    | Some JNull ->
+    | Some fv when backend.IsNull fv ->
         Error {
             path = name
             message = sprintf "null value (expected %s)" fi.PropertyType.Name
@@ -664,7 +727,7 @@ and resolveField
     (registry: CodecRegistry)
     (keyTransform: string -> string)
     (fi: System.Reflection.PropertyInfo)
-    (lookup: string -> JsonValue option)
+    (lookup: string -> obj option)
     : Result<obj, FieldError> =
     // Use the case-rule-derived JSON key as the error path so messages
     // match what the user sees in their JSON, and so the path is consistent
@@ -692,28 +755,126 @@ invariant: all fields validated, errors accumulated (not fail-fast)
 adr: inline required so Fable resolves typeof<'T> at each call site
 *)
 
+(**
+## buildRecordSchemaUntyped — pre-baked record decoder
+
+Hoist all per-field reflection out of the per-decode hot path. At
+codec-construction time we walk `FSharpType.GetRecordFields` once and
+materialize per-field `jsonKeys`, `isOpts`, `innerTypes`, and `typeNames`
+arrays. The returned closure does no reflection or string transformation
+per call — it indexes the pre-baked arrays and dispatches into `coerce`.
+
+`coerce` is still called per field per decode (since the JsonValue is
+only known then), but the keyTransform / option-detection / inner-type
+resolution work is amortized.
+
+This is the single biggest decode-side perf lever — each layer it
+removes from the hot path used to be paying string-allocation +
+reflection-call per field per decode.
+*)
+// Not `private`: `auto<'T>` is `inline` and will inline calls to this helper
+// at consumer call sites, which would fail accessibility checks against a
+// private binding. Treat it as internal-use anyway — the module signature
+// is the API surface.
+let buildRecordSchemaUntyped
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (keyTransform: string -> string)
+    (recordType: System.Type)
+    : (string -> obj option) -> Result<obj, FieldError list>
+    =
+    let fields = FSharpType.GetRecordFields recordType
+    let n = fields.Length
+    let jsonKeys = Array.init n (fun i -> keyTransform fields.[i].Name)
+
+    let isOpts =
+        Array.init n (fun i -> isOptionType fields.[i].PropertyType.FullName)
+
+    let innerTypes =
+        Array.init n (fun i ->
+            if isOpts.[i] then
+                getGenericInnerType fields.[i].PropertyType
+            else
+                fields.[i].PropertyType)
+    // `typeNames` is read only on the error path — we still pay one
+    // allocation per array entry at construction time but save the
+    // PropertyType.Name access per decode.
+    let typeNames = Array.init n (fun i -> innerTypes.[i].Name)
+
+    fun lookup ->
+        let values = Array.zeroCreate<obj> n
+        let mutable errs: FieldError list = []
+
+        for i = 0 to n - 1 do
+            let key = jsonKeys.[i]
+            let value = lookup key
+            let innerType = innerTypes.[i]
+
+            let result: Result<obj, FieldError> =
+                if isOpts.[i] then
+                    match value with
+                    | None -> Ok(box None)
+                    | Some fv when backend.IsNull fv -> Ok(box None)
+                    | Some fv ->
+                        match coerce backend registry keyTransform innerType fv with
+                        | Ok v -> Ok(buildOption innerType v)
+                        | Error msg -> Error { path = key; message = msg }
+                else
+                    match value with
+                    | None ->
+                        Error {
+                            path = key
+                            message = sprintf "missing field (expected %s)" typeNames.[i]
+                        }
+                    | Some fv when backend.IsNull fv ->
+                        Error {
+                            path = key
+                            message = sprintf "null where %s was required" typeNames.[i]
+                        }
+                    | Some fv ->
+                        match coerce backend registry keyTransform innerType fv with
+                        | Ok v -> Ok v
+                        | Error msg -> Error { path = key; message = msg }
+
+            match result with
+            | Ok v -> values.[i] <- v
+            | Error e -> errs <- e :: errs
+
+        if List.isEmpty errs then
+            Ok(FSharpValue.MakeRecord(recordType, values))
+        else
+            Error(List.rev errs)
+
 let inline auto<'T> (backend: IJsonBackend) (registry: CodecRegistry) (keyTransform: string -> string) : Schema<'T> =
     let typ = typeof<'T>
 
-    fun (lookup: string -> JsonValue option) ->
-        // Top-level dispatch: records → field-by-field; tagged DUs → discriminator.
-        // Anything else is rejected (the user shouldn't reach `auto<'T>` for a
-        // primitive type — that's `Codec.int` etc.).
-        if FSharpType.IsRecord typ then
-            match resolveRecord backend registry keyTransform typ lookup with
+    // Top-level dispatch: records → field-by-field via pre-baked schema;
+    // tagged DUs → discriminator (case is value-dependent, can't pre-bake);
+    // anything else is rejected (the user shouldn't reach `auto<'T>` for a
+    // primitive type — that's `Codec.int` etc.).
+    if FSharpType.IsRecord typ then
+        // Pre-bake once per call site (which is once per codec, given that
+        // `auto<'T>` is `inline`). The closure below does no reflection.
+        let recordSchema = buildRecordSchemaUntyped backend registry keyTransform typ
+
+        fun (lookup: string -> obj option) ->
+            match recordSchema lookup with
             | Ok r -> Ok(unbox<'T> r)
             | Error errs -> Error errs
-        elif FSharpType.IsUnion typ then
+    elif FSharpType.IsUnion typ then
+        fun (lookup: string -> obj option) ->
             match resolveUnionFromLookup backend registry keyTransform typ lookup with
             | Ok v -> Ok(unbox<'T> v)
             | Error errs -> Error errs
-        else
-            Error [
-                {
-                    path = ""
-                    message = sprintf "auto<%s> requires a record or discriminated-union type" typ.Name
-                }
-            ]
+    else
+        let badTypeError = [
+            {
+                path = ""
+                message = sprintf "auto<%s> requires a record or discriminated-union type" typ.Name
+            }
+        ]
+
+        fun _ -> Error badTypeError
 
 // ============================================================================
 // Adapters
@@ -722,20 +883,25 @@ let inline auto<'T> (backend: IJsonBackend) (registry: CodecRegistry) (keyTransf
 (**
 ## Adapters
 
-Convert various source formats to the `string -> JsonValue option` lookup.
+Convert various source formats to the `string -> obj option` lookup.
 *)
 
-/// Adapt a Map<string, string> (e.g., ToolCall.input from LLM).
-let stringMapAdapter (map: Map<string, string>) (key: string) : JsonValue option =
+/// Adapt a Map<string, string> (e.g., ToolCall.input from LLM). Each value
+/// is the raw F# string — `coerce` recognises it via `backend.IsString`
+/// and dispatches into the string-target arm of the giant primitive
+/// pattern (which can also coerce to int / float / bool).
+let stringMapAdapter (map: Map<string, string>) (key: string) : obj option =
     match Map.tryFind key map with
-    | Some v -> Some(JString v)
+    | Some v -> Some(box v)
     | None -> None
 
 /// Adapt a backend-native JSON map (e.g., parsed via `IJsonBackend.Parse`).
-/// Values are unboxed to JsonValue (zero-cost, erased).
-let jsonMapAdapter (backend: IJsonBackend) (map: obj) (key: string) : JsonValue option =
+/// Returns the raw native value (Erlang binary, Python str, JS string, .NET
+/// `JsonValue` case, …); the schema layer dispatches via `IJsonBackend.IsX`
+/// / `AsX` rather than pattern-matching `JsonValue`.
+let jsonMapAdapter (backend: IJsonBackend) (map: obj) (key: string) : obj option =
     if backend.ContainsKey(map, key) then
-        Some(unbox<JsonValue> (backend.Get(map, key)))
+        Some(backend.Get(map, key))
     else
         None
 

@@ -61,6 +61,22 @@ type IJsonBackend =
     abstract member IsArray: value: obj -> bool
     /// True if `value` is a JSON object (map / dict).
     abstract member IsMap: value: obj -> bool
+
+    // --- Typed accessors ---
+    // Pair with the IsX type tests: schema/coerce dispatches on the backend's
+    // type tests, then pulls the typed value via these accessors. Lets the
+    // hot path skip pattern-matching a `[<Erase>]` `JsonValue` DU (which has
+    // its own runtime-distinguishability constraints) and operate directly
+    // on the backend's native shape — Erlang binary on BEAM, Python str on
+    // Python, JsonValue case payload on .NET, etc.
+    /// Read `value` as a string. Behaviour is undefined unless `IsString value`.
+    abstract member AsString: value: obj -> string
+    /// Read `value` as an int. Behaviour is undefined unless `IsInt value`.
+    abstract member AsInt: value: obj -> int
+    /// Read `value` as a float. Behaviour is undefined unless `IsFloat value`.
+    abstract member AsFloat: value: obj -> float
+    /// Read `value` as a bool. Behaviour is undefined unless `IsBool value`.
+    abstract member AsBool: value: obj -> bool
     /// Length of a JSON array. Used for iterating without committing to a
     /// particular F# list/array runtime shape — Python's `json.loads` returns
     /// a native list while BEAM's `jsx.decode` returns an Erlang list, and

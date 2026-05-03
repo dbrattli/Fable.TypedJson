@@ -23,7 +23,7 @@ NUGET
 
 GROUP DotNet
 STORAGE: NONE
-RESTRICTION: == net8.0
+RESTRICTION: == net10.0
 NUGET
   remote: https://api.nuget.org/v3/index.json
     Fable.Core (5.0)

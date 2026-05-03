@@ -83,6 +83,15 @@ type private BeamBackendImpl() =
         member _.IsNull(value) = isErlNull value
         member _.IsArray(value) = isErlList value
         member _.IsMap(value) = isErlMap value
+
+        // Typed accessors — `[<Erase>]` semantics make these effectively
+        // identity unboxes on BEAM, since `JString s` IS the binary at
+        // runtime, `JInt n` IS the integer, etc. The unbox is just an F#
+        // type-check that Fable erases to the underlying term.
+        member _.AsString(value) = unbox<string> value
+        member _.AsInt(value) = unbox<int> value
+        member _.AsFloat(value) = unbox<float> value
+        member _.AsBool(value) = unbox<bool> value
         member _.ArrayLength(arr) = erlListLength arr
         member _.ArrayAt(arr, i) = erlListAt arr i
         member _.BuildArray(items) = erlListFromFSharpList items

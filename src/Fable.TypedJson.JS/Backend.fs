@@ -77,6 +77,13 @@ type private JSBackendImpl() =
             && not (isNull value)
             && not (JS.Constructors.Array.isArray value)
 
+        // Typed accessors — JS strings, numbers, and booleans are native
+        // primitives; the unbox at the F# level is a no-op at runtime.
+        member _.AsString(value) = unbox<string> value
+        member _.AsInt(value) = unbox<int> value
+        member _.AsFloat(value) = unbox<float> value
+        member _.AsBool(value) = unbox<bool> value
+
         // Dynamic property access via `?`. Cast the result through `unbox`
         // because `?` returns generic `'a` and `length` is `int`.
         member _.ArrayLength(arr) = unbox<int> arr?length
