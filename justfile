@@ -86,7 +86,7 @@ release: pack
 
 # Run EasyBuild.ShipIt for release management. Pass extra flags after `--`.
 shipit *args:
-    dotnet shipit --pre-release rc {{args}}
+    dotnet shipit {{args}}
 
 # --- Test ---
 
