@@ -39,6 +39,7 @@ check:
     dotnet build src/Fable.TypedJson.Beam
     dotnet build src/Fable.TypedJson.Python
     dotnet build src/Fable.TypedJson.JS
+    dotnet build src/Fable.TypedJson.DotNet
 
 # Format source files
 format:
@@ -93,7 +94,7 @@ shipit *args:
 build_test_path := justfile_directory() / "build/tests"
 
 # Run all backend test suites
-test: test-beam test-python test-js
+test: test-beam test-python test-js test-dotnet
 
 # Build and run Fable.TypedJson tests on BEAM
 test-beam: build-test-beam
@@ -133,3 +134,10 @@ test-js: build-test-js
 build-test-js:
     FableTarget=js dotnet build test
     FableTarget=js {{fable}} test --define JS --exclude Fable.Core --lang javascript --outDir build/js_test
+
+# Run the full F# test suite natively on the .NET CLR. No Fable transpile —
+# the test project compiles directly to .NET IL with FableTarget=dotnet,
+# which drops FABLE_COMPILER and references the .NET shim. The reflection
+# runner in Main.fs walks for [<Fact>]-tagged statics and invokes them.
+test-dotnet:
+    FableTarget=dotnet dotnet run --project test

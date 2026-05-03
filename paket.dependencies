@@ -9,6 +9,7 @@
 #   Beam   → Fable.TypedJson.Beam (netstandard2.0)
 #   Python → Fable.TypedJson.Python (netstandard2.0)
 #   JS     → Fable.TypedJson.JS (netstandard2.0)
+#   DotNet → Fable.TypedJson.DotNet (net8.0 — runs natively on the CLR)
 #   Test   → Fable.TypedJson.Test (net10.0)
 #
 # Each project's `paket.references` opts into its single group.
@@ -50,6 +51,19 @@ group JS
 
     nuget FSharp.Core >= 5.0.0 lowest_matching: true
     nuget Fable.Core >= 5.0.0 lowest_matching: true
+
+# .NET backend -- pure CLR shim over System.Text.Json. Unlike the Fable
+# targets, this one actually executes on the CLR, so [<Erase>] does NOT
+# erase JsonValue and the shim must wrap raw values into real DU cases
+# at the IJsonBackend boundary (one allocation per Get / per primitive).
+group DotNet
+    source https://api.nuget.org/v3/index.json
+    storage: none
+    framework: net8.0
+
+    nuget FSharp.Core >= 5.0.0 lowest_matching: true
+    nuget Fable.Core >= 5.0.0 lowest_matching: true
+    nuget System.Text.Json >= 8.0.5 lowest_matching: true
 
 # Test runner (host process). Tests transpile the same F# source to BOTH
 # BEAM and Python via #if PYTHON, so this group includes every backend's

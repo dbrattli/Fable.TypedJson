@@ -18,7 +18,11 @@ open Fable.TypedJson.Python.Json
 #if JS
 open Fable.TypedJson.JS.Json
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+#else
 open Fable.TypedJson.Beam.Json
+#endif
 #endif
 #endif
 

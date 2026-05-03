@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Author>Dag Brattli</Author>
+    <Copyright>Dag Brattli</Copyright>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageTags>fsharp;json;validation;dotnet;system.text.json</PackageTags>
+    <Description>.NET backend shim for Fable.TypedJson. Wires System.Text.Json into the IJsonBackend abstraction so the same codecs run natively on the CLR (alongside the Fable BEAM/JS/Python targets).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Backend.fs" />
+    <Compile Include="Json.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Fable.TypedJson\Fable.TypedJson.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\LICENSE" Pack="true" Visible="false" PackagePath="\" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <Import Project="..\..\.paket\Paket.Restore.targets" />
+</Project>

@@ -28,9 +28,15 @@ open Fable.TypedJson.JS.Json
 
 let backend = js
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 #endif
 
@@ -107,14 +113,9 @@ let ``test encode tagged union — search case`` () =
     let json = codec.encode value
     let parsed = parseRaw json
 
-    unbox<string> (backend.Get(parsed, "type"))
-    |> equal "search"
-
-    unbox<string> (backend.Get(parsed, "query"))
-    |> equal "hello"
-
-    unbox<int> (backend.Get(parsed, "maxResults"))
-    |> equal 5
+    getString backend parsed "type" |> equal "search"
+    getString backend parsed "query" |> equal "hello"
+    getInt backend parsed "maxResults" |> equal 5
 
 [<Fact>]
 let ``test encode tagged union — fieldless case`` () =
@@ -122,8 +123,7 @@ let ``test encode tagged union — fieldless case`` () =
     let json = codec.encode Ping
     let parsed = parseRaw json
 
-    unbox<string> (backend.Get(parsed, "type"))
-    |> equal "ping"
+    getString backend parsed "type" |> equal "ping"
 
 [<Fact>]
 let ``test round-trip tagged union — every case`` () =

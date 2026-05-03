@@ -1,0 +1,4 @@
+group DotNet
+    FSharp.Core
+    Fable.Core
+    System.Text.Json

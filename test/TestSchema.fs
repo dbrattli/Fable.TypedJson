@@ -21,9 +21,15 @@ open Fable.TypedJson.JS.Json
 
 let backend = js
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 #endif
 
@@ -332,8 +338,8 @@ let ``test formatErrors produces readable string`` () =
 let ``test dump simple record`` () =
     let record = { Name = "Alice"; Age = 30 }
     let map = dump record
-    let name = unbox<string> (backend.Get(map, "name"))
-    let age = unbox<int> (backend.Get(map, "age"))
+    let name = getString backend map "name"
+    let age = getInt backend map "age"
     name |> equal "Alice"
     age |> equal 30
 
@@ -345,8 +351,8 @@ let ``test dump record with option some`` () =
     }
 
     let map = dump record
-    let name = unbox<string> (backend.Get(map, "name"))
-    let email = unbox<string> (backend.Get(map, "email"))
+    let name = getString backend map "name"
+    let email = getString backend map "email"
     name |> equal "Alice"
     email |> equal "a@b.com"
 

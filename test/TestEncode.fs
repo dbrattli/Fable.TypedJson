@@ -20,9 +20,15 @@ open Fable.TypedJson.JS.Json
 
 let backend = js
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 #endif
 
@@ -34,8 +40,8 @@ let ``test encode simple object`` () =
         |> Encode.toJson
 
     let parsed = parseRaw json
-    let name = unbox<string> (backend.Get(parsed, "name"))
-    let age = unbox<int> (backend.Get(parsed, "age"))
+    let name = getString backend parsed "name"
+    let age = getInt backend parsed "age"
     name |> equal "Alice"
     age |> equal 30
 
@@ -49,7 +55,7 @@ let ``test encode nested object`` () =
 
     let parsed = parseRaw json
     let user = backend.Get(parsed, "user")
-    let name = unbox<string> (backend.Get(user, "name"))
+    let name = getString backend user "name"
     name |> equal "Bob"
 
 [<Fact>]
@@ -71,7 +77,7 @@ let ``test encode optional some`` () =
         |> Encode.toJson
 
     let parsed = parseRaw json
-    let value = unbox<int> (backend.Get(parsed, "value"))
+    let value = getInt backend parsed "value"
     value |> equal 42
 
 [<Fact>]
@@ -93,7 +99,7 @@ let ``test encode handles special characters`` () =
         |> Encode.toJson
 
     let parsed = parseRaw json
-    let text = unbox<string> (backend.Get(parsed, "text"))
+    let text = getString backend parsed "text"
     text |> equal "hello \"world\"\nnewline"
 
 [<Fact>]
@@ -103,7 +109,7 @@ let ``test encode float`` () =
         |> Encode.toJson
 
     let parsed = parseRaw json
-    let temp = unbox<float> (backend.Get(parsed, "temp"))
+    let temp = getFloat backend parsed "temp"
     temp |> equal 22.5
 
 [<Fact>]
@@ -113,8 +119,8 @@ let ``test encode bool`` () =
         |> Encode.toJson
 
     let parsed = parseRaw json
-    let active = unbox<bool> (backend.Get(parsed, "active"))
-    let deleted = unbox<bool> (backend.Get(parsed, "deleted"))
+    let active = getBool backend parsed "active"
+    let deleted = getBool backend parsed "deleted"
     active |> equal true
     deleted |> equal false
 
@@ -128,5 +134,5 @@ let ``test encode raw pre-encoded json`` () =
 
     let parsed = parseRaw json
     let data = backend.Get(parsed, "data")
-    let x = unbox<int> (backend.Get(data, "x"))
+    let x = getInt backend data "x"
     x |> equal 1

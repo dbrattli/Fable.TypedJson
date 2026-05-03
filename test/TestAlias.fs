@@ -23,9 +23,15 @@ open Fable.TypedJson.JS.Json
 
 let backend = js
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 #endif
 
@@ -81,8 +87,7 @@ let ``test alias redirects encode output`` () =
     backend.ContainsKey(parsed, "location")
     |> equal false
 
-    unbox<string> (backend.Get(parsed, "loc"))
-    |> equal "Oslo"
+    getString backend parsed "loc" |> equal "Oslo"
 
 [<Fact>]
 let ``test alias falls through to case rule for unaliased fields`` () =
@@ -97,8 +102,7 @@ let ``test alias falls through to case rule for unaliased fields`` () =
     // "Days" wasn't aliased, so it follows the codec's SnakeCase rule.
     backend.ContainsKey(parsed, "days") |> equal true
 
-    unbox<int> (backend.Get(parsed, "days"))
-    |> equal 5
+    getInt backend parsed "days" |> equal 5
 
 [<Fact>]
 let ``test alias propagates to JSON schema property keys`` () =
@@ -126,7 +130,7 @@ let ``test alias propagates to JSON schema property keys`` () =
     let toListOfStrings (arr: obj) =
         let len = backend.ArrayLength arr
 
-        [ for i in 0 .. len - 1 -> unbox<string> (backend.ArrayAt(arr, i)) ]
+        [ for i in 0 .. len - 1 -> arrayAtString backend arr i ]
         |> List.sort
 
     toListOfStrings required |> equal [ "loc"; "n" ]

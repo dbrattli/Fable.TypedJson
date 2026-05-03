@@ -20,9 +20,15 @@ open Fable.TypedJson.JS.Json
 
 let backend = js
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 #endif
 
@@ -139,7 +145,7 @@ let ``test auto encode with snake_case`` () =
 
     let json = codec.encodeWith CaseRules.SnakeCase record
     let map = parseRaw json
-    let temp = unbox<float> (backend.Get(map, "air_temperature"))
+    let temp = getFloat backend map "air_temperature"
     temp |> equal 22.5
 
 [<Fact>]
@@ -153,7 +159,7 @@ let ``test auto encode with camelCase`` () =
 
     let json = codec.encodeWith CaseRules.LowerFirst record
     let map = parseRaw json
-    let temp = unbox<float> (backend.Get(map, "airTemperature"))
+    let temp = getFloat backend map "airTemperature"
     temp |> equal 22.5
 
 [<Fact>]

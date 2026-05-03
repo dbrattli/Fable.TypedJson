@@ -20,9 +20,15 @@ open Fable.TypedJson.JS.Json
 
 let backend = js
 #else
+#if DOTNET
+open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
+#else
 open Fable.TypedJson.Beam.Json
 
 let backend = beam
+#endif
 #endif
 #endif
 
@@ -140,8 +146,8 @@ let ``test auto encode simple record`` () =
     let record = { Name = "Bob"; Age = 25 }
     let json = codec.encode record
     let map = parseRaw json
-    let name = unbox<string> (backend.Get(map, "name"))
-    let age = unbox<int> (backend.Get(map, "age"))
+    let name = getString backend map "name"
+    let age = getInt backend map "age"
     name |> equal "Bob"
     age |> equal 25
 
@@ -158,8 +164,8 @@ let ``test auto encode float record`` () =
 
     let json = codec.encode record
     let map = parseRaw json
-    let temp = unbox<float> (backend.Get(map, "air_temperature"))
-    let humidity = unbox<float> (backend.Get(map, "relative_humidity"))
+    let temp = getFloat backend map "air_temperature"
+    let humidity = getFloat backend map "relative_humidity"
     temp |> equal 22.5
     humidity |> equal 65.0
 
@@ -176,8 +182,8 @@ let ``test auto encode with option some`` () =
 
     let json = codec.encode record
     let map = parseRaw json
-    let name = unbox<string> (backend.Get(map, "name"))
-    let email = unbox<string> (backend.Get(map, "email"))
+    let name = getString backend map "name"
+    let email = getString backend map "email"
     name |> equal "Alice"
     email |> equal "a@b.com"
 
