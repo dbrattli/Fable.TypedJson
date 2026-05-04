@@ -34,18 +34,26 @@ type CaseRules =
 
 /// Insert `separator` before each uppercase letter (except at index 0) and
 /// lowercase the letter. Powers both `toSnakeCase` (separator = "_") and
-/// `dashify` (separator = "-"). Allocates one string per character but only
-/// runs at codec-construction time (or at most once per field per encode),
-/// not on the hot path.
+/// `dashify` (separator = "-"). The body is imperative — `Seq.mapi` over a
+/// string fails with `badarg` on Fable BEAM (its seq enumerator doesn't
+/// drive the binary correctly), and an indexed `for` loop with
+/// `result + …` lowers cleanly to binary append on every backend.
+/// Runs at codec-construction time, not on the hot path.
 let private separateUpper (separator: string) (name: string) : string =
-    name
-    |> Seq.mapi (fun i c ->
+    let mutable result = ""
+
+    for i = 0 to name.Length - 1 do
+        let c = name.[i]
+
         if System.Char.IsUpper c then
-            let lower = string (System.Char.ToLowerInvariant c)
-            if i > 0 then separator + lower else lower
+            if i > 0 then
+                result <- result + separator
+
+            result <- result + string (System.Char.ToLowerInvariant c)
         else
-            string c)
-    |> String.concat ""
+            result <- result + string c
+
+    result
 
 let private toSnakeCase (name: string) : string = separateUpper "_" name
 
