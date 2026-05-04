@@ -157,12 +157,8 @@ let registerEntry (fullName: string) (entry: CodecEntry) (registry: CodecRegistr
 /// Pipeline-friendly: `emptyRegistry |> register Days.JsonCodec |> register Email.JsonCodec`.
 let inline register<'T> (codec: IJsonCodec<'T>) (registry: CodecRegistry) : CodecRegistry =
     let entry = {
-        decode =
-            fun jv ->
-                match codec.Decode jv with
-                | Ok v -> Ok(box v)
-                | Error e -> Error e
-        encode = fun v -> codec.Encode(unbox<'T> v)
+        decode = codec.Decode >> Result.map box
+        encode = unbox<'T> >> codec.Encode
         schema = codec.Schema
     }
 
@@ -914,22 +910,13 @@ let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
     let values = FSharpValue.GetRecordFields(box record)
 
     // BEAM lowercases F# field names in reflection; Python and JS preserve
-    // PascalCase. Going through Schema's identity transform here would mean
-    // dump produces different keys per backend — confusing and not portable.
-    // Hardcode the canonical-PascalCase round-trip so the dumped map's keys
-    // are stable across all targets.
-    let normalize (n: string) : string =
-        // PascalCase → LowerFirst-ish. Match what BEAM already produces.
-        if n.Length = 0 then
-            n
-        else
-            string (System.Char.ToLowerInvariant n.[0])
-            + n.[1..]
-
+    // PascalCase. `lowerFirstTransform` normalizes both (no-ops on the
+    // already-lowercase BEAM names, lowercases the first letter on Python/JS)
+    // so the dumped map's keys are stable across all targets.
     Array.zip fields values
     |> Array.fold
         (fun acc (fi, v) ->
-            let key = normalize fi.Name
+            let key = lowerFirstTransform fi.Name
 
             if isOptionType fi.PropertyType.FullName then
                 match extractOption v with
