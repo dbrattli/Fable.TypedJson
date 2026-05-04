@@ -265,6 +265,13 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // through to the JSON output. Lists/arrays of records are walked
         // element-wise and rebuilt as backend-native arrays. Primitives,
         // already-encoded option payloads, and unknown types pass through.
+        // The record-walk inside the IsRecord and IsUnion-payload branches
+        // is duplicated verbatim. The natural fix would be to extract a
+        // `recordEntries` helper into a `let rec ... and ...` group with
+        // `transformValue`, but Fable BEAM's codegen mishandles mutual
+        // recursion when nested inside another function — closure variable
+        // capture breaks and the lowered Erlang emits `case undefined of`.
+        // Leave the duplication; the alternative ships broken on BEAM.
         let rec transformValue (rules: CaseRules) (t: System.Type) (v: obj) : obj =
             if isNull v then
                 v
@@ -274,18 +281,16 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                 | None -> backend.Null
             elif isFSharpListType t.FullName then
                 let elementType = getGenericInnerType t
-                let xs = extractList v
 
-                xs
-                |> List.map (fun item -> transformValue rules elementType item)
+                extractList v
+                |> List.map (transformValue rules elementType)
                 |> backend.BuildArray
             elif t.IsArray then
                 let elementType = t.GetElementType()
-                let arr = unbox<obj[]> v
 
-                arr
+                unbox<obj[]> v
                 |> Array.toList
-                |> List.map (fun item -> transformValue rules elementType item)
+                |> List.map (transformValue rules elementType)
                 |> backend.BuildArray
             elif FSharpType.IsRecord t then
                 // Use FSharpValue.GetRecordField (per-field) rather than
@@ -295,10 +300,8 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                 // `System.Object` at runtime, which has no `fields` key.
                 // Reading per-field uses the PropertyInfo we already have
                 // from the static `t`, so it works on every backend.
-                let innerFields = FSharpType.GetRecordFields t
-
                 let entries =
-                    innerFields
+                    FSharpType.GetRecordFields t
                     |> Array.toList
                     |> List.choose (fun fi ->
                         let fv = FSharpValue.GetRecordField(v, fi)
@@ -345,10 +348,8 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                     if FSharpType.IsRecord payloadType then
                         // Walk the payload's fields the same way we walk a
                         // top-level record, so caseRules + aliases apply.
-                        let payloadFields = FSharpType.GetRecordFields payloadType
-
                         let payloadEntries =
-                            payloadFields
+                            FSharpType.GetRecordFields payloadType
                             |> Array.toList
                             |> List.choose (fun fi ->
                                 let fv = FSharpValue.GetRecordField(payloadValue, fi)
