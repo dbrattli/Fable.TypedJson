@@ -32,71 +32,44 @@ type CaseRules =
     | KebabCase = 4
     | PascalCase = 5
 
-let private toSnakeCase (name: string) : string =
-    let mutable result = ""
-
-    for i = 0 to name.Length - 1 do
-        let c = name.[i]
-
-        if System.Char.IsUpper(c) then
-            if i > 0 then
-                result <- result + "_"
-
-            result <- result + string (System.Char.ToLowerInvariant(c))
+/// Insert `separator` before each uppercase letter (except at index 0) and
+/// lowercase the letter. Powers both `toSnakeCase` (separator = "_") and
+/// `dashify` (separator = "-"). Allocates one string per character but only
+/// runs at codec-construction time (or at most once per field per encode),
+/// not on the hot path.
+let private separateUpper (separator: string) (name: string) : string =
+    name
+    |> Seq.mapi (fun i c ->
+        if System.Char.IsUpper c then
+            let lower = string (System.Char.ToLowerInvariant c)
+            if i > 0 then separator + lower else lower
         else
-            result <- result + string c
+            string c)
+    |> String.concat ""
 
-    result
+let private toSnakeCase (name: string) : string = separateUpper "_" name
 
 let private lowerFirst (name: string) : string =
     if name.Length = 0 then
         name
     else
-        string (System.Char.ToLowerInvariant(name.[0]))
-        + name.[1..]
+        string (System.Char.ToLowerInvariant name.[0]) + name.[1..]
 
-let private dashify (separator: string) (name: string) : string =
-    let mutable result = ""
-
-    for i = 0 to name.Length - 1 do
-        let c = name.[i]
-
-        if System.Char.IsUpper(c) then
-            if i > 0 then
-                result <- result + separator
-
-            result <- result + string (System.Char.ToLowerInvariant c)
-        else
-            result <- result + string c
-
-    result
+let private dashify (separator: string) (name: string) : string = separateUpper separator name
 
 /// Convert a snake_case name back to PascalCase.
 let fromSnakeCase (name: string) : string =
-    let parts = name.Split('_')
-
-    parts
+    name.Split '_'
     |> Array.map (fun part ->
         if part.Length = 0 then
             part
         else
-            string (System.Char.ToUpperInvariant(part.[0]))
-            + part.[1..])
+            string (System.Char.ToUpperInvariant part.[0]) + part.[1..])
     |> String.concat ""
 
 /// True if the name contains any uppercase letter (i.e., looks like Pascal/camelCase
 /// rather than snake_case). Used to decide whether to convert before applying a rule.
-let private hasUpper (name: string) : bool =
-    let mutable i = 0
-    let mutable found = false
-
-    while i < name.Length && not found do
-        if System.Char.IsUpper(name.[i]) then
-            found <- true
-
-        i <- i + 1
-
-    found
+let private hasUpper (name: string) : bool = String.exists System.Char.IsUpper name
 
 /// Apply a case rule to a field name.
 /// Reflection-supplied names differ across Fable targets — BEAM lowercases
@@ -560,9 +533,7 @@ let withModel (validator: 'T -> Result<'T, FieldError list>) (codec: TypedJson<'
     // the validator on the fresh inner codec.
     let rec wrap (inner: TypedJson<'T>) : TypedJson<'T> =
         let decodeWith (rules: CaseRules) (map: JsonMap) =
-            match inner.decodeWith rules map with
-            | Ok v -> validator v
-            | Error errs -> Error errs
+            inner.decodeWith rules map |> Result.bind validator
 
         {
             decode = decodeWith inner.caseRules
