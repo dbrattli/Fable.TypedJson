@@ -368,27 +368,21 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // `getGenericInnerType`. Mirrors the decode-side schema cache.
         let n = fields.Length
 
-        let defaultJsonKeys =
-            if FSharpType.IsRecord typ then
-                Array.init n (fun i -> resolveKey aliases caseRules fields.[i].Name)
-            else
-                [||]
-
-        let defaultIsOpts =
-            if FSharpType.IsRecord typ then
-                Array.init n (fun i -> isOptionType fields.[i].PropertyType.FullName)
-            else
-                [||]
+        // `fields` is empty (`[||]`) for non-record top-level types (e.g.
+        // tagged DUs), so `Array.map` over it naturally yields `[||]` —
+        // no need to gate each pre-bake step on `FSharpType.IsRecord typ`.
+        let defaultJsonKeys = fields |> Array.map (fun fi -> resolveKey aliases caseRules fi.Name)
+        let defaultIsOpts = fields |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
 
         let defaultInnerTypes =
-            if FSharpType.IsRecord typ then
-                Array.init n (fun i ->
-                    if defaultIsOpts.[i] then
-                        getGenericInnerType fields.[i].PropertyType
+            Array.map2
+                (fun (fi: System.Reflection.PropertyInfo) isOpt ->
+                    if isOpt then
+                        getGenericInnerType fi.PropertyType
                     else
-                        fields.[i].PropertyType)
-            else
-                [||]
+                        fi.PropertyType)
+                fields
+                defaultIsOpts
 
         // Pre-bake per-field transformers. `transformValue` dispatches on
         // `System.Type` characteristics (FullName starts-with checks +
@@ -436,11 +430,7 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // Build transformers against the INNER type (post-option-unwrap)
         // because `encodeRecordWith` already unwraps the option at the
         // call site and passes the inner value to `transformers.[i]`.
-        let defaultTransformers =
-            if FSharpType.IsRecord typ then
-                Array.init n (fun i -> buildTransformer caseRules defaultInnerTypes.[i])
-            else
-                [||]
+        let defaultTransformers = defaultInnerTypes |> Array.map (buildTransformer caseRules)
 
         // Walk a record's fields and write directly into a backend-native
         // map via `Put`. Avoids the `(string * obj) list` cons-cell chain
@@ -478,12 +468,8 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                         // and rebuild transformers (rules only enters the
                         // transformers via the recursive `transformValue`
                         // calls they make on nested records / lists).
-                        let jsonKeys =
-                            Array.init n (fun i -> resolveKey aliases rules fields.[i].Name)
-
-                        let transformers =
-                            Array.init n (fun i -> buildTransformer rules defaultInnerTypes.[i])
-
+                        let jsonKeys = fields |> Array.map (fun fi -> resolveKey aliases rules fi.Name)
+                        let transformers = defaultInnerTypes |> Array.map (buildTransformer rules)
                         encodeRecordWith jsonKeys defaultIsOpts transformers record
 
                 map |> Encode.toJson backend

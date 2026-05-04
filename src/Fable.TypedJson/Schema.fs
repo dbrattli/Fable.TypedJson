@@ -344,6 +344,16 @@ let private describeValue (backend: IJsonBackend) (fv: obj) : string =
     elif backend.IsMap fv then "map"
     else "<unknown>"
 
+/// Build a `key -> obj option` lookup over a backend-native JSON map.
+/// One implementation backing both the internal record/union resolvers and
+/// the public `jsonMapAdapter` — declared above the `let rec coerce` block
+/// so the recursive group can reference it.
+let mapLookup (backend: IJsonBackend) (m: obj) (key: string) : obj option =
+    if backend.ContainsKey(m, key) then
+        Some(backend.Get(m, key))
+    else
+        None
+
 /// `coerce` walks the type tree to convert a backend-native value into
 /// the target F# type. Dispatches on `targetFullName` for primitives and
 /// on F# reflection (`FSharpType.IsRecord` / `IsUnion`, list/array
@@ -433,13 +443,7 @@ let rec coerce
                 if backend.IsMap fv then
                     // resolveField applies keyTransform before calling the
                     // lookup, so the key here is already in JSON form.
-                    let lookup (key: string) : obj option =
-                        if backend.ContainsKey(fv, key) then
-                            Some(backend.Get(fv, key))
-                        else
-                            None
-
-                    resolveRecord backend registry keyTransform targetType lookup
+                    resolveRecord backend registry keyTransform targetType (mapLookup backend fv)
                     |> Result.mapError formatErrors
                 else
                     Error(sprintf "expected JSON object for %s" targetType.Name)
@@ -660,13 +664,7 @@ and coerceUnion
     : Result<obj, string> =
     // resolveField applies keyTransform before calling the lookup, so the
     // key here is already in JSON form.
-    let lookup (key: string) : obj option =
-        if backend.ContainsKey(jsonMap, key) then
-            Some(backend.Get(jsonMap, key))
-        else
-            None
-
-    resolveUnionFromLookup backend registry keyTransform unionType lookup
+    resolveUnionFromLookup backend registry keyTransform unionType (mapLookup backend jsonMap)
     |> Result.mapError formatErrors
 
 and resolveOptionalField
@@ -773,21 +771,22 @@ let buildRecordSchemaUntyped
     =
     let fields = FSharpType.GetRecordFields recordType
     let n = fields.Length
-    let jsonKeys = Array.init n (fun i -> keyTransform fields.[i].Name)
-
-    let isOpts =
-        Array.init n (fun i -> isOptionType fields.[i].PropertyType.FullName)
+    let jsonKeys = fields |> Array.map (fun fi -> keyTransform fi.Name)
+    let isOpts = fields |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
 
     let innerTypes =
-        Array.init n (fun i ->
-            if isOpts.[i] then
-                getGenericInnerType fields.[i].PropertyType
-            else
-                fields.[i].PropertyType)
+        Array.map2
+            (fun (fi: System.Reflection.PropertyInfo) isOpt ->
+                if isOpt then
+                    getGenericInnerType fi.PropertyType
+                else
+                    fi.PropertyType)
+            fields
+            isOpts
     // `typeNames` is read only on the error path — we still pay one
     // allocation per array entry at construction time but save the
     // PropertyType.Name access per decode.
-    let typeNames = Array.init n (fun i -> innerTypes.[i].Name)
+    let typeNames = innerTypes |> Array.map (fun t -> t.Name)
 
     fun lookup ->
         let values = Array.zeroCreate<obj> n
@@ -883,11 +882,7 @@ let stringMapAdapter (map: Map<string, string>) (key: string) : obj option =
 /// Returns the raw native value (Erlang binary, Python str, JS string, .NET
 /// `JsonValue` case, …); the schema layer dispatches via `IJsonBackend.IsX`
 /// / `AsX` rather than pattern-matching `JsonValue`.
-let jsonMapAdapter (backend: IJsonBackend) (map: obj) (key: string) : obj option =
-    if backend.ContainsKey(map, key) then
-        Some(backend.Get(map, key))
-    else
-        None
+let jsonMapAdapter (backend: IJsonBackend) (map: obj) : string -> obj option = mapLookup backend map
 
 // ============================================================================
 // Convenience Functions
