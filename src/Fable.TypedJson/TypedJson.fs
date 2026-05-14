@@ -61,7 +61,8 @@ let private lowerFirst (name: string) : string =
     if name.Length = 0 then
         name
     else
-        string (System.Char.ToLowerInvariant name.[0]) + name.[1..]
+        string (System.Char.ToLowerInvariant name.[0])
+        + name.[1..]
 
 let private dashify (separator: string) (name: string) : string = separateUpper separator name
 
@@ -72,7 +73,8 @@ let fromSnakeCase (name: string) : string =
         if part.Length = 0 then
             part
         else
-            string (System.Char.ToUpperInvariant part.[0]) + part.[1..])
+            string (System.Char.ToUpperInvariant part.[0])
+            + part.[1..])
     |> String.concat ""
 
 /// True if the name contains any uppercase letter (i.e., looks like Pascal/camelCase
@@ -204,6 +206,187 @@ Creates a TypedJson codec by wrapping Schema.auto with:
 adr: inline required for typeof<'T> resolution on Fable backends
 *)
 
+/// Resolve the JSON key for a given F# field name: alias if present,
+/// otherwise the case-rule-derived form. Lookup is keyed by the field's
+/// PascalCase form so the same alias works regardless of how the
+/// backend's reflection presents the name (BEAM lowercases, Python
+/// preserves the F# spelling).
+let resolveKey (aliases: Map<string, string>) (caseRules: CaseRules) (fieldName: string) : string =
+    let canonical = applyCaseRule CaseRules.PascalCase fieldName
+
+    match Map.tryFind canonical aliases with
+    | Some alias -> alias
+    | None -> applyCaseRule caseRules fieldName
+
+/// Recursively transform a value into a backend-native form so that any
+/// nested records have their keys mapped through the same CaseRules/aliases
+/// the outer record uses. Without this, nested F# records would be Stringify'd
+/// by the backend using its default reflection casing (Python: PascalCase,
+/// BEAM: lowercase) and leak through to the JSON output. Lists/arrays of
+/// records are walked element-wise and rebuilt as backend-native arrays.
+/// Primitives, already-encoded option payloads, and unknown types pass
+/// through.
+///
+/// Module-level mutual recursion is intentional: nesting `let rec ... and ...`
+/// inside an `inline` function triggers a Fable BEAM codegen bug (captures
+/// lower to `undefined`). At module scope with explicit parameters the bug
+/// doesn't apply — same pattern as Schema.fs `coerce` / `resolveRecord`.
+let rec transformValue (backend: IJsonBackend) (aliases: Map<string, string>) (rules: CaseRules) (t: System.Type) (v: obj) : obj =
+    if isNull v then
+        v
+    elif isOptionType t.FullName then
+        match extractOption v with
+        | Some inner -> transformValue backend aliases rules (getGenericInnerType t) inner
+        | None -> backend.Null
+    elif isFSharpListType t.FullName then
+        let elementType = getGenericInnerType t
+
+        extractList v
+        |> List.map (transformValue backend aliases rules elementType)
+        |> backend.BuildArray
+    elif t.IsArray then
+        let elementType = t.GetElementType()
+
+        unbox<obj[]> v
+        |> Array.toList
+        |> List.map (transformValue backend aliases rules elementType)
+        |> backend.BuildArray
+    elif FSharpType.IsRecord t then
+        Encode.object backend (recordEntries backend aliases rules t v)
+    elif FSharpType.IsUnion t then
+        // Tagged DU: emit `{type: "<caseName>", ...payload}`. For a fieldless
+        // case, just `{type: "..."}`. For a single record-field case, flatten
+        // the record's keys alongside the discriminator. Other shapes are
+        // unsupported in v1 (matches Schema.coerceUnion).
+        let caseInfo, caseValues = FSharpValue.GetUnionFields(v, t)
+        let tag = tagOfCaseName caseInfo.Name
+        let caseFields = caseInfo.GetFields()
+        let baseEntry = (discriminatorKey, box tag)
+
+        // `caseValues : obj[]` has a different runtime shape on each Fable
+        // backend (process-dict ref on BEAM, GenericArray on Python, native
+        // array on .NET). Going through `backend.ArrayLength` / `ArrayAt`
+        // gives uniform access.
+        let payloadCount = backend.ArrayLength(box caseValues)
+
+        let payload =
+            if payloadCount > 0 then
+                Some(backend.ArrayAt(box caseValues, 0))
+            else
+                None
+
+        match caseFields.Length, payload with
+        | 0, _
+        | _, None -> Encode.object backend [ baseEntry ]
+        | 1, Some payloadValue ->
+            let payloadType = caseFields.[0].PropertyType
+
+            if FSharpType.IsRecord payloadType then
+                let payloadEntries = recordEntries backend aliases rules payloadType payloadValue
+                Encode.object backend (baseEntry :: payloadEntries)
+            else
+                // Non-record single-field cases not supported in v1.
+                Encode.object backend [ baseEntry ]
+        | _ ->
+            // Multi-positional-field cases not supported in v1.
+            Encode.object backend [ baseEntry ]
+    else
+        v
+
+/// Walk a record's fields, applying caseRules + aliases to each key and
+/// recursively transforming each value via `transformValue`. Optional fields
+/// with `None` are dropped (no entry emitted).
+///
+/// Uses `FSharpValue.GetRecordField` per-field rather than `GetRecordFields`
+/// (whole record). The latter requires recovering the F# record type from a
+/// boxed obj and Fable BEAM can't — it lowers `box record`'s type to
+/// `System.Object` at runtime. Reading per-field uses the PropertyInfo we
+/// already have from the static `recordType`, so it works on every backend.
+and recordEntries
+    (backend: IJsonBackend)
+    (aliases: Map<string, string>)
+    (rules: CaseRules)
+    (recordType: System.Type)
+    (recordValue: obj)
+    : (string * obj) list =
+    FSharpType.GetRecordFields recordType
+    |> Array.toList
+    |> List.choose (fun fi ->
+        let fv = FSharpValue.GetRecordField(recordValue, fi)
+        let jsonKey = resolveKey aliases rules fi.Name
+
+        if isOptionType fi.PropertyType.FullName then
+            match extractOption fv with
+            | Some inner -> Some(jsonKey, transformValue backend aliases rules (getGenericInnerType fi.PropertyType) inner)
+            | None -> None
+        else
+            Some(jsonKey, transformValue backend aliases rules fi.PropertyType fv))
+
+/// Pre-bake a per-field transformer. `transformValue` dispatches on
+/// `System.Type` characteristics, and that dispatch is identical on every
+/// call for a given field type. Resolve it once per field and capture the
+/// appropriate closure: `id` for primitives, specialised closures for
+/// option/list/array/record/union.
+let buildTransformer (backend: IJsonBackend) (aliases: Map<string, string>) (rules: CaseRules) (innerType: System.Type) : obj -> obj =
+    let fn = innerType.FullName
+
+    if isOptionType fn then
+        let valueType = getGenericInnerType innerType
+
+        fun v ->
+            match extractOption v with
+            | Some inner -> transformValue backend aliases rules valueType inner
+            | Option.None -> backend.Null
+    elif isFSharpListType fn then
+        let elementType = getGenericInnerType innerType
+
+        fun v ->
+            extractList v
+            |> List.map (fun item -> transformValue backend aliases rules elementType item)
+            |> backend.BuildArray
+    elif innerType.IsArray then
+        let elementType = innerType.GetElementType()
+
+        fun v ->
+            unbox<obj[]> v
+            |> Array.toList
+            |> List.map (fun item -> transformValue backend aliases rules elementType item)
+            |> backend.BuildArray
+    elif FSharpType.IsRecord innerType then
+        fun v -> transformValue backend aliases rules innerType v
+    elif FSharpType.IsUnion innerType then
+        fun v -> transformValue backend aliases rules innerType v
+    else
+        // Primitive (string / int / float / bool / ...): identity — matches
+        // `transformValue`'s `else v` branch.
+        id
+
+/// Walk a record's fields and write directly into a backend-native map via
+/// `Put`. Avoids the `(string * obj) list` cons-cell chain that `Encode.object`
+/// builds, and uses pre-baked per-field transformers so each field's
+/// `transformValue` dispatch happens once at codec-construction (not per encode).
+let encodeRecordValues
+    (backend: IJsonBackend)
+    (fields: System.Reflection.PropertyInfo[])
+    (jsonKeys: string[])
+    (isOpts: bool[])
+    (transformers: (obj -> obj)[])
+    (boxedRecord: obj)
+    : obj =
+    let mutable acc = backend.NewMap()
+
+    for i = 0 to fields.Length - 1 do
+        let v = FSharpValue.GetRecordField(boxedRecord, fields.[i])
+
+        if isOpts.[i] then
+            match extractOption v with
+            | Some inner -> acc <- backend.Put(acc, jsonKeys.[i], transformers.[i] inner)
+            | Option.None -> ()
+        else
+            acc <- backend.Put(acc, jsonKeys.[i], transformers.[i] v)
+
+    acc
+
 let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : TypedJson<'T> =
     let typ = typeof<'T>
 
@@ -215,18 +398,6 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
             FSharpType.GetRecordFields typ
         else
             [||]
-
-    /// Resolve the JSON key for a given F# field name: alias if present,
-    /// otherwise the case-rule-derived form. Lookup is keyed by the field's
-    /// PascalCase form so the same alias works regardless of how the
-    /// backend's reflection presents the name (BEAM lowercases, Python
-    /// preserves the F# spelling).
-    let resolveKey (aliases: Map<string, string>) (caseRules: CaseRules) (fieldName: string) : string =
-        let canonical = applyCaseRule CaseRules.PascalCase fieldName
-
-        match Map.tryFind canonical aliases with
-        | Some alias -> alias
-        | None -> applyCaseRule caseRules fieldName
 
     // Recursive constructor — building a new codec with different aliases or
     // a different default case rule is a single recursive call away. F#
@@ -257,131 +428,20 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
             // up; passing a raw adapter avoids double-transforming the key.
             schemaFn (jsonMapAdapter backend map)
 
-        // Recursively transform a value into a backend-native form so that
-        // any nested records have their keys mapped through the same
-        // CaseRules/aliases the outer record uses. Without this, nested F#
-        // records would be Stringify'd by the backend using its default
-        // reflection casing (Python: PascalCase, BEAM: lowercase) and leak
-        // through to the JSON output. Lists/arrays of records are walked
-        // element-wise and rebuilt as backend-native arrays. Primitives,
-        // already-encoded option payloads, and unknown types pass through.
-        // The record-walk inside the IsRecord and IsUnion-payload branches
-        // is duplicated verbatim. The natural fix would be to extract a
-        // `recordEntries` helper into a `let rec ... and ...` group with
-        // `transformValue`, but Fable BEAM's codegen mishandles mutual
-        // recursion when nested inside another function — closure variable
-        // capture breaks and the lowered Erlang emits `case undefined of`.
-        // Leave the duplication; the alternative ships broken on BEAM.
-        let rec transformValue (rules: CaseRules) (t: System.Type) (v: obj) : obj =
-            if isNull v then
-                v
-            elif isOptionType t.FullName then
-                match extractOption v with
-                | Some inner -> transformValue rules (getGenericInnerType t) inner
-                | None -> backend.Null
-            elif isFSharpListType t.FullName then
-                let elementType = getGenericInnerType t
-
-                extractList v
-                |> List.map (transformValue rules elementType)
-                |> backend.BuildArray
-            elif t.IsArray then
-                let elementType = t.GetElementType()
-
-                unbox<obj[]> v
-                |> Array.toList
-                |> List.map (transformValue rules elementType)
-                |> backend.BuildArray
-            elif FSharpType.IsRecord t then
-                // Use FSharpValue.GetRecordField (per-field) rather than
-                // FSharpValue.GetRecordFields (whole record). The latter
-                // requires recovering the F# record type from a boxed obj
-                // and Fable BEAM can't — it lowers `box record`'s type to
-                // `System.Object` at runtime, which has no `fields` key.
-                // Reading per-field uses the PropertyInfo we already have
-                // from the static `t`, so it works on every backend.
-                let entries =
-                    FSharpType.GetRecordFields t
-                    |> Array.toList
-                    |> List.choose (fun fi ->
-                        let fv = FSharpValue.GetRecordField(v, fi)
-                        let jsonKey = resolveKey aliases rules fi.Name
-
-                        if isOptionType fi.PropertyType.FullName then
-                            match extractOption fv with
-                            | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
-                            | None -> None
-                        else
-                            Some(jsonKey, transformValue rules fi.PropertyType fv))
-
-                Encode.object backend entries
-
-            elif FSharpType.IsUnion t then
-                // Tagged DU: emit `{type: "<caseName>", ...payload}`.
-                // For a fieldless case, just `{type: "..."}`. For a single
-                // record-field case, flatten the record's keys alongside the
-                // discriminator. Other shapes are unsupported in v1 (matches
-                // the decode side in Schema.coerceUnion).
-                let caseInfo, caseValues = FSharpValue.GetUnionFields(v, t)
-                let tag = tagOfCaseName caseInfo.Name
-                let caseFields = caseInfo.GetFields()
-                let baseEntry = (discriminatorKey, box tag)
-
-                // `caseValues : obj[]` has a different runtime shape on each
-                // Fable backend (process-dict ref on BEAM, GenericArray on
-                // Python, native array on .NET). Going through `backend.ArrayAt`
-                // / `ArrayLength` gives uniform access.
-                let payloadCount = backend.ArrayLength(box caseValues)
-
-                let payload =
-                    if payloadCount > 0 then
-                        Some(backend.ArrayAt(box caseValues, 0))
-                    else
-                        None
-
-                match caseFields.Length, payload with
-                | 0, _
-                | _, None -> Encode.object backend [ baseEntry ]
-                | 1, Some payloadValue ->
-                    let payloadType = caseFields.[0].PropertyType
-
-                    if FSharpType.IsRecord payloadType then
-                        // Walk the payload's fields the same way we walk a
-                        // top-level record, so caseRules + aliases apply.
-                        let payloadEntries =
-                            FSharpType.GetRecordFields payloadType
-                            |> Array.toList
-                            |> List.choose (fun fi ->
-                                let fv = FSharpValue.GetRecordField(payloadValue, fi)
-                                let jsonKey = resolveKey aliases rules fi.Name
-
-                                if isOptionType fi.PropertyType.FullName then
-                                    match extractOption fv with
-                                    | Some inner -> Some(jsonKey, transformValue rules (getGenericInnerType fi.PropertyType) inner)
-                                    | None -> None
-                                else
-                                    Some(jsonKey, transformValue rules fi.PropertyType fv))
-
-                        Encode.object backend (baseEntry :: payloadEntries)
-                    else
-                        // Non-record single-field cases not supported in v1.
-                        Encode.object backend [ baseEntry ]
-                | _ ->
-                    // Multi-positional-field cases not supported in v1.
-                    Encode.object backend [ baseEntry ]
-            else
-                v
-
         // Pre-bake the per-field metadata for the default rules so the hot
         // encode path skips per-call `resolveKey`, `isOptionType`, and
         // `getGenericInnerType`. Mirrors the decode-side schema cache.
-        let n = fields.Length
-
+        //
         // `fields` is empty (`[||]`) for non-record top-level types (e.g.
         // tagged DUs), so `Array.map` over it naturally yields `[||]` —
         // no need to gate each pre-bake step on `FSharpType.IsRecord typ`.
-        let defaultJsonKeys = fields |> Array.map (fun fi -> resolveKey aliases caseRules fi.Name)
-        let defaultIsOpts = fields |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
+        let defaultJsonKeys =
+            fields
+            |> Array.map (fun fi -> resolveKey aliases caseRules fi.Name)
+
+        let defaultIsOpts =
+            fields
+            |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
 
         let defaultInnerTypes =
             Array.map2
@@ -393,74 +453,12 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                 fields
                 defaultIsOpts
 
-        // Pre-bake per-field transformers. `transformValue` dispatches on
-        // `System.Type` characteristics (FullName starts-with checks +
-        // FSharpType.IsRecord/IsUnion + IsArray), and that dispatch is
-        // identical on every call for a given field type. Resolve it once
-        // per field and capture the appropriate closure: `id` for primitives
-        // (the `else v` fall-through path), specialised closures for option
-        // / list / array / record / union. The dispatch happens on
-        // `System.Type` (not on `JsonValue`) so the Fable codegen is well
-        // exercised — no risk of the erased-DU pattern issue we saw earlier.
-        let buildTransformer (rules: CaseRules) (innerType: System.Type) : obj -> obj =
-            let fn = innerType.FullName
-
-            if isOptionType fn then
-                let valueType = getGenericInnerType innerType
-
-                fun v ->
-                    match extractOption v with
-                    | Some inner -> transformValue rules valueType inner
-                    | Option.None -> backend.Null
-            elif isFSharpListType fn then
-                let elementType = getGenericInnerType innerType
-
-                fun v ->
-                    extractList v
-                    |> List.map (fun item -> transformValue rules elementType item)
-                    |> backend.BuildArray
-            elif innerType.IsArray then
-                let elementType = innerType.GetElementType()
-
-                fun v ->
-                    unbox<obj[]> v
-                    |> Array.toList
-                    |> List.map (fun item -> transformValue rules elementType item)
-                    |> backend.BuildArray
-            elif FSharpType.IsRecord innerType then
-                fun v -> transformValue rules innerType v
-            elif FSharpType.IsUnion innerType then
-                fun v -> transformValue rules innerType v
-            else
-                // Primitive (string / int / float / bool / ...): identity —
-                // matches `transformValue`'s `else v` branch.
-                id
-
         // Build transformers against the INNER type (post-option-unwrap)
-        // because `encodeRecordWith` already unwraps the option at the
+        // because `encodeRecordValues` already unwraps the option at the
         // call site and passes the inner value to `transformers.[i]`.
-        let defaultTransformers = defaultInnerTypes |> Array.map (buildTransformer caseRules)
-
-        // Walk a record's fields and write directly into a backend-native
-        // map via `Put`. Avoids the `(string * obj) list` cons-cell chain
-        // that `Encode.object` builds, and uses pre-baked per-field
-        // transformers so each field's `transformValue` dispatch happens
-        // once at codec-construction (not per encode).
-        let inline encodeRecordWith (jsonKeys: string[]) (isOpts: bool[]) (transformers: (obj -> obj)[]) (record: 'T) : obj =
-            let mutable acc = backend.NewMap()
-            let boxed = box record
-
-            for i = 0 to n - 1 do
-                let v = FSharpValue.GetRecordField(boxed, fields.[i])
-
-                if isOpts.[i] then
-                    match extractOption v with
-                    | Some inner -> acc <- backend.Put(acc, jsonKeys.[i], transformers.[i] inner)
-                    | Option.None -> ()
-                else
-                    acc <- backend.Put(acc, jsonKeys.[i], transformers.[i] v)
-
-            acc
+        let defaultTransformers =
+            defaultInnerTypes
+            |> Array.map (buildTransformer backend aliases caseRules)
 
         let encodeWith (rules: CaseRules) (record: 'T) : string =
             // Top-level dispatch mirrors decode (Schema.auto): record →
@@ -468,22 +466,30 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
             // transformValue. Anything else: hand off to the backend's
             // Stringify and hope for the best.
             if FSharpType.IsRecord typ then
+                let boxed = box record
+
                 let map =
                     if rules = caseRules then
                         // Hot path: reuse the pre-baked metadata + transformers.
-                        encodeRecordWith defaultJsonKeys defaultIsOpts defaultTransformers record
+                        encodeRecordValues backend fields defaultJsonKeys defaultIsOpts defaultTransformers boxed
                     else
                         // Cold path: caller overrode the rule, recompute keys
                         // and rebuild transformers (rules only enters the
                         // transformers via the recursive `transformValue`
                         // calls they make on nested records / lists).
-                        let jsonKeys = fields |> Array.map (fun fi -> resolveKey aliases rules fi.Name)
-                        let transformers = defaultInnerTypes |> Array.map (buildTransformer rules)
-                        encodeRecordWith jsonKeys defaultIsOpts transformers record
+                        let jsonKeys =
+                            fields
+                            |> Array.map (fun fi -> resolveKey aliases rules fi.Name)
+
+                        let transformers =
+                            defaultInnerTypes
+                            |> Array.map (buildTransformer backend aliases rules)
+
+                        encodeRecordValues backend fields jsonKeys defaultIsOpts transformers boxed
 
                 map |> Encode.toJson backend
             elif FSharpType.IsUnion typ then
-                transformValue rules typ (box record)
+                transformValue backend aliases rules typ (box record)
                 |> Encode.toJson backend
             else
                 Encode.toJson backend (box record)
@@ -528,7 +534,8 @@ let withModel (validator: 'T -> Result<'T, FieldError list>) (codec: TypedJson<'
     // the validator on the fresh inner codec.
     let rec wrap (inner: TypedJson<'T>) : TypedJson<'T> =
         let decodeWith (rules: CaseRules) (map: JsonMap) =
-            inner.decodeWith rules map |> Result.bind validator
+            inner.decodeWith rules map
+            |> Result.bind validator
 
         {
             decode = decodeWith inner.caseRules
