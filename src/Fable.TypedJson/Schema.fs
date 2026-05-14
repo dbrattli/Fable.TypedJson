@@ -408,8 +408,25 @@ let rec coerce
         elif backend.IsInt fv then Ok(box (float (backend.AsInt fv)))
         elif backend.IsString fv then
             let s = backend.AsString fv
-
+            // JSON numbers are always `.`-as-decimal per RFC 8259. On the
+            // CLR `TryParse(s)` uses the thread culture, which on `.`-as-
+            // thousands locales (es/fr/de/...) misparses "22.5" as 225 —
+            // pin InvariantCulture. Fable backends transpile to native
+            // locale-immune parsers (Erlang `binary_to_float`, Python `float`,
+            // JS `parseFloat`), and Fable doesn't implement the 3-arg overload
+            // (returns 0.0 on BEAM), so the parameterless form is correct
+            // there.
+#if FABLE_COMPILER
             match System.Double.TryParse(s) with
+#else
+            match
+                System.Double.TryParse(
+                    s,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture
+                )
+            with
+#endif
             | true, f -> Ok(box f)
             | _ -> Error(sprintf "cannot parse '%s' as float" s)
         else
