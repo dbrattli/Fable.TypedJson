@@ -157,12 +157,8 @@ let registerEntry (fullName: string) (entry: CodecEntry) (registry: CodecRegistr
 /// Pipeline-friendly: `emptyRegistry |> register Days.JsonCodec |> register Email.JsonCodec`.
 let inline register<'T> (codec: IJsonCodec<'T>) (registry: CodecRegistry) : CodecRegistry =
     let entry = {
-        decode =
-            fun jv ->
-                match codec.Decode jv with
-                | Ok v -> Ok(box v)
-                | Error e -> Error e
-        encode = fun v -> codec.Encode(unbox<'T> v)
+        decode = codec.Decode >> Result.map box
+        encode = unbox<'T> >> codec.Encode
         schema = codec.Schema
     }
 
@@ -289,9 +285,10 @@ let getOptionInnerFullName (fi: System.Reflection.PropertyInfo) : string =
 
 let getGenericInnerType (t: System.Type) : System.Type = t.GenericTypeArguments.[0]
 
-/// Format a list of FieldErrors into a single string (used to collapse nested
-/// record / list errors into a single coerce error message).
-let private joinErrors (errors: FieldError list) : string =
+/// Format a list of FieldErrors into a single human-readable string.
+/// Collapses nested record / list errors into a single message and is the
+/// public LLM-feedback formatter — one definition serving both call sites.
+let formatErrors (errors: FieldError list) : string =
     errors
     |> List.map (fun e -> sprintf "%s: %s" e.path e.message)
     |> String.concat ", "
@@ -308,17 +305,10 @@ let identityTransform (s: string) : string = s
 /// returns it unchanged. Stable across BEAM/Python (already lowercase) and
 /// JS (PascalCase → camelCase).
 let lowerFirstTransform (s: string) : string =
-    let mutable hasUpper = false
-
-    for i = 0 to s.Length - 1 do
-        if System.Char.IsUpper(s.[i]) then
-            hasUpper <- true
-
-    if not hasUpper || s.Length = 0 then
+    if s.Length = 0 || not (String.exists System.Char.IsUpper s) then
         s
     else
-        string (System.Char.ToLowerInvariant s.[0])
-        + s.[1..]
+        string (System.Char.ToLowerInvariant s.[0]) + s.[1..]
 
 /// Lazily wrap a backend-native value as a `JsonValue` for hand-off to
 /// user codecs (`IJsonCodec.Decode`). Internal `coerce` never calls this
@@ -349,6 +339,16 @@ let private describeValue (backend: IJsonBackend) (fv: obj) : string =
     elif backend.IsArray fv then "array"
     elif backend.IsMap fv then "map"
     else "<unknown>"
+
+/// Build a `key -> obj option` lookup over a backend-native JSON map.
+/// One implementation backing both the internal record/union resolvers and
+/// the public `jsonMapAdapter` — declared above the `let rec coerce` block
+/// so the recursive group can reference it.
+let mapLookup (backend: IJsonBackend) (m: obj) (key: string) : obj option =
+    if backend.ContainsKey(m, key) then
+        Some(backend.Get(m, key))
+    else
+        None
 
 /// `coerce` walks the type tree to convert a backend-native value into
 /// the target F# type. Dispatches on `targetFullName` for primitives and
@@ -439,15 +439,8 @@ let rec coerce
                 if backend.IsMap fv then
                     // resolveField applies keyTransform before calling the
                     // lookup, so the key here is already in JSON form.
-                    let lookup (key: string) : obj option =
-                        if backend.ContainsKey(fv, key) then
-                            Some(backend.Get(fv, key))
-                        else
-                            None
-
-                    match resolveRecord backend registry keyTransform targetType lookup with
-                    | Ok r -> Ok r
-                    | Error errs -> Error(joinErrors errs)
+                    resolveRecord backend registry keyTransform targetType (mapLookup backend fv)
+                    |> Result.mapError formatErrors
                 else
                     Error(sprintf "expected JSON object for %s" targetType.Name)
 
@@ -520,9 +513,8 @@ and coerceList
     // Build a typed `'elementType list` so the boxed result can be assigned
     // to a record field via reflection. Fable erases generics so the helper
     // is just `box xs`; on the CLR it constructs the typed union cells.
-    match coerceElements backend registry keyTransform elementType fv with
-    | Ok xs -> Ok(buildList elementType xs)
-    | Error msg -> Error msg
+    coerceElements backend registry keyTransform elementType fv
+    |> Result.map (buildList elementType)
 
 and coerceArray
     (backend: IJsonBackend)
@@ -531,9 +523,8 @@ and coerceArray
     (elementType: System.Type)
     (fv: obj)
     : Result<obj, string> =
-    match coerceElements backend registry keyTransform elementType fv with
-    | Ok xs -> Ok(box (List.toArray xs))
-    | Error msg -> Error msg
+    coerceElements backend registry keyTransform elementType fv
+    |> Result.map (List.toArray >> box)
 
 and resolveRecord
     (backend: IJsonBackend)
@@ -632,9 +623,8 @@ and resolveUnionFromLookup
                 let payloadType = caseFields.[0].PropertyType
 
                 if FSharpType.IsRecord payloadType then
-                    match resolveRecord backend registry keyTransform payloadType lookup with
-                    | Ok payload -> Ok(FSharpValue.MakeUnion(caseInfo, [| payload |]))
-                    | Error errs -> Error errs
+                    resolveRecord backend registry keyTransform payloadType lookup
+                    |> Result.map (fun payload -> FSharpValue.MakeUnion(caseInfo, [| payload |]))
                 else
                     Error [
                         {
@@ -670,15 +660,8 @@ and coerceUnion
     : Result<obj, string> =
     // resolveField applies keyTransform before calling the lookup, so the
     // key here is already in JSON form.
-    let lookup (key: string) : obj option =
-        if backend.ContainsKey(jsonMap, key) then
-            Some(backend.Get(jsonMap, key))
-        else
-            None
-
-    match resolveUnionFromLookup backend registry keyTransform unionType lookup with
-    | Ok v -> Ok v
-    | Error errs -> Error(joinErrors errs)
+    resolveUnionFromLookup backend registry keyTransform unionType (mapLookup backend jsonMap)
+    |> Result.mapError formatErrors
 
 and resolveOptionalField
     (backend: IJsonBackend)
@@ -694,9 +677,9 @@ and resolveOptionalField
     | Some fv ->
         let innerType = getGenericInnerType fi.PropertyType
 
-        match coerce backend registry keyTransform innerType fv with
-        | Ok v -> Ok(buildOption innerType v)
-        | Error msg -> Error { path = name; message = msg }
+        coerce backend registry keyTransform innerType fv
+        |> Result.map (buildOption innerType)
+        |> Result.mapError (fun msg -> { path = name; message = msg })
 
 and resolveRequiredField
     (backend: IJsonBackend)
@@ -718,9 +701,8 @@ and resolveRequiredField
             message = sprintf "null value (expected %s)" fi.PropertyType.Name
         }
     | Some fv ->
-        match coerce backend registry keyTransform fi.PropertyType fv with
-        | Ok v -> Ok v
-        | Error msg -> Error { path = name; message = msg }
+        coerce backend registry keyTransform fi.PropertyType fv
+        |> Result.mapError (fun msg -> { path = name; message = msg })
 
 and resolveField
     (backend: IJsonBackend)
@@ -785,21 +767,22 @@ let buildRecordSchemaUntyped
     =
     let fields = FSharpType.GetRecordFields recordType
     let n = fields.Length
-    let jsonKeys = Array.init n (fun i -> keyTransform fields.[i].Name)
-
-    let isOpts =
-        Array.init n (fun i -> isOptionType fields.[i].PropertyType.FullName)
+    let jsonKeys = fields |> Array.map (fun fi -> keyTransform fi.Name)
+    let isOpts = fields |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
 
     let innerTypes =
-        Array.init n (fun i ->
-            if isOpts.[i] then
-                getGenericInnerType fields.[i].PropertyType
-            else
-                fields.[i].PropertyType)
+        Array.map2
+            (fun (fi: System.Reflection.PropertyInfo) isOpt ->
+                if isOpt then
+                    getGenericInnerType fi.PropertyType
+                else
+                    fi.PropertyType)
+            fields
+            isOpts
     // `typeNames` is read only on the error path — we still pay one
     // allocation per array entry at construction time but save the
     // PropertyType.Name access per decode.
-    let typeNames = Array.init n (fun i -> innerTypes.[i].Name)
+    let typeNames = innerTypes |> Array.map (fun t -> t.Name)
 
     fun lookup ->
         let values = Array.zeroCreate<obj> n
@@ -857,15 +840,11 @@ let inline auto<'T> (backend: IJsonBackend) (registry: CodecRegistry) (keyTransf
         // `auto<'T>` is `inline`). The closure below does no reflection.
         let recordSchema = buildRecordSchemaUntyped backend registry keyTransform typ
 
-        fun (lookup: string -> obj option) ->
-            match recordSchema lookup with
-            | Ok r -> Ok(unbox<'T> r)
-            | Error errs -> Error errs
+        fun (lookup: string -> obj option) -> recordSchema lookup |> Result.map unbox<'T>
     elif FSharpType.IsUnion typ then
         fun (lookup: string -> obj option) ->
-            match resolveUnionFromLookup backend registry keyTransform typ lookup with
-            | Ok v -> Ok(unbox<'T> v)
-            | Error errs -> Error errs
+            resolveUnionFromLookup backend registry keyTransform typ lookup
+            |> Result.map unbox<'T>
     else
         let badTypeError = [
             {
@@ -899,11 +878,7 @@ let stringMapAdapter (map: Map<string, string>) (key: string) : obj option =
 /// Returns the raw native value (Erlang binary, Python str, JS string, .NET
 /// `JsonValue` case, …); the schema layer dispatches via `IJsonBackend.IsX`
 /// / `AsX` rather than pattern-matching `JsonValue`.
-let jsonMapAdapter (backend: IJsonBackend) (map: obj) (key: string) : obj option =
-    if backend.ContainsKey(map, key) then
-        Some(backend.Get(map, key))
-    else
-        None
+let jsonMapAdapter (backend: IJsonBackend) (map: obj) : string -> obj option = mapLookup backend map
 
 // ============================================================================
 // Convenience Functions
@@ -935,22 +910,13 @@ let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
     let values = FSharpValue.GetRecordFields(box record)
 
     // BEAM lowercases F# field names in reflection; Python and JS preserve
-    // PascalCase. Going through Schema's identity transform here would mean
-    // dump produces different keys per backend — confusing and not portable.
-    // Hardcode the canonical-PascalCase round-trip so the dumped map's keys
-    // are stable across all targets.
-    let normalize (n: string) : string =
-        // PascalCase → LowerFirst-ish. Match what BEAM already produces.
-        if n.Length = 0 then
-            n
-        else
-            string (System.Char.ToLowerInvariant n.[0])
-            + n.[1..]
-
+    // PascalCase. `lowerFirstTransform` normalizes both (no-ops on the
+    // already-lowercase BEAM names, lowercases the first letter on Python/JS)
+    // so the dumped map's keys are stable across all targets.
     Array.zip fields values
     |> Array.fold
         (fun acc (fi, v) ->
-            let key = normalize fi.Name
+            let key = lowerFirstTransform fi.Name
 
             if isOptionType fi.PropertyType.FullName then
                 match extractOption v with
@@ -959,9 +925,3 @@ let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
             else
                 backend.Put(acc, key, v))
         (backend.NewMap())
-
-/// Format errors into a human-readable string for LLM feedback.
-let formatErrors (errors: FieldError list) : string =
-    errors
-    |> List.map (fun e -> sprintf "%s: %s" e.path e.message)
-    |> String.concat ", "

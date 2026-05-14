@@ -95,7 +95,7 @@ let rec schemaForType (registry: CodecRegistry) (caseRules: Json.CaseRules) (t: 
             //    top-level codec's aliases are honored; nested records use
             //    plain CaseRules).
             elif FSharpType.IsRecord t then
-                schemaForRecord registry Map.empty caseRules t
+                SVDict(schemaForRecord registry Map.empty caseRules t)
 
             else
                 // Unknown — fall back to a permissive empty object.
@@ -106,25 +106,28 @@ and schemaForRecord
     (aliases: Map<string, string>)
     (caseRules: Json.CaseRules)
     (recordType: System.Type)
-    : JsonSchemaValue =
-    let fields = FSharpType.GetRecordFields recordType
+    : JsonSchema =
+    // Walk the fields once, computing the JSON key + required-ness + schema
+    // per field. Avoids resolving the key twice (once for properties, once
+    // for required) and a redundant Array.toList copy per pass.
+    let entries =
+        recordType
+        |> FSharpType.GetRecordFields
+        |> Array.map (fun fi ->
+            let key = resolveJsonKey aliases caseRules fi.Name
+            let isOpt = isOptionType fi.PropertyType.FullName
+            let propSchema = schemaForType registry caseRules fi.PropertyType
+            key, isOpt, propSchema)
 
     let propertyEntries =
-        fields
+        entries
+        |> Array.map (fun (k, _, s) -> k, s)
         |> Array.toList
-        |> List.map (fun fi ->
-            let key = resolveJsonKey aliases caseRules fi.Name
-            let propSchema = schemaForType registry caseRules fi.PropertyType
-            key, propSchema)
 
     let required =
-        fields
+        entries
+        |> Array.choose (fun (k, isOpt, _) -> if isOpt then None else Some(SVStr k))
         |> Array.toList
-        |> List.choose (fun fi ->
-            if isOptionType fi.PropertyType.FullName then
-                None
-            else
-                Some(SVStr(resolveJsonKey aliases caseRules fi.Name)))
 
     let baseSchema =
         Map.ofList [
@@ -133,35 +136,20 @@ and schemaForRecord
             "properties", SVDict(Map.ofList propertyEntries)
         ]
 
-    let withRequired =
-        if List.isEmpty required then
-            baseSchema
-        else
-            Map.add "required" (SVList required) baseSchema
-
-    SVDict withRequired
+    if List.isEmpty required then
+        baseSchema
+    else
+        Map.add "required" (SVList required) baseSchema
 
 /// Generate a JSON Schema document for record type `'T`, given a registry of
 /// custom codecs and the case rule used for field-name → JSON-key mapping.
 /// Returns the schema as a JSON string (via the supplied backend). For alias
 /// support, prefer `jsonSchemaOfCodec` which reads aliases off a TypedJson.
 let inline jsonSchemaOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (caseRules: Json.CaseRules) : string =
-    let t = typeof<'T>
-
-    let schemaValue = schemaForRecord registry Map.empty caseRules t
-
-    match schemaValue with
-    | SVDict m -> schemaToJson backend m
-    | _ -> backend.Stringify(toNative backend schemaValue)
+    schemaForRecord registry Map.empty caseRules typeof<'T> |> schemaToJson backend
 
 /// Generate a JSON Schema document from a `TypedJson<'T>` codec. Reads the
 /// codec's configured `caseRules` and any `alias`-attached overrides so the
 /// emitted schema matches what the codec actually accepts and produces.
 let inline jsonSchemaOfCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (codec: Json.TypedJson<'T>) : string =
-    let t = typeof<'T>
-
-    let schemaValue = schemaForRecord registry codec.aliases codec.caseRules t
-
-    match schemaValue with
-    | SVDict m -> schemaToJson backend m
-    | _ -> backend.Stringify(toNative backend schemaValue)
+    schemaForRecord registry codec.aliases codec.caseRules typeof<'T> |> schemaToJson backend

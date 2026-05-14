@@ -32,36 +32,20 @@ type CaseRules =
     | KebabCase = 4
     | PascalCase = 5
 
-let private toSnakeCase (name: string) : string =
+/// Insert `separator` before each uppercase letter (except at index 0) and
+/// lowercase the letter. Powers both `toSnakeCase` (separator = "_") and
+/// `dashify` (separator = "-"). The body is imperative — `Seq.mapi` over a
+/// string fails with `badarg` on Fable BEAM (its seq enumerator doesn't
+/// drive the binary correctly), and an indexed `for` loop with
+/// `result + …` lowers cleanly to binary append on every backend.
+/// Runs at codec-construction time, not on the hot path.
+let private separateUpper (separator: string) (name: string) : string =
     let mutable result = ""
 
     for i = 0 to name.Length - 1 do
         let c = name.[i]
 
-        if System.Char.IsUpper(c) then
-            if i > 0 then
-                result <- result + "_"
-
-            result <- result + string (System.Char.ToLowerInvariant(c))
-        else
-            result <- result + string c
-
-    result
-
-let private lowerFirst (name: string) : string =
-    if name.Length = 0 then
-        name
-    else
-        string (System.Char.ToLowerInvariant(name.[0]))
-        + name.[1..]
-
-let private dashify (separator: string) (name: string) : string =
-    let mutable result = ""
-
-    for i = 0 to name.Length - 1 do
-        let c = name.[i]
-
-        if System.Char.IsUpper(c) then
+        if System.Char.IsUpper c then
             if i > 0 then
                 result <- result + separator
 
@@ -71,32 +55,29 @@ let private dashify (separator: string) (name: string) : string =
 
     result
 
+let private toSnakeCase (name: string) : string = separateUpper "_" name
+
+let private lowerFirst (name: string) : string =
+    if name.Length = 0 then
+        name
+    else
+        string (System.Char.ToLowerInvariant name.[0]) + name.[1..]
+
+let private dashify (separator: string) (name: string) : string = separateUpper separator name
+
 /// Convert a snake_case name back to PascalCase.
 let fromSnakeCase (name: string) : string =
-    let parts = name.Split('_')
-
-    parts
+    name.Split '_'
     |> Array.map (fun part ->
         if part.Length = 0 then
             part
         else
-            string (System.Char.ToUpperInvariant(part.[0]))
-            + part.[1..])
+            string (System.Char.ToUpperInvariant part.[0]) + part.[1..])
     |> String.concat ""
 
 /// True if the name contains any uppercase letter (i.e., looks like Pascal/camelCase
 /// rather than snake_case). Used to decide whether to convert before applying a rule.
-let private hasUpper (name: string) : bool =
-    let mutable i = 0
-    let mutable found = false
-
-    while i < name.Length && not found do
-        if System.Char.IsUpper(name.[i]) then
-            found <- true
-
-        i <- i + 1
-
-    found
+let private hasUpper (name: string) : bool = String.exists System.Char.IsUpper name
 
 /// Apply a case rule to a field name.
 /// Reflection-supplied names differ across Fable targets — BEAM lowercases
@@ -284,6 +265,13 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // through to the JSON output. Lists/arrays of records are walked
         // element-wise and rebuilt as backend-native arrays. Primitives,
         // already-encoded option payloads, and unknown types pass through.
+        // The record-walk inside the IsRecord and IsUnion-payload branches
+        // is duplicated verbatim. The natural fix would be to extract a
+        // `recordEntries` helper into a `let rec ... and ...` group with
+        // `transformValue`, but Fable BEAM's codegen mishandles mutual
+        // recursion when nested inside another function — closure variable
+        // capture breaks and the lowered Erlang emits `case undefined of`.
+        // Leave the duplication; the alternative ships broken on BEAM.
         let rec transformValue (rules: CaseRules) (t: System.Type) (v: obj) : obj =
             if isNull v then
                 v
@@ -293,18 +281,16 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                 | None -> backend.Null
             elif isFSharpListType t.FullName then
                 let elementType = getGenericInnerType t
-                let xs = extractList v
 
-                xs
-                |> List.map (fun item -> transformValue rules elementType item)
+                extractList v
+                |> List.map (transformValue rules elementType)
                 |> backend.BuildArray
             elif t.IsArray then
                 let elementType = t.GetElementType()
-                let arr = unbox<obj[]> v
 
-                arr
+                unbox<obj[]> v
                 |> Array.toList
-                |> List.map (fun item -> transformValue rules elementType item)
+                |> List.map (transformValue rules elementType)
                 |> backend.BuildArray
             elif FSharpType.IsRecord t then
                 // Use FSharpValue.GetRecordField (per-field) rather than
@@ -314,10 +300,8 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                 // `System.Object` at runtime, which has no `fields` key.
                 // Reading per-field uses the PropertyInfo we already have
                 // from the static `t`, so it works on every backend.
-                let innerFields = FSharpType.GetRecordFields t
-
                 let entries =
-                    innerFields
+                    FSharpType.GetRecordFields t
                     |> Array.toList
                     |> List.choose (fun fi ->
                         let fv = FSharpValue.GetRecordField(v, fi)
@@ -364,10 +348,8 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                     if FSharpType.IsRecord payloadType then
                         // Walk the payload's fields the same way we walk a
                         // top-level record, so caseRules + aliases apply.
-                        let payloadFields = FSharpType.GetRecordFields payloadType
-
                         let payloadEntries =
-                            payloadFields
+                            FSharpType.GetRecordFields payloadType
                             |> Array.toList
                             |> List.choose (fun fi ->
                                 let fv = FSharpValue.GetRecordField(payloadValue, fi)
@@ -395,27 +377,21 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // `getGenericInnerType`. Mirrors the decode-side schema cache.
         let n = fields.Length
 
-        let defaultJsonKeys =
-            if FSharpType.IsRecord typ then
-                Array.init n (fun i -> resolveKey aliases caseRules fields.[i].Name)
-            else
-                [||]
-
-        let defaultIsOpts =
-            if FSharpType.IsRecord typ then
-                Array.init n (fun i -> isOptionType fields.[i].PropertyType.FullName)
-            else
-                [||]
+        // `fields` is empty (`[||]`) for non-record top-level types (e.g.
+        // tagged DUs), so `Array.map` over it naturally yields `[||]` —
+        // no need to gate each pre-bake step on `FSharpType.IsRecord typ`.
+        let defaultJsonKeys = fields |> Array.map (fun fi -> resolveKey aliases caseRules fi.Name)
+        let defaultIsOpts = fields |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
 
         let defaultInnerTypes =
-            if FSharpType.IsRecord typ then
-                Array.init n (fun i ->
-                    if defaultIsOpts.[i] then
-                        getGenericInnerType fields.[i].PropertyType
+            Array.map2
+                (fun (fi: System.Reflection.PropertyInfo) isOpt ->
+                    if isOpt then
+                        getGenericInnerType fi.PropertyType
                     else
-                        fields.[i].PropertyType)
-            else
-                [||]
+                        fi.PropertyType)
+                fields
+                defaultIsOpts
 
         // Pre-bake per-field transformers. `transformValue` dispatches on
         // `System.Type` characteristics (FullName starts-with checks +
@@ -463,11 +439,7 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // Build transformers against the INNER type (post-option-unwrap)
         // because `encodeRecordWith` already unwraps the option at the
         // call site and passes the inner value to `transformers.[i]`.
-        let defaultTransformers =
-            if FSharpType.IsRecord typ then
-                Array.init n (fun i -> buildTransformer caseRules defaultInnerTypes.[i])
-            else
-                [||]
+        let defaultTransformers = defaultInnerTypes |> Array.map (buildTransformer caseRules)
 
         // Walk a record's fields and write directly into a backend-native
         // map via `Put`. Avoids the `(string * obj) list` cons-cell chain
@@ -505,12 +477,8 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                         // and rebuild transformers (rules only enters the
                         // transformers via the recursive `transformValue`
                         // calls they make on nested records / lists).
-                        let jsonKeys =
-                            Array.init n (fun i -> resolveKey aliases rules fields.[i].Name)
-
-                        let transformers =
-                            Array.init n (fun i -> buildTransformer rules defaultInnerTypes.[i])
-
+                        let jsonKeys = fields |> Array.map (fun fi -> resolveKey aliases rules fi.Name)
+                        let transformers = defaultInnerTypes |> Array.map (buildTransformer rules)
                         encodeRecordWith jsonKeys defaultIsOpts transformers record
 
                 map |> Encode.toJson backend
@@ -560,9 +528,7 @@ let withModel (validator: 'T -> Result<'T, FieldError list>) (codec: TypedJson<'
     // the validator on the fresh inner codec.
     let rec wrap (inner: TypedJson<'T>) : TypedJson<'T> =
         let decodeWith (rules: CaseRules) (map: JsonMap) =
-            match inner.decodeWith rules map with
-            | Ok v -> validator v
-            | Error errs -> Error errs
+            inner.decodeWith rules map |> Result.bind validator
 
         {
             decode = decodeWith inner.caseRules

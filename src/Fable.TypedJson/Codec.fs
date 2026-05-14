@@ -36,17 +36,11 @@ let mk (decode: JsonValue -> Result<'T, string>) (encode: 'T -> JsonValue) (sche
     }
 
 let chain (validate: 'T -> Result<'T, string>) (inner: IJsonCodec<'T>) : IJsonCodec<'T> =
-    mk
-        (fun jv ->
-            match inner.Decode jv with
-            | Ok v -> validate v
-            | Error e -> Error e)
-        (fun v -> inner.Encode v)
-        inner.Schema
+    mk (inner.Decode >> Result.bind validate) inner.Encode inner.Schema
 
 /// Add or overwrite a single key in a codec's JSON Schema fragment.
 let withSchemaKey (key: string) (value: JsonSchemaValue) (codec: IJsonCodec<'T>) : IJsonCodec<'T> =
-    mk (fun jv -> codec.Decode jv) (fun v -> codec.Encode v) (Map.add key value codec.Schema)
+    mk codec.Decode codec.Encode (Map.add key value codec.Schema)
 
 // ============================================================================
 // Primitive codecs
@@ -222,10 +216,4 @@ let describe (text: string) (codec: IJsonCodec<'T>) : IJsonCodec<'T> =
 /// preserved (the JSON shape doesn't change, only the F# type does).
 ///   `Codec.int |> Codec.gt 0 |> Codec.map Days (fun (Days n) -> n)`
 let map (toOuter: 'A -> 'B) (fromOuter: 'B -> 'A) (codec: IJsonCodec<'A>) : IJsonCodec<'B> =
-    mk
-        (fun jv ->
-            match codec.Decode jv with
-            | Ok v -> Ok(toOuter v)
-            | Error e -> Error e)
-        (fun v -> codec.Encode(fromOuter v))
-        codec.Schema
+    mk (codec.Decode >> Result.map toOuter) (fromOuter >> codec.Encode) codec.Schema
