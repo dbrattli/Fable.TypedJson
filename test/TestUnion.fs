@@ -162,3 +162,73 @@ let ``test tagged union as record field — round-trip`` () =
     match codec.decode (parseRaw json) with
     | Ok roundtripped -> roundtripped |> equal original
     | Error errs -> equal "Ok" (formatErrors errs)
+
+// ============================================================================
+// Snake-case discriminator tags (Anthropic content-block style)
+//
+// Multi-word PascalCase case names get transformed through the codec's
+// CaseRules — so `ToolUse` under `SnakeCase` becomes the `"tool_use"` tag.
+// Mirrors how Anthropic / OpenAI / MCP wire formats encode message-type
+// discriminators.
+// ============================================================================
+
+type TextPayload = { Text: string }
+type ToolUsePayload = { Id: string; Name: string }
+
+type ContentBlock =
+    | Text of TextPayload
+    | ToolUse of ToolUsePayload
+    | ToolResult
+
+[<Fact>]
+let ``test snake_case union tag — encode multi-word case`` () =
+    let codec = auto<ContentBlock> () |> withCaseRules CaseRules.SnakeCase
+    let value = ToolUse { Id = "abc"; Name = "search" }
+    let json = codec.encode value
+    let parsed = parseRaw json
+
+    getString backend parsed "type" |> equal "tool_use"
+    getString backend parsed "id" |> equal "abc"
+    getString backend parsed "name" |> equal "search"
+
+[<Fact>]
+let ``test snake_case union tag — decode multi-word case`` () =
+    let codec = auto<ContentBlock> () |> withCaseRules CaseRules.SnakeCase
+    let map = parseRaw """{"type":"tool_use","id":"xyz","name":"calc"}"""
+
+    match codec.decode map with
+    | Ok(ToolUse p) ->
+        p.Id |> equal "xyz"
+        p.Name |> equal "calc"
+    | Ok other -> equal "ToolUse" (sprintf "%A" other)
+    | Error errs -> equal "Ok" (formatErrors errs)
+
+[<Fact>]
+let ``test snake_case union tag — fieldless multi-word case`` () =
+    let codec = auto<ContentBlock> () |> withCaseRules CaseRules.SnakeCase
+    let json = codec.encode ToolResult
+    let parsed = parseRaw json
+
+    getString backend parsed "type" |> equal "tool_result"
+
+    match codec.decode (parseRaw """{"type":"tool_result"}""") with
+    | Ok ToolResult -> ()
+    | Ok other -> equal "ToolResult" (sprintf "%A" other)
+    | Error errs -> equal "Ok" (formatErrors errs)
+
+[<Fact>]
+let ``test snake_case union tag — round-trip every case`` () =
+    let codec = auto<ContentBlock> () |> withCaseRules CaseRules.SnakeCase
+
+    let cases = [
+        Text { Text = "hello" }
+        ToolUse { Id = "id-1"; Name = "tool" }
+        ToolResult
+    ]
+
+    for original in cases do
+        let json = codec.encode original
+
+        match codec.decode (parseRaw json) with
+        | Ok roundtripped -> roundtripped |> equal original
+        | Error errs -> equal "Ok" (formatErrors errs)

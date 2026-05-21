@@ -356,11 +356,14 @@ let mapLookup (backend: IJsonBackend) (m: obj) (key: string) : obj option =
 /// detection) for compound types. The `keyTransform` parameter
 /// encapsulates the codec's case rule + aliases so nested-record /
 /// nested-union sub-lookups apply the same transformation the outer
-/// record did.
+/// record did. The `tagTransform` parameter does the same for tagged-DU
+/// case names — it maps `UnionCaseInfo.Name` to the wire-format tag the
+/// discriminator dispatch matches against.
 let rec coerce
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (targetType: System.Type)
     (fv: obj)
     : Result<obj, string> =
@@ -456,7 +459,7 @@ let rec coerce
                 if backend.IsMap fv then
                     // resolveField applies keyTransform before calling the
                     // lookup, so the key here is already in JSON form.
-                    resolveRecord backend registry keyTransform targetType (mapLookup backend fv)
+                    resolveRecord backend registry keyTransform tagTransform targetType (mapLookup backend fv)
                     |> Result.mapError formatErrors
                 else
                     Error(sprintf "expected JSON object for %s" targetType.Name)
@@ -469,19 +472,19 @@ let rec coerce
             //    as a primitive sequence type.
             elif isFSharpListType targetFullName then
                 let elementType = getGenericInnerType targetType
-                coerceList backend registry keyTransform elementType fv
+                coerceList backend registry keyTransform tagTransform elementType fv
 
             // 4. Tagged discriminated union.
             elif FSharpType.IsUnion targetType then
                 if backend.IsMap fv then
-                    coerceUnion backend registry keyTransform targetType fv
+                    coerceUnion backend registry keyTransform tagTransform targetType fv
                 else
                     Error(sprintf "expected JSON object for %s" targetType.Name)
 
             // 5. .NET array (`'T[]`).
             elif targetType.IsArray then
                 let elementType = targetType.GetElementType()
-                coerceArray backend registry keyTransform elementType fv
+                coerceArray backend registry keyTransform tagTransform elementType fv
 
             else
                 Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
@@ -490,6 +493,7 @@ and private coerceElements
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (elementType: System.Type)
     (fv: obj)
     : Result<obj list, string> =
@@ -510,7 +514,7 @@ and private coerceElements
         while i < len && err.IsNone do
             let head = backend.ArrayAt(fv, i)
 
-            match coerce backend registry keyTransform elementType head with
+            match coerce backend registry keyTransform tagTransform elementType head with
             | Ok v -> acc <- v :: acc
             | Error msg -> err <- Some(sprintf "[%d] %s" i msg)
 
@@ -524,29 +528,32 @@ and coerceList
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (elementType: System.Type)
     (fv: obj)
     : Result<obj, string> =
     // Build a typed `'elementType list` so the boxed result can be assigned
     // to a record field via reflection. Fable erases generics so the helper
     // is just `box xs`; on the CLR it constructs the typed union cells.
-    coerceElements backend registry keyTransform elementType fv
+    coerceElements backend registry keyTransform tagTransform elementType fv
     |> Result.map (buildList elementType)
 
 and coerceArray
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (elementType: System.Type)
     (fv: obj)
     : Result<obj, string> =
-    coerceElements backend registry keyTransform elementType fv
+    coerceElements backend registry keyTransform tagTransform elementType fv
     |> Result.map (List.toArray >> box)
 
 and resolveRecord
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (recordType: System.Type)
     (lookup: string -> obj option)
     : Result<obj, FieldError list> =
@@ -554,7 +561,7 @@ and resolveRecord
 
     let results =
         fields
-        |> Array.map (fun fi -> resolveField backend registry keyTransform fi lookup)
+        |> Array.map (fun fi -> resolveField backend registry keyTransform tagTransform fi lookup)
 
     let errors =
         results
@@ -579,24 +586,13 @@ and resolveRecord
 /// convention. v1 hardcodes this; a future combinator can override per codec.
 and discriminatorKey = "type"
 
-/// Transform an F# union case name into the JSON tag value the dispatcher
-/// looks up. Applies LowerFirst — `Search` → `"search"`, `CalculateExpression`
-/// → `"calculateExpression"`. This matches what most JSON APIs and Pydantic
-/// emit by default. Users wanting snake_case / PascalCase tags can register
-/// a custom codec for the union type.
-and tagOfCaseName (caseName: string) : string =
-    if caseName.Length = 0 then
-        caseName
-    else
-        string (System.Char.ToLowerInvariant caseName.[0])
-        + caseName.[1..]
-
 /// Resolve a tagged DU from a key→JsonValue lookup. Used both by the
 /// top-level `Schema.auto` (which only has a lookup) and indirectly via
 /// `coerceUnion` (which builds a lookup from a backend-native map).
 ///
 /// 1. Read the discriminator key (default `"type"`).
-/// 2. Find the matching `UnionCaseInfo` by tag.
+/// 2. Find the matching `UnionCaseInfo` by tag, transforming case names
+///    through `tagTransform` (codec's case rule, supplied by TypedJson).
 /// 3. Decode the case's payload:
 ///    - 0 fields: `MakeUnion(case, [||])`
 ///    - 1 record field: parse the SAME lookup as that record (Pydantic flat style)
@@ -605,6 +601,7 @@ and resolveUnionFromLookup
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (unionType: System.Type)
     (lookup: string -> obj option)
     : Result<obj, FieldError list> =
@@ -622,7 +619,7 @@ and resolveUnionFromLookup
 
         match
             cases
-            |> Array.tryFind (fun c -> tagOfCaseName c.Name = tag)
+            |> Array.tryFind (fun c -> tagTransform c.Name = tag)
         with
         | None ->
             Error [
@@ -640,7 +637,7 @@ and resolveUnionFromLookup
                 let payloadType = caseFields.[0].PropertyType
 
                 if FSharpType.IsRecord payloadType then
-                    resolveRecord backend registry keyTransform payloadType lookup
+                    resolveRecord backend registry keyTransform tagTransform payloadType lookup
                     |> Result.map (fun payload -> FSharpValue.MakeUnion(caseInfo, [| payload |]))
                 else
                     Error [
@@ -672,18 +669,20 @@ and coerceUnion
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (unionType: System.Type)
     (jsonMap: obj)
     : Result<obj, string> =
     // resolveField applies keyTransform before calling the lookup, so the
     // key here is already in JSON form.
-    resolveUnionFromLookup backend registry keyTransform unionType (mapLookup backend jsonMap)
+    resolveUnionFromLookup backend registry keyTransform tagTransform unionType (mapLookup backend jsonMap)
     |> Result.mapError formatErrors
 
 and resolveOptionalField
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (fi: System.Reflection.PropertyInfo)
     (name: string)
     (value: obj option)
@@ -694,7 +693,7 @@ and resolveOptionalField
     | Some fv ->
         let innerType = getGenericInnerType fi.PropertyType
 
-        coerce backend registry keyTransform innerType fv
+        coerce backend registry keyTransform tagTransform innerType fv
         |> Result.map (buildOption innerType)
         |> Result.mapError (fun msg -> { path = name; message = msg })
 
@@ -702,6 +701,7 @@ and resolveRequiredField
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (fi: System.Reflection.PropertyInfo)
     (name: string)
     (value: obj option)
@@ -718,13 +718,14 @@ and resolveRequiredField
             message = sprintf "null value (expected %s)" fi.PropertyType.Name
         }
     | Some fv ->
-        coerce backend registry keyTransform fi.PropertyType fv
+        coerce backend registry keyTransform tagTransform fi.PropertyType fv
         |> Result.mapError (fun msg -> { path = name; message = msg })
 
 and resolveField
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (fi: System.Reflection.PropertyInfo)
     (lookup: string -> obj option)
     : Result<obj, FieldError> =
@@ -736,9 +737,9 @@ and resolveField
     let value = lookup name
 
     if isOptionType fi.PropertyType.FullName then
-        resolveOptionalField backend registry keyTransform fi name value
+        resolveOptionalField backend registry keyTransform tagTransform fi name value
     else
-        resolveRequiredField backend registry keyTransform fi name value
+        resolveRequiredField backend registry keyTransform tagTransform fi name value
 
 // ============================================================================
 // Schema.auto
@@ -779,6 +780,7 @@ let buildRecordSchemaUntyped
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (keyTransform: string -> string)
+    (tagTransform: string -> string)
     (recordType: System.Type)
     : (string -> obj option) -> Result<obj, FieldError list>
     =
@@ -816,7 +818,7 @@ let buildRecordSchemaUntyped
                     | None -> Ok(box None)
                     | Some fv when backend.IsNull fv -> Ok(box None)
                     | Some fv ->
-                        match coerce backend registry keyTransform innerType fv with
+                        match coerce backend registry keyTransform tagTransform innerType fv with
                         | Ok v -> Ok(buildOption innerType v)
                         | Error msg -> Error { path = key; message = msg }
                 else
@@ -832,7 +834,7 @@ let buildRecordSchemaUntyped
                             message = sprintf "null where %s was required" typeNames.[i]
                         }
                     | Some fv ->
-                        match coerce backend registry keyTransform innerType fv with
+                        match coerce backend registry keyTransform tagTransform innerType fv with
                         | Ok v -> Ok v
                         | Error msg -> Error { path = key; message = msg }
 
@@ -845,7 +847,12 @@ let buildRecordSchemaUntyped
         else
             Error(List.rev errs)
 
-let inline auto<'T> (backend: IJsonBackend) (registry: CodecRegistry) (keyTransform: string -> string) : Schema<'T> =
+let inline auto<'T>
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (keyTransform: string -> string)
+    (tagTransform: string -> string)
+    : Schema<'T> =
     let typ = typeof<'T>
 
     // Top-level dispatch: records → field-by-field via pre-baked schema;
@@ -855,12 +862,12 @@ let inline auto<'T> (backend: IJsonBackend) (registry: CodecRegistry) (keyTransf
     if FSharpType.IsRecord typ then
         // Pre-bake once per call site (which is once per codec, given that
         // `auto<'T>` is `inline`). The closure below does no reflection.
-        let recordSchema = buildRecordSchemaUntyped backend registry keyTransform typ
+        let recordSchema = buildRecordSchemaUntyped backend registry keyTransform tagTransform typ
 
         fun (lookup: string -> obj option) -> recordSchema lookup |> Result.map unbox<'T>
     elif FSharpType.IsUnion typ then
         fun (lookup: string -> obj option) ->
-            resolveUnionFromLookup backend registry keyTransform typ lookup
+            resolveUnionFromLookup backend registry keyTransform tagTransform typ lookup
             |> Result.map unbox<'T>
     else
         let badTypeError = [
@@ -903,22 +910,23 @@ let jsonMapAdapter (backend: IJsonBackend) (map: obj) : string -> obj option = m
 
 /// Validate from a string map (ToolCall.input from LLM). Uses an empty codec
 /// registry and the identity key transform — keys in the input are treated
-/// as the F# field names verbatim.
+/// as the F# field names verbatim. Union-case tags default to LowerFirst
+/// (matches the pre-tagTransform behavior).
 let inline validateMap<'T> (backend: IJsonBackend) (map: Map<string, string>) : Result<'T, FieldError list> =
-    (auto<'T> backend emptyRegistry lowerFirstTransform) (stringMapAdapter map)
+    (auto<'T> backend emptyRegistry lowerFirstTransform lowerFirstTransform) (stringMapAdapter map)
 
 /// Validate from a string map with a custom codec registry.
 let inline validateMapWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
-    (auto<'T> backend registry lowerFirstTransform) (stringMapAdapter map)
+    (auto<'T> backend registry lowerFirstTransform lowerFirstTransform) (stringMapAdapter map)
 
 /// Validate from a backend-native JSON map. Uses an empty codec registry and
 /// the identity key transform — JSON keys are treated as F# field names.
 let inline validateJson<'T> (backend: IJsonBackend) (map: obj) : Result<'T, FieldError list> =
-    (auto<'T> backend emptyRegistry lowerFirstTransform) (jsonMapAdapter backend map)
+    (auto<'T> backend emptyRegistry lowerFirstTransform lowerFirstTransform) (jsonMapAdapter backend map)
 
 /// Validate from a backend-native JSON map with a custom codec registry.
 let inline validateJsonWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: obj) : Result<'T, FieldError list> =
-    (auto<'T> backend registry lowerFirstTransform) (jsonMapAdapter backend map)
+    (auto<'T> backend registry lowerFirstTransform lowerFirstTransform) (jsonMapAdapter backend map)
 
 /// Dump a record to a backend-native JSON map (e.g., for inter-process messaging).
 let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
