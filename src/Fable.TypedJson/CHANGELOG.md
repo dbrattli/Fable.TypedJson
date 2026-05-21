@@ -1,5 +1,5 @@
 ---
-last_commit_released: fff65d7af324f670816212bbd6d4efa7db712b1e
+last_commit_released: 98a8b39e6ff95f652d9add3b92ce73ae7b781b80
 name: Fable.TypedJson
 ---
 
@@ -12,6 +12,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 0.4.0 - 2026-05-21
+
+### 🚀 Features
+
+* Union tag follows codec CaseRules (snake_case discriminator support) (#16) ([98a8b39](https://github.com/dbrattli/Fable.TypedJson/commit/98a8b39e6ff95f652d9add3b92ce73ae7b781b80))
+
+### 🐞 Bug Fixes
+
+* Pin InvariantCulture for string→float coerce on .NET (#14) ([c41c699](https://github.com/dbrattli/Fable.TypedJson/commit/c41c699ec56cbfd68f638cb3ba8c03fb0e3ebd1a))
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/fff65d7af324f670816212bbd6d4efa7db712b1e..98a8b39e6ff95f652d9add3b92ce73ae7b781b80)</small></strong>
 
 ## 0.3.0 - 2026-05-03
 
