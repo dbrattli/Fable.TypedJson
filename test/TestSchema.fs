@@ -256,61 +256,61 @@ let ``test validateJson optional missing`` () =
 
 [<Fact>]
 let ``test coercion string to int`` () =
-    match coerce backend emptyRegistry identityTransform typeof<int> (box "42") with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "42") with
     | Ok v -> (unbox<int> v) |> equal 42
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion string to float`` () =
-    match coerce backend emptyRegistry identityTransform typeof<float> (box "3.14") with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "3.14") with
     | Ok v -> (unbox<float> v) |> equal 3.14
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion string to bool true`` () =
-    match coerce backend emptyRegistry identityTransform typeof<bool> (box "true") with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "true") with
     | Ok v -> (unbox<bool> v) |> equal true
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion string to bool false`` () =
-    match coerce backend emptyRegistry identityTransform typeof<bool> (box "false") with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "false") with
     | Ok v -> (unbox<bool> v) |> equal false
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion int to float`` () =
-    match coerce backend emptyRegistry identityTransform typeof<float> (box 42) with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box 42) with
     | Ok v -> (unbox<float> v) |> equal 42.0
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion float to int`` () =
-    match coerce backend emptyRegistry identityTransform typeof<int> (box 42.0) with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box 42.0) with
     | Ok v -> (unbox<int> v) |> equal 42
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion int to string`` () =
-    match coerce backend emptyRegistry identityTransform typeof<string> (box 42) with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<string> (box 42) with
     | Ok v -> (unbox<string> v) |> equal "42"
     | Error e -> equal "Ok" e
 
 [<Fact>]
 let ``test coercion invalid string to int`` () =
-    match coerce backend emptyRegistry identityTransform typeof<int> (box "not_a_number") with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "not_a_number") with
     | Ok _ -> equal "Error" "Ok"
     | Error msg -> (msg.Contains("cannot parse")) |> equal true
 
 [<Fact>]
 let ``test coercion invalid string to float`` () =
-    match coerce backend emptyRegistry identityTransform typeof<float> (box "not_a_number") with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "not_a_number") with
     | Ok _ -> equal "Error" "Ok"
     | Error msg -> (msg.Contains("cannot parse")) |> equal true
 
 [<Fact>]
 let ``test coercion invalid string to bool`` () =
-    match coerce backend emptyRegistry identityTransform typeof<bool> (box "maybe") with
+    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "maybe") with
     | Ok _ -> equal "Error" "Ok"
     | Error msg -> (msg.Contains("cannot parse")) |> equal true
 

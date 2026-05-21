@@ -258,8 +258,12 @@ let rec transformValue (backend: IJsonBackend) (aliases: Map<string, string>) (r
         // case, just `{type: "..."}`. For a single record-field case, flatten
         // the record's keys alongside the discriminator. Other shapes are
         // unsupported in v1 (matches Schema.coerceUnion).
+        //
+        // Tag value follows the codec's CaseRules — e.g., SnakeCase produces
+        // `ToolUse` → `"tool_use"`. Decode side mirrors this via the
+        // `tagTransform` passed into `Schema.auto`.
         let caseInfo, caseValues = FSharpValue.GetUnionFields(v, t)
-        let tag = tagOfCaseName caseInfo.Name
+        let tag = applyCaseRule rules caseInfo.Name
         let caseFields = caseInfo.GetFields()
         let baseEntry = (discriminatorKey, box tag)
 
@@ -409,9 +413,13 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // the per-decode hot path skips the per-field reflection that the old
         // build-per-call path used to pay.
         let defaultKeyTransform = resolveKey aliases caseRules
+        // Tag transform applies the case rule directly to the F# union case
+        // name (no aliasing — case names don't have an alias mechanism today).
+        // Encode side mirrors via `applyCaseRule rules caseInfo.Name`.
+        let defaultTagTransform = applyCaseRule caseRules
 
         let defaultSchemaFn =
-            Fable.TypedJson.Schema.auto<'T> backend registry defaultKeyTransform
+            Fable.TypedJson.Schema.auto<'T> backend registry defaultKeyTransform defaultTagTransform
 
         let decodeWith (rules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
             // Fast path: caller didn't override the case rule, reuse the
@@ -422,7 +430,8 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
                     defaultSchemaFn
                 else
                     let keyTransform = resolveKey aliases rules
-                    Fable.TypedJson.Schema.auto<'T> backend registry keyTransform
+                    let tagTransform = applyCaseRule rules
+                    Fable.TypedJson.Schema.auto<'T> backend registry keyTransform tagTransform
 
             // Schema.resolveField applies `keyTransform` itself before looking
             // up; passing a raw adapter avoids double-transforming the key.
