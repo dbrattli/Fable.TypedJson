@@ -67,7 +67,7 @@ jobs:
 
       - name: Cache rebar3 dependencies
         if: matrix.target == 'beam'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/rebar3
           key: rebar3-${{ hashFiles('**/rebar.config') }}
