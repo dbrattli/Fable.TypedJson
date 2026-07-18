@@ -1,5 +1,5 @@
 ---
-last_commit_released: 8f6e40d622209bce15ce75ff6c22f3e4c7c4454c
+last_commit_released: 33b94f4e2dfde262fad19673e4bdcb03f3a070fd
 name: Fable.TypedJson.Beam
 ---
 
@@ -12,6 +12,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 0.4.1 - 2026-07-18
+
+### 🐞 Bug Fixes
+
+* *(beam)* Support Fable 5.11 ref-wrapped union case values (#31) ([d9bf688](https://github.com/dbrattli/Fable.TypedJson/commit/d9bf6882a3340d9445285b5e5ec459e6716b2036))
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/8f6e40d622209bce15ce75ff6c22f3e4c7c4454c..33b94f4e2dfde262fad19673e4bdcb03f3a070fd)</small></strong>
 
 ## 0.4.0 - 2026-05-21
 
