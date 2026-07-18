@@ -182,18 +182,26 @@ type ContentBlock =
 
 [<Fact>]
 let ``test snake_case union tag — encode multi-word case`` () =
-    let codec = auto<ContentBlock> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<ContentBlock> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let value = ToolUse { Id = "abc"; Name = "search" }
     let json = codec.encode value
     let parsed = parseRaw json
 
-    getString backend parsed "type" |> equal "tool_use"
+    getString backend parsed "type"
+    |> equal "tool_use"
+
     getString backend parsed "id" |> equal "abc"
     getString backend parsed "name" |> equal "search"
 
 [<Fact>]
 let ``test snake_case union tag — decode multi-word case`` () =
-    let codec = auto<ContentBlock> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<ContentBlock> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let map = parseRaw """{"type":"tool_use","id":"xyz","name":"calc"}"""
 
     match codec.decode map with
@@ -205,11 +213,15 @@ let ``test snake_case union tag — decode multi-word case`` () =
 
 [<Fact>]
 let ``test snake_case union tag — fieldless multi-word case`` () =
-    let codec = auto<ContentBlock> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<ContentBlock> ()
+        |> withCaseRules CaseRules.SnakeCase
+
     let json = codec.encode ToolResult
     let parsed = parseRaw json
 
-    getString backend parsed "type" |> equal "tool_result"
+    getString backend parsed "type"
+    |> equal "tool_result"
 
     match codec.decode (parseRaw """{"type":"tool_result"}""") with
     | Ok ToolResult -> ()
@@ -218,13 +230,11 @@ let ``test snake_case union tag — fieldless multi-word case`` () =
 
 [<Fact>]
 let ``test snake_case union tag — round-trip every case`` () =
-    let codec = auto<ContentBlock> () |> withCaseRules CaseRules.SnakeCase
+    let codec =
+        auto<ContentBlock> ()
+        |> withCaseRules CaseRules.SnakeCase
 
-    let cases = [
-        Text { Text = "hello" }
-        ToolUse { Id = "id-1"; Name = "tool" }
-        ToolResult
-    ]
+    let cases = [ Text { Text = "hello" }; ToolUse { Id = "id-1"; Name = "tool" }; ToolResult ]
 
     for original in cases do
         let json = codec.encode original

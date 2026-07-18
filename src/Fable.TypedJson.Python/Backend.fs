@@ -121,7 +121,8 @@ type private PythonBackendImpl() =
 
         member _.IsInt(value) =
             not (pyInstanceof value pyBool)
-            && (pyInstanceof value pyInt || pyInstanceof value pyInt32)
+            && (pyInstanceof value pyInt
+                || pyInstanceof value pyInt32)
 
         member _.IsFloat(value) =
             pyInstanceof value pyFloat

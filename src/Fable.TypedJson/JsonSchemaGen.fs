@@ -146,10 +146,12 @@ and schemaForRecord
 /// Returns the schema as a JSON string (via the supplied backend). For alias
 /// support, prefer `jsonSchemaOfCodec` which reads aliases off a TypedJson.
 let inline jsonSchemaOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (caseRules: Json.CaseRules) : string =
-    schemaForRecord registry Map.empty caseRules typeof<'T> |> schemaToJson backend
+    schemaForRecord registry Map.empty caseRules typeof<'T>
+    |> schemaToJson backend
 
 /// Generate a JSON Schema document from a `TypedJson<'T>` codec. Reads the
 /// codec's configured `caseRules` and any `alias`-attached overrides so the
 /// emitted schema matches what the codec actually accepts and produces.
 let inline jsonSchemaOfCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (codec: Json.TypedJson<'T>) : string =
-    schemaForRecord registry codec.aliases codec.caseRules typeof<'T> |> schemaToJson backend
+    schemaForRecord registry codec.aliases codec.caseRules typeof<'T>
+    |> schemaToJson backend

@@ -305,10 +305,14 @@ let identityTransform (s: string) : string = s
 /// returns it unchanged. Stable across BEAM/Python (already lowercase) and
 /// JS (PascalCase → camelCase).
 let lowerFirstTransform (s: string) : string =
-    if s.Length = 0 || not (String.exists System.Char.IsUpper s) then
+    if
+        s.Length = 0
+        || not (String.exists System.Char.IsUpper s)
+    then
         s
     else
-        string (System.Char.ToLowerInvariant s.[0]) + s.[1..]
+        string (System.Char.ToLowerInvariant s.[0])
+        + s.[1..]
 
 /// Lazily wrap a backend-native value as a `JsonValue` for hand-off to
 /// user codecs (`IJsonCodec.Decode`). Internal `coerce` never calls this
@@ -317,13 +321,20 @@ let lowerFirstTransform (s: string) : string =
 /// `[<Erase>]` legacy / Fable's representation of struct DUs); on the
 /// .NET shim each call allocates a small DU instance.
 let toJsonValue (backend: IJsonBackend) (fv: obj) : JsonValue =
-    if backend.IsString fv then JString(backend.AsString fv)
-    elif backend.IsInt fv then JInt(backend.AsInt fv)
-    elif backend.IsFloat fv then JFloat(backend.AsFloat fv)
-    elif backend.IsBool fv then JBool(backend.AsBool fv)
-    elif backend.IsNull fv then JNull
-    elif backend.IsArray fv then JArray fv
-    elif backend.IsMap fv then JMap fv
+    if backend.IsString fv then
+        JString(backend.AsString fv)
+    elif backend.IsInt fv then
+        JInt(backend.AsInt fv)
+    elif backend.IsFloat fv then
+        JFloat(backend.AsFloat fv)
+    elif backend.IsBool fv then
+        JBool(backend.AsBool fv)
+    elif backend.IsNull fv then
+        JNull
+    elif backend.IsArray fv then
+        JArray fv
+    elif backend.IsMap fv then
+        JMap fv
     else
         failwithf "toJsonValue: unrecognised value of type %s" (fv.GetType().FullName)
 
@@ -331,14 +342,22 @@ let toJsonValue (backend: IJsonBackend) (fv: obj) : JsonValue =
 /// error messages — replaces the JsonValue pattern match the old
 /// coerce-error path used.
 let private describeValue (backend: IJsonBackend) (fv: obj) : string =
-    if backend.IsString fv then sprintf "string '%s'" (backend.AsString fv)
-    elif backend.IsInt fv then sprintf "int %d" (backend.AsInt fv)
-    elif backend.IsFloat fv then sprintf "float %f" (backend.AsFloat fv)
-    elif backend.IsBool fv then sprintf "bool %b" (backend.AsBool fv)
-    elif backend.IsNull fv then "null"
-    elif backend.IsArray fv then "array"
-    elif backend.IsMap fv then "map"
-    else "<unknown>"
+    if backend.IsString fv then
+        sprintf "string '%s'" (backend.AsString fv)
+    elif backend.IsInt fv then
+        sprintf "int %d" (backend.AsInt fv)
+    elif backend.IsFloat fv then
+        sprintf "float %f" (backend.AsFloat fv)
+    elif backend.IsBool fv then
+        sprintf "bool %b" (backend.AsBool fv)
+    elif backend.IsNull fv then
+        "null"
+    elif backend.IsArray fv then
+        "array"
+    elif backend.IsMap fv then
+        "map"
+    else
+        "<unknown>"
 
 /// Build a `key -> obj option` lookup over a backend-native JSON map.
 /// One implementation backing both the internal record/union resolvers and
@@ -371,9 +390,12 @@ let rec coerce
 
     // String target — anything primitive can become a string.
     if targetFullName = "System.String" then
-        if backend.IsString fv then Ok(box (backend.AsString fv))
-        elif backend.IsInt fv then Ok(box (string (backend.AsInt fv)))
-        elif backend.IsFloat fv then Ok(box (string (backend.AsFloat fv)))
+        if backend.IsString fv then
+            Ok(box (backend.AsString fv))
+        elif backend.IsInt fv then
+            Ok(box (string (backend.AsInt fv)))
+        elif backend.IsFloat fv then
+            Ok(box (string (backend.AsFloat fv)))
         elif backend.IsBool fv then
             Ok(box (if backend.AsBool fv then "true" else "false"))
         else
@@ -381,8 +403,10 @@ let rec coerce
 
     // Int target
     elif targetFullName = "System.Int32" then
-        if backend.IsInt fv then Ok(box (backend.AsInt fv))
-        elif backend.IsFloat fv then Ok(box (int (backend.AsFloat fv)))
+        if backend.IsInt fv then
+            Ok(box (backend.AsInt fv))
+        elif backend.IsFloat fv then
+            Ok(box (int (backend.AsFloat fv)))
         elif backend.IsString fv then
             let s = backend.AsString fv
 
@@ -394,8 +418,10 @@ let rec coerce
 
     // Int64 target
     elif targetFullName = "System.Int64" then
-        if backend.IsInt fv then Ok(box (int64 (backend.AsInt fv)))
-        elif backend.IsFloat fv then Ok(box (int64 (backend.AsFloat fv)))
+        if backend.IsInt fv then
+            Ok(box (int64 (backend.AsInt fv)))
+        elif backend.IsFloat fv then
+            Ok(box (int64 (backend.AsFloat fv)))
         elif backend.IsString fv then
             let s = backend.AsString fv
 
@@ -407,8 +433,10 @@ let rec coerce
 
     // Float target
     elif targetFullName = "System.Double" then
-        if backend.IsFloat fv then Ok(box (backend.AsFloat fv))
-        elif backend.IsInt fv then Ok(box (float (backend.AsInt fv)))
+        if backend.IsFloat fv then
+            Ok(box (backend.AsFloat fv))
+        elif backend.IsInt fv then
+            Ok(box (float (backend.AsInt fv)))
         elif backend.IsString fv then
             let s = backend.AsString fv
             // JSON numbers are always `.`-as-decimal per RFC 8259. On the
@@ -422,13 +450,7 @@ let rec coerce
 #if FABLE_COMPILER
             match System.Double.TryParse(s) with
 #else
-            match
-                System.Double.TryParse(
-                    s,
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture
-                )
-            with
+            match System.Double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture) with
 #endif
             | true, f -> Ok(box f)
             | _ -> Error(sprintf "cannot parse '%s' as float" s)
@@ -437,7 +459,8 @@ let rec coerce
 
     // Bool target
     elif targetFullName = "System.Boolean" then
-        if backend.IsBool fv then Ok(box (backend.AsBool fv))
+        if backend.IsBool fv then
+            Ok(box (backend.AsBool fv))
         elif backend.IsString fv then
             let s = backend.AsString fv
 
@@ -782,12 +805,17 @@ let buildRecordSchemaUntyped
     (keyTransform: string -> string)
     (tagTransform: string -> string)
     (recordType: System.Type)
-    : (string -> obj option) -> Result<obj, FieldError list>
-    =
+    : (string -> obj option) -> Result<obj, FieldError list> =
     let fields = FSharpType.GetRecordFields recordType
     let n = fields.Length
-    let jsonKeys = fields |> Array.map (fun fi -> keyTransform fi.Name)
-    let isOpts = fields |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
+
+    let jsonKeys =
+        fields
+        |> Array.map (fun fi -> keyTransform fi.Name)
+
+    let isOpts =
+        fields
+        |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
 
     let innerTypes =
         Array.map2
@@ -862,7 +890,8 @@ let inline auto<'T>
     if FSharpType.IsRecord typ then
         // Pre-bake once per call site (which is once per codec, given that
         // `auto<'T>` is `inline`). The closure below does no reflection.
-        let recordSchema = buildRecordSchemaUntyped backend registry keyTransform tagTransform typ
+        let recordSchema =
+            buildRecordSchemaUntyped backend registry keyTransform tagTransform typ
 
         fun (lookup: string -> obj option) -> recordSchema lookup |> Result.map unbox<'T>
     elif FSharpType.IsUnion typ then
