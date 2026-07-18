@@ -37,10 +37,15 @@ let private isErlList (v: obj) : bool = nativeOnly
 [<Emit("is_map($0)")>]
 let private isErlMap (v: obj) : bool = nativeOnly
 
-[<Emit("length($0)")>]
+// assumption: the sequence reaching these is either a plain Erlang list (what
+// `BuildArray` emits) or a process-dict array ref (what `FSharpValue.GetUnionFields`
+// returns for its `obj[]` case values — fable-library-beam 5.11 started
+// ref-wrapping that array, where 5.5 returned a bare list). `fable_utils:to_list`
+// normalizes both, so these stay correct across that representation change.
+[<Emit("length(fable_utils:to_list($0))")>]
 let private erlListLength (l: obj) : int = nativeOnly
 
-[<Emit("lists:nth($1 + 1, $0)")>]
+[<Emit("lists:nth($1 + 1, fable_utils:to_list($0))")>]
 let private erlListAt (l: obj) (i: int) : obj = nativeOnly
 
 // F# `obj list` IS an Erlang list at runtime on Fable BEAM, so the box is
