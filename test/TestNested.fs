@@ -11,6 +11,8 @@ module Fable.TypedJson.Tests.Nested
 open Fable.TypedJson.Testing
 open Fable.TypedJson.Schema
 open Fable.TypedJson.Json
+open Scriptorium.Nib.Assertion
+open type Scriptorium.Quill.Test
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
@@ -42,32 +44,41 @@ type Address = { Street: string; City: string }
 
 type User = { Name: string; Address: Address }
 
-[<Fact>]
-let ``test nested record decodes valid input`` () =
-    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+let private nestedRecordTests =
+    testList (
+        "Nested record",
+        [
+            test (
+                "nested record decodes valid input",
+                fun _ ->
+                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
 
-    let map =
-        parseRaw """{"name":"Alice","address":{"street":"Main 1","city":"Oslo"}}"""
+                    let map =
+                        parseRaw """{"name":"Alice","address":{"street":"Main 1","city":"Oslo"}}"""
 
-    match codec.decode map with
-    | Ok r ->
-        r.Name |> equal "Alice"
-        r.Address.Street |> equal "Main 1"
-        r.Address.City |> equal "Oslo"
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "Alice")
+                        assertThat r.Address.Street (isEqualTo "Main 1")
+                        assertThat r.Address.City (isEqualTo "Oslo")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "nested record reports inner missing field",
+                fun _ ->
+                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+                    let map = parseRaw """{"name":"Alice","address":{"street":"Main 1"}}"""
 
-[<Fact>]
-let ``test nested record reports inner missing field`` () =
-    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
-    let map = parseRaw """{"name":"Alice","address":{"street":"Main 1"}}"""
-
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errs ->
-        let formatted = formatErrors errs
-        // Outer field is "address"; inner failure is "city: ..."
-        formatted.Contains "address" |> equal true
-        formatted.Contains "city" |> equal true
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errs ->
+                        let formatted = formatErrors errs
+                        // Outer field is "address"; inner failure is "city: ..."
+                        assertThat (formatted.Contains "address") isTrue
+                        assertThat (formatted.Contains "city") isTrue
+            )
+        ]
+    )
 
 // ============================================================================
 // List of primitives
@@ -75,33 +86,42 @@ let ``test nested record reports inner missing field`` () =
 
 type Tagged = { Title: string; Tags: string list }
 
-[<Fact>]
-let ``test list of strings decodes`` () =
-    let codec =
-        auto<Tagged> ()
-        |> withCaseRules CaseRules.SnakeCase
+let private listOfPrimitivesTests =
+    testList (
+        "List of primitives",
+        [
+            test (
+                "list of strings decodes",
+                fun _ ->
+                    let codec =
+                        auto<Tagged> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let map = parseRaw """{"title":"hello","tags":["a","b","c"]}"""
+                    let map = parseRaw """{"title":"hello","tags":["a","b","c"]}"""
 
-    match codec.decode map with
-    | Ok r ->
-        r.Title |> equal "hello"
-        r.Tags |> equal [ "a"; "b"; "c" ]
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.Title (isEqualTo "hello")
+                        assertThat r.Tags (isEqualTo [ "a"; "b"; "c" ])
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "list of strings empty decodes",
+                fun _ ->
+                    let codec =
+                        auto<Tagged> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-[<Fact>]
-let ``test list of strings empty decodes`` () =
-    let codec =
-        auto<Tagged> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    let map = parseRaw """{"title":"empty","tags":[]}"""
 
-    let map = parseRaw """{"title":"empty","tags":[]}"""
-
-    match codec.decode map with
-    | Ok r ->
-        r.Tags |> equal []
-        r.Title |> equal "empty"
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.Tags (isEqualTo [])
+                        assertThat r.Title (isEqualTo "empty")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+        ]
+    )
 
 // ============================================================================
 // List of records
@@ -109,43 +129,52 @@ let ``test list of strings empty decodes`` () =
 
 type Team = { Name: string; Members: User list }
 
-[<Fact>]
-let ``test list of records decodes`` () =
-    let codec = auto<Team> () |> withCaseRules CaseRules.SnakeCase
+let private listOfRecordsTests =
+    testList (
+        "List of records",
+        [
+            test (
+                "list of records decodes",
+                fun _ ->
+                    let codec = auto<Team> () |> withCaseRules CaseRules.SnakeCase
 
-    let map =
-        parseRaw
-            """{"name":"Engineering","members":[
-                {"name":"Alice","address":{"street":"S1","city":"Oslo"}},
-                {"name":"Bob","address":{"street":"S2","city":"Bergen"}}
-            ]}"""
+                    let map =
+                        parseRaw
+                            """{"name":"Engineering","members":[
+                                {"name":"Alice","address":{"street":"S1","city":"Oslo"}},
+                                {"name":"Bob","address":{"street":"S2","city":"Bergen"}}
+                            ]}"""
 
-    match codec.decode map with
-    | Ok r ->
-        r.Name |> equal "Engineering"
-        r.Members.Length |> equal 2
-        r.Members.[0].Name |> equal "Alice"
-        r.Members.[1].Address.City |> equal "Bergen"
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "Engineering")
+                        assertThat r.Members.Length (isEqualTo 2)
+                        assertThat (r.Members.[0].Name) (isEqualTo "Alice")
+                        assertThat (r.Members.[1].Address.City) (isEqualTo "Bergen")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "list of records reports element index in error",
+                fun _ ->
+                    let codec = auto<Team> () |> withCaseRules CaseRules.SnakeCase
 
-[<Fact>]
-let ``test list of records reports element index in error`` () =
-    let codec = auto<Team> () |> withCaseRules CaseRules.SnakeCase
+                    let map =
+                        parseRaw
+                            """{"name":"Engineering","members":[
+                                {"name":"Alice","address":{"street":"S1","city":"Oslo"}},
+                                {"name":"Bob"}
+                            ]}"""
 
-    let map =
-        parseRaw
-            """{"name":"Engineering","members":[
-                {"name":"Alice","address":{"street":"S1","city":"Oslo"}},
-                {"name":"Bob"}
-            ]}"""
-
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errs ->
-        let formatted = formatErrors errs
-        formatted.Contains("members") |> equal true
-        formatted.Contains("[1]") |> equal true
-        formatted.Contains("address") |> equal true
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errs ->
+                        let formatted = formatErrors errs
+                        assertThat (formatted.Contains("members")) isTrue
+                        assertThat (formatted.Contains("[1]")) isTrue
+                        assertThat (formatted.Contains("address")) isTrue
+            )
+        ]
+    )
 
 // ============================================================================
 // CaseRules apply recursively on encode
@@ -163,89 +192,104 @@ type Customer = {
     ShippingAddress: Postal
 }
 
-[<Fact>]
-let ``test encode applies case rule to nested record keys`` () =
-    let codec =
-        auto<Customer> ()
-        |> withCaseRules CaseRules.SnakeCase
-
-    let json =
-        codec.encode {
-            CustomerName = "Alice"
-            ShippingAddress = {
-                PostalCode = "0150"
-                CountryName = "Norway"
-            }
-        }
-
-    let parsed = parseRaw json
-    // Outer keys
-    backend.ContainsKey(parsed, "customer_name")
-    |> equal true
-
-    backend.ContainsKey(parsed, "shipping_address")
-    |> equal true
-
-    // Inner keys must follow the same rule.
-    let inner = backend.Get(parsed, "shipping_address")
-
-    backend.ContainsKey(inner, "postal_code")
-    |> equal true
-
-    backend.ContainsKey(inner, "country_name")
-    |> equal true
-
 type Route = { Vendor: string; Stops: Postal list }
 
-[<Fact>]
-let ``test encode applies case rule to record-list element keys`` () =
-    let codec =
-        auto<Route> ()
-        |> withCaseRules CaseRules.SnakeCase
+let private caseRulesRecursiveTests =
+    testList (
+        "CaseRules apply recursively on encode",
+        [
+            test (
+                "encode applies case rule to nested record keys",
+                fun _ ->
+                    let codec =
+                        auto<Customer> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let json =
-        codec.encode {
-            Vendor = "Acme"
-            Stops = [
-                {
-                    PostalCode = "0150"
-                    CountryName = "Norway"
-                }
-            ]
-        }
+                    let json =
+                        codec.encode {
+                            CustomerName = "Alice"
+                            ShippingAddress = {
+                                PostalCode = "0150"
+                                CountryName = "Norway"
+                            }
+                        }
 
-    let parsed = parseRaw json
-    let stops = backend.Get(parsed, "stops")
-    backend.IsArray stops |> equal true
-    backend.ArrayLength stops |> equal 1
-    let first = backend.ArrayAt(stops, 0)
+                    let parsed = parseRaw json
+                    // Outer keys
+                    assertThat (backend.ContainsKey(parsed, "customer_name")) isTrue
 
-    backend.ContainsKey(first, "postal_code")
-    |> equal true
+                    assertThat (backend.ContainsKey(parsed, "shipping_address")) isTrue
 
-    backend.ContainsKey(first, "country_name")
-    |> equal true
+                    // Inner keys must follow the same rule.
+                    let inner = backend.Get(parsed, "shipping_address")
 
-[<Fact>]
-let ``test encode round-trips nested record under snake_case`` () =
-    let codec =
-        auto<Customer> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    assertThat (backend.ContainsKey(inner, "postal_code")) isTrue
 
-    let original = {
-        CustomerName = "Alice"
-        ShippingAddress = {
-            PostalCode = "0150"
-            CountryName = "Norway"
-        }
-    }
+                    assertThat (backend.ContainsKey(inner, "country_name")) isTrue
+            )
+            test (
+                "encode applies case rule to record-list element keys",
+                fun _ ->
+                    let codec =
+                        auto<Route> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let json = codec.encode original
-    let map = parseRaw json
+                    let json =
+                        codec.encode {
+                            Vendor = "Acme"
+                            Stops = [
+                                {
+                                    PostalCode = "0150"
+                                    CountryName = "Norway"
+                                }
+                            ]
+                        }
 
-    match codec.decode map with
-    | Ok r ->
-        r.CustomerName |> equal "Alice"
-        r.ShippingAddress.PostalCode |> equal "0150"
-        r.ShippingAddress.CountryName |> equal "Norway"
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    let parsed = parseRaw json
+                    let stops = backend.Get(parsed, "stops")
+                    assertThat (backend.IsArray stops) isTrue
+                    assertThat (backend.ArrayLength stops) (isEqualTo 1)
+                    let first = backend.ArrayAt(stops, 0)
+
+                    assertThat (backend.ContainsKey(first, "postal_code")) isTrue
+
+                    assertThat (backend.ContainsKey(first, "country_name")) isTrue
+            )
+            test (
+                "encode round-trips nested record under snake_case",
+                fun _ ->
+                    let codec =
+                        auto<Customer> ()
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let original = {
+                        CustomerName = "Alice"
+                        ShippingAddress = {
+                            PostalCode = "0150"
+                            CountryName = "Norway"
+                        }
+                    }
+
+                    let json = codec.encode original
+                    let map = parseRaw json
+
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.CustomerName (isEqualTo "Alice")
+                        assertThat r.ShippingAddress.PostalCode (isEqualTo "0150")
+                        assertThat r.ShippingAddress.CountryName (isEqualTo "Norway")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+        ]
+    )
+
+let tests =
+    testList (
+        "Nested",
+        [
+            nestedRecordTests
+            listOfPrimitivesTests
+            listOfRecordsTests
+            caseRulesRecursiveTests
+        ]
+    )

@@ -10,6 +10,8 @@ module Fable.TypedJson.Tests.Schema
 open Fable.TypedJson.Testing
 open Fable.TypedJson.Schema
 open Fable.TypedJson.Json
+open Scriptorium.Nib.Assertion
+open type Scriptorium.Quill.Test
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
@@ -57,193 +59,224 @@ type MixedInput = {
 // validateMap — String Map (ToolCall.input simulation)
 // ============================================================================
 
-[<Fact>]
-let ``test validateMap simple strings`` () =
-    let input = Map.ofList [ "name", "Alice"; "age", "30" ]
+let private validateMapTests =
+    testList (
+        "validateMap — String Map (ToolCall.input simulation)",
+        [
+            test (
+                "validateMap simple strings",
+                fun _ ->
+                    let input = Map.ofList [ "name", "Alice"; "age", "30" ]
 
-    match validateMap<SimpleInput> input with
-    | Ok r ->
-        r.Name |> equal "Alice"
-        r.Age |> equal 30
-    | Error e -> equal "Ok" (formatErrors e)
+                    match validateMap<SimpleInput> input with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "Alice")
+                        assertThat r.Age (isEqualTo 30)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateMap float from string",
+                fun _ ->
+                    let input = Map.ofList [ "temperature", "22.5"; "humidity", "65.0" ]
 
-[<Fact>]
-let ``test validateMap float from string`` () =
-    let input = Map.ofList [ "temperature", "22.5"; "humidity", "65.0" ]
+                    match validateMap<FloatInput> input with
+                    | Ok r ->
+                        assertThat r.Temperature (isEqualTo 22.5)
+                        assertThat r.Humidity (isEqualTo 65.0)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateMap bool from string",
+                fun _ ->
+                    let input = Map.ofList [ "active", "true"; "debug", "false" ]
 
-    match validateMap<FloatInput> input with
-    | Ok r ->
-        r.Temperature |> equal 22.5
-        r.Humidity |> equal 65.0
-    | Error e -> equal "Ok" (formatErrors e)
+                    match validateMap<BoolInput> input with
+                    | Ok r ->
+                        assertThat r.Active isTrue
+                        assertThat r.Debug isFalse
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateMap missing required field",
+                fun _ ->
+                    let input = Map.ofList [ "name", "Alice" ]
 
-[<Fact>]
-let ``test validateMap bool from string`` () =
-    let input = Map.ofList [ "active", "true"; "debug", "false" ]
+                    match validateMap<SimpleInput> input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        assertThat errors.Length (isEqualTo 1)
+                        assertThat (errors.[0].path) (isEqualTo "age")
+            )
+            test (
+                "validateMap all fields missing",
+                fun _ ->
+                    let input: Map<string, string> = Map.empty
 
-    match validateMap<BoolInput> input with
-    | Ok r ->
-        r.Active |> equal true
-        r.Debug |> equal false
-    | Error e -> equal "Ok" (formatErrors e)
+                    match validateMap<SimpleInput> input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat errors.Length (isEqualTo 2)
+            )
+            test (
+                "validateMap optional present",
+                fun _ ->
+                    let input = Map.ofList [ "name", "Alice"; "email", "a@b.com" ]
 
-[<Fact>]
-let ``test validateMap missing required field`` () =
-    let input = Map.ofList [ "name", "Alice" ]
+                    match validateMap<OptionalInput> input with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "Alice")
+                        assertThat r.Email (isEqualTo (Some "a@b.com"))
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateMap optional missing",
+                fun _ ->
+                    let input = Map.ofList [ "name", "Alice" ]
 
-    match validateMap<SimpleInput> input with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 1
-        errors.[0].path |> equal "age"
+                    match validateMap<OptionalInput> input with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "Alice")
+                        assertThat r.Email (isEqualTo None)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateMap invalid int string",
+                fun _ ->
+                    let input = Map.ofList [ "name", "Alice"; "age", "not_a_number" ]
 
-[<Fact>]
-let ``test validateMap all fields missing`` () =
-    let input: Map<string, string> = Map.empty
+                    match validateMap<SimpleInput> input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        assertThat errors.Length (isEqualTo 1)
+                        assertThat (errors.[0].path) (isEqualTo "age")
 
-    match validateMap<SimpleInput> input with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors -> errors.Length |> equal 2
+                        assertThat (errors.[0].message.Contains("cannot parse")) isTrue
+            )
+            test (
+                "validateMap invalid float string",
+                fun _ ->
+                    let input = Map.ofList [ "temperature", "hot"; "humidity", "65.0" ]
 
-[<Fact>]
-let ``test validateMap optional present`` () =
-    let input = Map.ofList [ "name", "Alice"; "email", "a@b.com" ]
+                    match validateMap<FloatInput> input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        assertThat errors.Length (isEqualTo 1)
+                        assertThat (errors.[0].path) (isEqualTo "temperature")
+            )
+            test (
+                "validateMap invalid bool string",
+                fun _ ->
+                    let input = Map.ofList [ "active", "yes"; "debug", "false" ]
 
-    match validateMap<OptionalInput> input with
-    | Ok r ->
-        r.Name |> equal "Alice"
-        r.Email |> equal (Some "a@b.com")
-    | Error e -> equal "Ok" (formatErrors e)
+                    match validateMap<BoolInput> input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        assertThat errors.Length (isEqualTo 1)
+                        assertThat (errors.[0].path) (isEqualTo "active")
+            )
+            test (
+                "validateMap mixed types all from strings",
+                fun _ ->
+                    let input =
+                        Map.ofList [ "label", "test"; "count", "5"; "score", "9.5"; "enabled", "true" ]
 
-[<Fact>]
-let ``test validateMap optional missing`` () =
-    let input = Map.ofList [ "name", "Alice" ]
+                    match validateMap<MixedInput> input with
+                    | Ok r ->
+                        assertThat r.Label (isEqualTo "test")
+                        assertThat r.Count (isEqualTo 5)
+                        assertThat r.Score (isEqualTo 9.5)
+                        assertThat r.Enabled isTrue
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateMap accumulates multiple errors",
+                fun _ ->
+                    let input = Map.ofList [ "label", "test" ]
 
-    match validateMap<OptionalInput> input with
-    | Ok r ->
-        r.Name |> equal "Alice"
-        r.Email |> equal None
-    | Error e -> equal "Ok" (formatErrors e)
-
-[<Fact>]
-let ``test validateMap invalid int string`` () =
-    let input = Map.ofList [ "name", "Alice"; "age", "not_a_number" ]
-
-    match validateMap<SimpleInput> input with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 1
-        errors.[0].path |> equal "age"
-
-        (errors.[0].message.Contains("cannot parse"))
-        |> equal true
-
-[<Fact>]
-let ``test validateMap invalid float string`` () =
-    let input = Map.ofList [ "temperature", "hot"; "humidity", "65.0" ]
-
-    match validateMap<FloatInput> input with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 1
-        errors.[0].path |> equal "temperature"
-
-[<Fact>]
-let ``test validateMap invalid bool string`` () =
-    let input = Map.ofList [ "active", "yes"; "debug", "false" ]
-
-    match validateMap<BoolInput> input with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 1
-        errors.[0].path |> equal "active"
-
-[<Fact>]
-let ``test validateMap mixed types all from strings`` () =
-    let input =
-        Map.ofList [ "label", "test"; "count", "5"; "score", "9.5"; "enabled", "true" ]
-
-    match validateMap<MixedInput> input with
-    | Ok r ->
-        r.Label |> equal "test"
-        r.Count |> equal 5
-        r.Score |> equal 9.5
-        r.Enabled |> equal true
-    | Error e -> equal "Ok" (formatErrors e)
-
-[<Fact>]
-let ``test validateMap accumulates multiple errors`` () =
-    let input = Map.ofList [ "label", "test" ]
-
-    match validateMap<MixedInput> input with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        // count, score, enabled are all missing
-        errors.Length |> equal 3
+                    match validateMap<MixedInput> input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        // count, score, enabled are all missing
+                        assertThat errors.Length (isEqualTo 3)
+            )
+        ]
+    )
 
 // ============================================================================
 // validateJson — BeamMap (parsed JSON)
 // ============================================================================
 
-[<Fact>]
-let ``test validateJson with native types`` () =
-    let map = parseRaw """{"name":"Alice","age":30}"""
+let private validateJsonTests =
+    testList (
+        "validateJson — BeamMap (parsed JSON)",
+        [
+            test (
+                "validateJson with native types",
+                fun _ ->
+                    let map = parseRaw """{"name":"Alice","age":30}"""
 
-    match validateJson<SimpleInput> map with
-    | Ok r ->
-        r.Name |> equal "Alice"
-        r.Age |> equal 30
-    | Error e -> equal "Ok" (formatErrors e)
+                    match validateJson<SimpleInput> map with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "Alice")
+                        assertThat r.Age (isEqualTo 30)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateJson with floats",
+                fun _ ->
+                    let map = parseRaw """{"temperature":22.5,"humidity":65.0}"""
 
-[<Fact>]
-let ``test validateJson with floats`` () =
-    let map = parseRaw """{"temperature":22.5,"humidity":65.0}"""
+                    match validateJson<FloatInput> map with
+                    | Ok r ->
+                        assertThat r.Temperature (isEqualTo 22.5)
+                        assertThat r.Humidity (isEqualTo 65.0)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateJson with bools",
+                fun _ ->
+                    let map = parseRaw """{"active":true,"debug":false}"""
 
-    match validateJson<FloatInput> map with
-    | Ok r ->
-        r.Temperature |> equal 22.5
-        r.Humidity |> equal 65.0
-    | Error e -> equal "Ok" (formatErrors e)
+                    match validateJson<BoolInput> map with
+                    | Ok r ->
+                        assertThat r.Active isTrue
+                        assertThat r.Debug isFalse
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateJson missing field",
+                fun _ ->
+                    let map = parseRaw """{"name":"Alice"}"""
 
-[<Fact>]
-let ``test validateJson with bools`` () =
-    let map = parseRaw """{"active":true,"debug":false}"""
+                    match validateJson<SimpleInput> map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        assertThat errors.Length (isEqualTo 1)
+                        assertThat (errors.[0].path) (isEqualTo "age")
+            )
+            test (
+                "validateJson optional present",
+                fun _ ->
+                    let map = parseRaw """{"name":"Alice","email":"a@b.com"}"""
 
-    match validateJson<BoolInput> map with
-    | Ok r ->
-        r.Active |> equal true
-        r.Debug |> equal false
-    | Error e -> equal "Ok" (formatErrors e)
+                    match validateJson<OptionalInput> map with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "Alice")
+                        assertThat r.Email (isEqualTo (Some "a@b.com"))
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+            test (
+                "validateJson optional missing",
+                fun _ ->
+                    let map = parseRaw """{"name":"Alice"}"""
 
-[<Fact>]
-let ``test validateJson missing field`` () =
-    let map = parseRaw """{"name":"Alice"}"""
-
-    match validateJson<SimpleInput> map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 1
-        errors.[0].path |> equal "age"
-
-[<Fact>]
-let ``test validateJson optional present`` () =
-    let map = parseRaw """{"name":"Alice","email":"a@b.com"}"""
-
-    match validateJson<OptionalInput> map with
-    | Ok r ->
-        r.Name |> equal "Alice"
-        r.Email |> equal (Some "a@b.com")
-    | Error e -> equal "Ok" (formatErrors e)
-
-[<Fact>]
-let ``test validateJson optional missing`` () =
-    let map = parseRaw """{"name":"Alice"}"""
-
-    match validateJson<OptionalInput> map with
-    | Ok r ->
-        r.Name |> equal "Alice"
-        r.Email |> equal None
-    | Error e -> equal "Ok" (formatErrors e)
+                    match validateJson<OptionalInput> map with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "Alice")
+                        assertThat r.Email (isEqualTo None)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
+            )
+        ]
+    )
 
 // ============================================================================
 // Coercion Tests
@@ -254,116 +287,163 @@ let ``test validateJson optional missing`` () =
 // case wrappers. The DU is reserved for the `IJsonCodec` boundary.
 // Pass `box "42"` / `box 42` / etc. directly here.
 
-[<Fact>]
-let ``test coercion string to int`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "42") with
-    | Ok v -> (unbox<int> v) |> equal 42
-    | Error e -> equal "Ok" e
-
-[<Fact>]
-let ``test coercion string to float`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "3.14") with
-    | Ok v -> (unbox<float> v) |> equal 3.14
-    | Error e -> equal "Ok" e
-
-[<Fact>]
-let ``test coercion string to bool true`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "true") with
-    | Ok v -> (unbox<bool> v) |> equal true
-    | Error e -> equal "Ok" e
-
-[<Fact>]
-let ``test coercion string to bool false`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "false") with
-    | Ok v -> (unbox<bool> v) |> equal false
-    | Error e -> equal "Ok" e
-
-[<Fact>]
-let ``test coercion int to float`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box 42) with
-    | Ok v -> (unbox<float> v) |> equal 42.0
-    | Error e -> equal "Ok" e
-
-[<Fact>]
-let ``test coercion float to int`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box 42.0) with
-    | Ok v -> (unbox<int> v) |> equal 42
-    | Error e -> equal "Ok" e
-
-[<Fact>]
-let ``test coercion int to string`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<string> (box 42) with
-    | Ok v -> (unbox<string> v) |> equal "42"
-    | Error e -> equal "Ok" e
-
-[<Fact>]
-let ``test coercion invalid string to int`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "not_a_number") with
-    | Ok _ -> equal "Error" "Ok"
-    | Error msg -> (msg.Contains("cannot parse")) |> equal true
-
-[<Fact>]
-let ``test coercion invalid string to float`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "not_a_number") with
-    | Ok _ -> equal "Error" "Ok"
-    | Error msg -> (msg.Contains("cannot parse")) |> equal true
-
-[<Fact>]
-let ``test coercion invalid string to bool`` () =
-    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "maybe") with
-    | Ok _ -> equal "Error" "Ok"
-    | Error msg -> (msg.Contains("cannot parse")) |> equal true
+let private coercionTests =
+    testList (
+        "Coercion",
+        [
+            test (
+                "coercion string to int",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "42") with
+                    | Ok v -> assertThat (unbox<int> v) (isEqualTo 42)
+                    | Error e -> assertThat e (isEqualTo "Ok")
+            )
+            test (
+                "coercion string to float",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "3.14") with
+                    | Ok v -> assertThat (unbox<float> v) (isEqualTo 3.14)
+                    | Error e -> assertThat e (isEqualTo "Ok")
+            )
+            test (
+                "coercion string to bool true",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "true") with
+                    | Ok v -> assertThat (unbox<bool> v) isTrue
+                    | Error e -> assertThat e (isEqualTo "Ok")
+            )
+            test (
+                "coercion string to bool false",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "false") with
+                    | Ok v -> assertThat (unbox<bool> v) isFalse
+                    | Error e -> assertThat e (isEqualTo "Ok")
+            )
+            test (
+                "coercion int to float",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box 42) with
+                    | Ok v -> assertThat (unbox<float> v) (isEqualTo 42.0)
+                    | Error e -> assertThat e (isEqualTo "Ok")
+            )
+            test (
+                "coercion float to int",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box 42.0) with
+                    | Ok v -> assertThat (unbox<int> v) (isEqualTo 42)
+                    | Error e -> assertThat e (isEqualTo "Ok")
+            )
+            test (
+                "coercion int to string",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<string> (box 42) with
+                    | Ok v -> assertThat (unbox<string> v) (isEqualTo "42")
+                    | Error e -> assertThat e (isEqualTo "Ok")
+            )
+            test (
+                "coercion invalid string to int",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "not_a_number") with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
+            )
+            test (
+                "coercion invalid string to float",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "not_a_number") with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
+            )
+            test (
+                "coercion invalid string to bool",
+                fun _ ->
+                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "maybe") with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
+            )
+        ]
+    )
 
 // ============================================================================
 // formatErrors
 // ============================================================================
 
-[<Fact>]
-let ``test formatErrors produces readable string`` () =
-    let errors = [
-        {
-            path = "name"
-            message = "missing field (expected String)"
-        }
-        {
-            path = "age"
-            message = "cannot parse 'xyz' as int"
-        }
-    ]
+let private formatErrorsTests =
+    testList (
+        "formatErrors",
+        [
+            test (
+                "formatErrors produces readable string",
+                fun _ ->
+                    let errors = [
+                        {
+                            path = "name"
+                            message = "missing field (expected String)"
+                        }
+                        {
+                            path = "age"
+                            message = "cannot parse 'xyz' as int"
+                        }
+                    ]
 
-    let result = formatErrors errors
-    (result.Contains("name:")) |> equal true
-    (result.Contains("age:")) |> equal true
+                    let result = formatErrors errors
+                    assertThat (result.Contains("name:")) isTrue
+                    assertThat (result.Contains("age:")) isTrue
+            )
+        ]
+    )
 
 // ============================================================================
 // dump — Record to BeamMap
 // ============================================================================
 
-[<Fact>]
-let ``test dump simple record`` () =
-    let record = { Name = "Alice"; Age = 30 }
-    let map = dump record
-    let name = getString backend map "name"
-    let age = getInt backend map "age"
-    name |> equal "Alice"
-    age |> equal 30
+let private dumpTests =
+    testList (
+        "dump — Record to BeamMap",
+        [
+            test (
+                "dump simple record",
+                fun _ ->
+                    let record = { Name = "Alice"; Age = 30 }
+                    let map = dump record
+                    let name = getString backend map "name"
+                    let age = getInt backend map "age"
+                    assertThat name (isEqualTo "Alice")
+                    assertThat age (isEqualTo 30)
+            )
+            test (
+                "dump record with option some",
+                fun _ ->
+                    let record = {
+                        Name = "Alice"
+                        Email = Some "a@b.com"
+                    }
 
-[<Fact>]
-let ``test dump record with option some`` () =
-    let record = {
-        Name = "Alice"
-        Email = Some "a@b.com"
-    }
+                    let map = dump record
+                    let name = getString backend map "name"
+                    let email = getString backend map "email"
+                    assertThat name (isEqualTo "Alice")
+                    assertThat email (isEqualTo "a@b.com")
+            )
+            test (
+                "dump record with option none omits field",
+                fun _ ->
+                    let record = { Name = "Alice"; Email = None }
+                    let map = dump record
+                    let hasEmail = backend.ContainsKey(map, "email")
+                    assertThat hasEmail isFalse
+            )
+        ]
+    )
 
-    let map = dump record
-    let name = getString backend map "name"
-    let email = getString backend map "email"
-    name |> equal "Alice"
-    email |> equal "a@b.com"
-
-[<Fact>]
-let ``test dump record with option none omits field`` () =
-    let record = { Name = "Alice"; Email = None }
-    let map = dump record
-    let hasEmail = backend.ContainsKey(map, "email")
-    hasEmail |> equal false
+let tests =
+    testList (
+        "Schema",
+        [
+            validateMapTests
+            validateJsonTests
+            coercionTests
+            formatErrorsTests
+            dumpTests
+        ]
+    )

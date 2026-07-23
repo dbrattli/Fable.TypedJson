@@ -1,66 +1,41 @@
-#if FABLE_COMPILER
-module Program
+(**
+# Main — Entry point for the Fable.TypedJson test suite
 
-()
-#else
-module Program =
-    open System
-    open System.Reflection
-    open Fable.TypedJson.Testing
+One runner for every target. Quill's `runTests` executes the suite and
+returns the process exit code, so a failing test fails the build on all
+four backends:
 
-    /// Walks the test assembly and invokes every static method tagged with
-    /// `[<Fact>]` from `Fable.TypedJson.Testing`. Reports per-test results
-    /// and a summary line; exits non-zero if anything failed so CI can gate
-    /// on it. F# `let`-bound test functions compile to static methods on
-    /// the module's CLR type, so reflecting over public+nonpublic statics
-    /// catches them all.
-    let private runTests () : int =
-        let asm = Assembly.GetExecutingAssembly()
-        let factType = typeof<FactAttribute>
-        let mutable passed = 0
-        let mutable failed = 0
-        let failures = ResizeArray<string * string>()
+  * BEAM   — the run is synchronous and Quill calls `halt/1`, so `erl`
+             exits non-zero. Fable emits a `main.erl` shim dispatching to
+             `[<EntryPoint>]`, which is what the justfile invokes.
+  * Python — synchronous; the returned exit code is the process exit code.
+  * JS     — Node cannot block, so Quill chains `process.exit` onto the
+             resolved promise and the value returned here is ignored.
+  * .NET   — plain CLR execution, no Fable transpile.
 
-        for typ in asm.GetTypes() do
-            let bindings =
-                BindingFlags.Static
-                ||| BindingFlags.Public
-                ||| BindingFlags.NonPublic
+adr: Scriptorium (Quill + Nib) replaces the four per-target runners — it compiles to every target we ship
+adr: one [<EntryPoint>] for all targets; Fable's BEAM `main.erl` shim keeps it findable across compiler versions
+invariant: every test module's `tests` value appears in this list — an unlisted module is silently not run
+tradeoff: lost the BEAM runner's "discovered zero modules is a failure" guard; gained one runner and real skips
+*)
 
-            for mi in typ.GetMethods(bindings) do
-                if mi.GetCustomAttributes(factType, false).Length > 0 then
-                    let qualified = sprintf "%s.%s" typ.FullName mi.Name
+module Fable.TypedJson.Tests.Main
 
-                    try
-                        mi.Invoke(null, [||]) |> ignore
-                        passed <- passed + 1
-                        printfn "PASS %s" qualified
-                    with
-                    | :? TargetInvocationException as ex ->
-                        failed <- failed + 1
-                        let inner = ex.InnerException
-                        let msg = if isNull inner then ex.Message else inner.Message
-                        printfn "FAIL %s: %s" qualified msg
-                        failures.Add(qualified, msg)
-                    | ex ->
-                        failed <- failed + 1
-                        printfn "FAIL %s: %s" qualified ex.Message
-                        failures.Add(qualified, ex.Message)
+open type Scriptorium.Quill.Runner
 
-        printfn ""
-        printfn "Passed: %d, Failed: %d" passed failed
-
-        if failed > 0 then
-            printfn ""
-            printfn "Failures:"
-
-            for (name, msg) in failures do
-                printfn "  %s — %s" name msg
-
-            1
-        else
-            0
-
-    [<EntryPoint>]
-    let main _ = runTests ()
-#endif
+[<EntryPoint>]
+let main _ =
+    runTests [
+        Encode.tests
+        Auto.tests
+        CaseRules.tests
+        Errors.tests
+        ErasedDU.tests
+        Schema.tests
+        Codec.tests
+        Refined.tests
+        Nested.tests
+        JsonSchema.tests
+        Alias.tests
+        Union.tests
+    ]

@@ -9,6 +9,8 @@ module Fable.TypedJson.Tests.CaseRules
 
 open Fable.TypedJson.Testing
 open Fable.TypedJson.Json
+open Scriptorium.Nib.Assertion
+open type Scriptorium.Quill.Test
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
@@ -37,60 +39,41 @@ let backend = beam
 // applyCaseRule Tests
 // ============================================================================
 
-[<Fact>]
-let ``test snake_case conversion`` () =
-    applyCaseRule CaseRules.SnakeCase "AirTemperature"
-    |> equal "air_temperature"
-
-[<Fact>]
-let ``test snake_case multi-word`` () =
-    applyCaseRule CaseRules.SnakeCase "RelativeHumidity"
-    |> equal "relative_humidity"
-
-[<Fact>]
-let ``test snake_case single word`` () =
-    applyCaseRule CaseRules.SnakeCase "Name"
-    |> equal "name"
-
-[<Fact>]
-let ``test snake_case already lowercase`` () =
-    applyCaseRule CaseRules.SnakeCase "name"
-    |> equal "name"
-
-[<Fact>]
-let ``test lower_first conversion`` () =
-    applyCaseRule CaseRules.LowerFirst "AirTemperature"
-    |> equal "airTemperature"
-
-[<Fact>]
-let ``test lower_first single word`` () =
-    applyCaseRule CaseRules.LowerFirst "Name"
-    |> equal "name"
-
-[<Fact>]
-let ``test kebab_case conversion`` () =
-    applyCaseRule CaseRules.KebabCase "AirTemperature"
-    |> equal "air-temperature"
-
-[<Fact>]
-let ``test snake_case_all_caps conversion`` () =
-    applyCaseRule CaseRules.SnakeCaseAllCaps "AirTemperature"
-    |> equal "AIR_TEMPERATURE"
-
-[<Fact>]
-let ``test none preserves case`` () =
-    applyCaseRule CaseRules.None "AirTemperature"
-    |> equal "AirTemperature"
-
-[<Fact>]
-let ``test pascal_case conversion`` () =
-    applyCaseRule CaseRules.PascalCase "air_temperature"
-    |> equal "AirTemperature"
-
-[<Fact>]
-let ``test pascal_case single word`` () =
-    applyCaseRule CaseRules.PascalCase "name"
-    |> equal "Name"
+let private applyCaseRuleTests =
+    testList (
+        "applyCaseRule",
+        [
+            test (
+                "snake_case conversion",
+                fun _ -> assertThat (applyCaseRule CaseRules.SnakeCase "AirTemperature") (isEqualTo "air_temperature")
+            )
+            test (
+                "snake_case multi-word",
+                fun _ -> assertThat (applyCaseRule CaseRules.SnakeCase "RelativeHumidity") (isEqualTo "relative_humidity")
+            )
+            test ("snake_case single word", fun _ -> assertThat (applyCaseRule CaseRules.SnakeCase "Name") (isEqualTo "name"))
+            test ("snake_case already lowercase", fun _ -> assertThat (applyCaseRule CaseRules.SnakeCase "name") (isEqualTo "name"))
+            test (
+                "lower_first conversion",
+                fun _ -> assertThat (applyCaseRule CaseRules.LowerFirst "AirTemperature") (isEqualTo "airTemperature")
+            )
+            test ("lower_first single word", fun _ -> assertThat (applyCaseRule CaseRules.LowerFirst "Name") (isEqualTo "name"))
+            test (
+                "kebab_case conversion",
+                fun _ -> assertThat (applyCaseRule CaseRules.KebabCase "AirTemperature") (isEqualTo "air-temperature")
+            )
+            test (
+                "snake_case_all_caps conversion",
+                fun _ -> assertThat (applyCaseRule CaseRules.SnakeCaseAllCaps "AirTemperature") (isEqualTo "AIR_TEMPERATURE")
+            )
+            test ("none preserves case", fun _ -> assertThat (applyCaseRule CaseRules.None "AirTemperature") (isEqualTo "AirTemperature"))
+            test (
+                "pascal_case conversion",
+                fun _ -> assertThat (applyCaseRule CaseRules.PascalCase "air_temperature") (isEqualTo "AirTemperature")
+            )
+            test ("pascal_case single word", fun _ -> assertThat (applyCaseRule CaseRules.PascalCase "name") (isEqualTo "Name"))
+        ]
+    )
 
 // ============================================================================
 // Auto Codec with Different Case Rules
@@ -101,160 +84,181 @@ type Weather = {
     WindSpeed: float
 }
 
-[<Fact>]
-let ``test auto decode with snake_case keys`` () =
-    let codec = auto<Weather> ()
-    let map = parseRaw """{"air_temperature":22.5,"wind_speed":3.0}"""
+let private autoCodecCaseRulesTests =
+    testList (
+        "Auto Codec with Different Case Rules",
+        [
+            test (
+                "auto decode with snake_case keys",
+                fun _ ->
+                    let codec = auto<Weather> ()
+                    let map = parseRaw """{"air_temperature":22.5,"wind_speed":3.0}"""
 
-    match codec.decodeWith CaseRules.SnakeCase map with
-    | Ok w ->
-        w.AirTemperature |> equal 22.5
-        w.WindSpeed |> equal 3.0
-    | Error e -> equal "Ok" (sprintf "Error: %A" e)
+                    match codec.decodeWith CaseRules.SnakeCase map with
+                    | Ok w ->
+                        assertThat w.AirTemperature (isEqualTo 22.5)
+                        assertThat w.WindSpeed (isEqualTo 3.0)
+                    | Error e -> assertThat (sprintf "Error: %A" e) (isEqualTo "Ok")
+            )
+            test (
+                "auto decode with camelCase keys",
+                fun _ ->
+                    let codec = auto<Weather> ()
+                    let map = parseRaw """{"airTemperature":22.5,"windSpeed":3.0}"""
 
-[<Fact>]
-let ``test auto decode with camelCase keys`` () =
-    let codec = auto<Weather> ()
-    let map = parseRaw """{"airTemperature":22.5,"windSpeed":3.0}"""
+                    match codec.decodeWith CaseRules.LowerFirst map with
+                    | Ok w ->
+                        assertThat w.AirTemperature (isEqualTo 22.5)
+                        assertThat w.WindSpeed (isEqualTo 3.0)
+                    | Error e -> assertThat (sprintf "Error: %A" e) (isEqualTo "Ok")
+            )
+            test (
+                "auto decode with PascalCase keys",
+                fun _ ->
+                    let codec = auto<Weather> ()
+                    let map = parseRaw """{"AirTemperature":22.5,"WindSpeed":3.0}"""
 
-    match codec.decodeWith CaseRules.LowerFirst map with
-    | Ok w ->
-        w.AirTemperature |> equal 22.5
-        w.WindSpeed |> equal 3.0
-    | Error e -> equal "Ok" (sprintf "Error: %A" e)
+                    match codec.decodeWith CaseRules.PascalCase map with
+                    | Ok w ->
+                        assertThat w.AirTemperature (isEqualTo 22.5)
+                        assertThat w.WindSpeed (isEqualTo 3.0)
+                    | Error e -> assertThat (sprintf "Error: %A" e) (isEqualTo "Ok")
+            )
+            test (
+                "auto encode with snake_case",
+                fun _ ->
+                    let codec = auto<Weather> ()
 
-[<Fact>]
-let ``test auto decode with PascalCase keys`` () =
-    let codec = auto<Weather> ()
-    let map = parseRaw """{"AirTemperature":22.5,"WindSpeed":3.0}"""
+                    let record = {
+                        AirTemperature = 22.5
+                        WindSpeed = 3.0
+                    }
 
-    match codec.decodeWith CaseRules.PascalCase map with
-    | Ok w ->
-        w.AirTemperature |> equal 22.5
-        w.WindSpeed |> equal 3.0
-    | Error e -> equal "Ok" (sprintf "Error: %A" e)
+                    let json = codec.encodeWith CaseRules.SnakeCase record
+                    let map = parseRaw json
+                    let temp = getFloat backend map "air_temperature"
+                    assertThat temp (isEqualTo 22.5)
+            )
+            test (
+                "auto encode with camelCase",
+                fun _ ->
+                    let codec = auto<Weather> ()
 
-[<Fact>]
-let ``test auto encode with snake_case`` () =
-    let codec = auto<Weather> ()
+                    let record = {
+                        AirTemperature = 22.5
+                        WindSpeed = 3.0
+                    }
 
-    let record = {
-        AirTemperature = 22.5
-        WindSpeed = 3.0
-    }
+                    let json = codec.encodeWith CaseRules.LowerFirst record
+                    let map = parseRaw json
+                    let temp = getFloat backend map "airTemperature"
+                    assertThat temp (isEqualTo 22.5)
+            )
+            test (
+                "same codec different casing",
+                fun _ ->
+                    let codec = auto<Weather> ()
 
-    let json = codec.encodeWith CaseRules.SnakeCase record
-    let map = parseRaw json
-    let temp = getFloat backend map "air_temperature"
-    temp |> equal 22.5
+                    let record = {
+                        AirTemperature = 22.5
+                        WindSpeed = 3.0
+                    }
 
-[<Fact>]
-let ``test auto encode with camelCase`` () =
-    let codec = auto<Weather> ()
+                    // Encode as snake_case
+                    let snakeJson = codec.encodeWith CaseRules.SnakeCase record
+                    let snakeMap = parseRaw snakeJson
 
-    let record = {
-        AirTemperature = 22.5
-        WindSpeed = 3.0
-    }
+                    assertThat (backend.ContainsKey(snakeMap, "air_temperature")) isTrue
 
-    let json = codec.encodeWith CaseRules.LowerFirst record
-    let map = parseRaw json
-    let temp = getFloat backend map "airTemperature"
-    temp |> equal 22.5
+                    // Encode same record as camelCase
+                    let camelJson = codec.encodeWith CaseRules.LowerFirst record
+                    let camelMap = parseRaw camelJson
 
-[<Fact>]
-let ``test same codec different casing`` () =
-    let codec = auto<Weather> ()
-
-    let record = {
-        AirTemperature = 22.5
-        WindSpeed = 3.0
-    }
-
-    // Encode as snake_case
-    let snakeJson = codec.encodeWith CaseRules.SnakeCase record
-    let snakeMap = parseRaw snakeJson
-
-    backend.ContainsKey(snakeMap, "air_temperature")
-    |> equal true
-
-    // Encode same record as camelCase
-    let camelJson = codec.encodeWith CaseRules.LowerFirst record
-    let camelMap = parseRaw camelJson
-
-    backend.ContainsKey(camelMap, "airTemperature")
-    |> equal true
+                    assertThat (backend.ContainsKey(camelMap, "airTemperature")) isTrue
+            )
+        ]
+    )
 
 // ============================================================================
 // Default CaseRules + withCaseRules — the configured-once flow
 // ============================================================================
 
-[<Fact>]
-let ``test default case rule is LowerFirst`` () =
-    let codec = auto<Weather> ()
-    codec.caseRules |> equal CaseRules.LowerFirst
+let private defaultAndWithCaseRulesTests =
+    testList (
+        "Default CaseRules + withCaseRules — the configured-once flow",
+        [
+            test (
+                "default case rule is LowerFirst",
+                fun _ ->
+                    let codec = auto<Weather> ()
+                    assertThat codec.caseRules (isEqualTo CaseRules.LowerFirst)
+            )
+            test (
+                "default codec encodes and decodes camelCase",
+                fun _ ->
+                    let codec = auto<Weather> ()
 
-[<Fact>]
-let ``test default codec encodes and decodes camelCase`` () =
-    let codec = auto<Weather> ()
+                    let record = {
+                        AirTemperature = 22.5
+                        WindSpeed = 3.0
+                    }
+                    // No CaseRules argument — uses the codec's default (LowerFirst).
+                    let json = codec.encode record
+                    let map = parseRaw json
 
-    let record = {
-        AirTemperature = 22.5
-        WindSpeed = 3.0
-    }
-    // No CaseRules argument — uses the codec's default (LowerFirst).
-    let json = codec.encode record
-    let map = parseRaw json
+                    assertThat (backend.ContainsKey(map, "airTemperature")) isTrue
 
-    backend.ContainsKey(map, "airTemperature")
-    |> equal true
+                    assertThat (backend.ContainsKey(map, "windSpeed")) isTrue
 
-    backend.ContainsKey(map, "windSpeed")
-    |> equal true
+                    match codec.decode map with
+                    | Ok w ->
+                        assertThat w.AirTemperature (isEqualTo 22.5)
+                        assertThat w.WindSpeed (isEqualTo 3.0)
+                    | Error e -> assertThat (sprintf "Error: %A" e) (isEqualTo "Ok")
+            )
+            test (
+                "withCaseRules switches default for round-trip",
+                fun _ ->
+                    let codec =
+                        auto<Weather> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    match codec.decode map with
-    | Ok w ->
-        w.AirTemperature |> equal 22.5
-        w.WindSpeed |> equal 3.0
-    | Error e -> equal "Ok" (sprintf "Error: %A" e)
+                    let record = {
+                        AirTemperature = 22.5
+                        WindSpeed = 3.0
+                    }
 
-[<Fact>]
-let ``test withCaseRules switches default for round-trip`` () =
-    let codec =
-        auto<Weather> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    let json = codec.encode record
+                    let map = parseRaw json
 
-    let record = {
-        AirTemperature = 22.5
-        WindSpeed = 3.0
-    }
+                    assertThat (backend.ContainsKey(map, "air_temperature")) isTrue
 
-    let json = codec.encode record
-    let map = parseRaw json
+                    match codec.decode map with
+                    | Ok w -> assertThat w.AirTemperature (isEqualTo 22.5)
+                    | Error e -> assertThat (sprintf "Error: %A" e) (isEqualTo "Ok")
+            )
+            test (
+                "withCaseRules survives withModel composition",
+                fun _ ->
+                    let codec =
+                        auto<Weather> ()
+                        |> withModel (fun w -> if w.WindSpeed >= 0.0 then Ok w else Error [])
+                        |> withCaseRules CaseRules.SnakeCase
 
-    backend.ContainsKey(map, "air_temperature")
-    |> equal true
+                    assertThat codec.caseRules (isEqualTo CaseRules.SnakeCase)
 
-    match codec.decode map with
-    | Ok w -> w.AirTemperature |> equal 22.5
-    | Error e -> equal "Ok" (sprintf "Error: %A" e)
+                    let record = {
+                        AirTemperature = 22.5
+                        WindSpeed = 3.0
+                    }
 
-[<Fact>]
-let ``test withCaseRules survives withModel composition`` () =
-    let codec =
-        auto<Weather> ()
-        |> withModel (fun w -> if w.WindSpeed >= 0.0 then Ok w else Error [])
-        |> withCaseRules CaseRules.SnakeCase
+                    let json = codec.encode record
+                    let map = parseRaw json
 
-    codec.caseRules |> equal CaseRules.SnakeCase
+                    assertThat (backend.ContainsKey(map, "air_temperature")) isTrue
+            )
+        ]
+    )
 
-    let record = {
-        AirTemperature = 22.5
-        WindSpeed = 3.0
-    }
-
-    let json = codec.encode record
-    let map = parseRaw json
-
-    backend.ContainsKey(map, "air_temperature")
-    |> equal true
+let tests =
+    testList ("CaseRules", [ applyCaseRuleTests; autoCodecCaseRulesTests; defaultAndWithCaseRulesTests ])

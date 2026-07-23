@@ -297,7 +297,7 @@ Fable.TypedJson.DotNet (.NET shim — runs natively on the CLR, no Fable transpi
 - `src/Fable.TypedJson.Python/` — Python backend shim
 - `src/Fable.TypedJson.JS/` — JavaScript backend shim
 - `src/Fable.TypedJson.DotNet/` — .NET backend shim (System.Text.Json, runs natively on the CLR)
-- `test/` — F# test sources. Compile to Erlang (`#if !DOTNET && !PYTHON && !JS` → BEAM), Python (`#if PYTHON`), JavaScript (`#if JS`), or run natively on the CLR (`#if DOTNET`, no Fable transpile). The .NET path uses a reflection-based runner in `Main.fs` that walks the assembly for `[<Fact>]`-tagged statics; pytest picks up the Fable-emitted `test_*.py` files directly.
+- `test/` — F# test sources. Compile to Erlang (`#if !DOTNET && !PYTHON && !JS` → BEAM), Python (`#if PYTHON`), JavaScript (`#if JS`), or run natively on the CLR (`#if DOTNET`, no Fable transpile). One [Scriptorium](https://github.com/fable-hub/Scriptorium) suite drives all four — Quill supplies the test DSL and runner (`Main.fs` is the single entry point), Nib the assertions.
 
 ## Prerequisites
 
@@ -309,7 +309,7 @@ The core and the Fable shims (Beam, Python, JS) target **netstandard2.0**, so an
 
 - .NET SDK that satisfies the test fsproj's `net10.0` target (currently .NET SDK 10)
 - For the BEAM target: Erlang/OTP and `rebar3`
-- For the Python target: `uv` (the venv pulls in `fable-library` and `pytest`)
+- For the Python target: `uv` (the venv pulls in `fable-library`)
 - `just` (task runner)
 
 ## Setup
@@ -334,13 +334,15 @@ just check          # type-check all five projects via `dotnet build` (DotNet is
 
 ```sh
 just test           # run all four backend test suites from the same F# sources
-just test-beam      # transpile tests to Erlang, run via test_runner.erl on BEAM
-just test-python    # transpile tests to Python, run via pytest
-just test-js        # transpile tests to JavaScript, run via the Node runner
-just test-dotnet    # build tests for net10.0 with FableTarget=dotnet, run the reflection-based runner natively
+just test-beam      # transpile tests to Erlang, run on the BEAM VM
+just test-python    # transpile tests to Python, run under python
+just test-js        # transpile tests to JavaScript, run under node
+just test-dotnet    # build tests for net10.0 with FableTarget=dotnet, run natively on the CLR
 ```
 
-The same F# test sources compile to all four targets via `#if PYTHON | JS | DOTNET` blocks that swap a few backend-specific imports. `Fable.Core.Testing.Assert.AreEqual` doesn't throw on Fable BEAM, so the test helpers in `test/Testing.fs` raise explicitly on inequality — making every runner report real failures.
+The same F# test sources compile to all four targets via `#if PYTHON | JS | DOTNET` blocks that swap a few backend-specific imports. Tests are written with [Scriptorium](https://github.com/fable-hub/Scriptorium) — Quill for the test DSL and runner, Nib for assertions — both of which compile to every target, so a single `runTests` entry point in `Main.fs` replaces the per-target runners. Quill exits non-zero on failure on all four targets, so CI gates on it.
+
+Known per-target divergences are marked with Quill's `skipIfJavaScript` / `skipIfDotNet` configurers next to the test, each carrying a comment explaining the gap, so they show up as skips rather than silently disappearing.
 
 ## Format
 

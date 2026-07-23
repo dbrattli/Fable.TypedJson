@@ -14,6 +14,8 @@ module Fable.TypedJson.Tests.Codec
 open Fable.TypedJson.Testing
 open Fable.TypedJson.Schema
 open Fable.TypedJson.Json
+open Scriptorium.Nib.Assertion
+open type Scriptorium.Quill.Test
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
@@ -38,61 +40,75 @@ module Codec = Fable.TypedJson.Codec
 // Pipeline composition (Pydantic Annotated equivalent, no new type)
 // ============================================================================
 
-[<Fact>]
-let ``test gt rejects values at threshold`` () =
-    let codec = Codec.int |> Codec.gt 0
+let private pipelineCompositionTests =
+    testList (
+        "Pipeline composition (Pydantic Annotated equivalent, no new type)",
+        [
+            test (
+                "gt rejects values at threshold",
+                fun _ ->
+                    let codec = Codec.int |> Codec.gt 0
 
-    match codec.Decode(JInt 0) with
-    | Ok _ -> equal "Error" "Ok"
-    | Error msg -> msg |> equal "must be > 0"
+                    match codec.Decode(JInt 0) with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error msg -> assertThat msg (isEqualTo "must be > 0")
+            )
+            test (
+                "gt accepts above threshold",
+                fun _ ->
+                    let codec = Codec.int |> Codec.gt 0
 
-[<Fact>]
-let ``test gt accepts above threshold`` () =
-    let codec = Codec.int |> Codec.gt 0
+                    match codec.Decode(JInt 1) with
+                    | Ok n -> assertThat n (isEqualTo 1)
+                    | Error _ -> assertThat "Error" (isEqualTo "Ok")
+            )
+            test (
+                "stacked gt and le bounds",
+                fun _ ->
+                    let codec = Codec.int |> Codec.gt 0 |> Codec.le 14
 
-    match codec.Decode(JInt 1) with
-    | Ok n -> n |> equal 1
-    | Error _ -> equal "Ok" "Error"
+                    match codec.Decode(JInt 14) with
+                    | Ok n -> assertThat n (isEqualTo 14)
+                    | Error _ -> assertThat "Error" (isEqualTo "Ok")
+            )
+            test (
+                "stacked gt and le rejects above upper",
+                fun _ ->
+                    let codec = Codec.int |> Codec.gt 0 |> Codec.le 14
 
-[<Fact>]
-let ``test stacked gt and le bounds`` () =
-    let codec = Codec.int |> Codec.gt 0 |> Codec.le 14
+                    match codec.Decode(JInt 15) with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error msg -> assertThat msg (isEqualTo "must be <= 14")
+            )
+            test (
+                "minLength rejects shorter strings",
+                fun _ ->
+                    let codec = Codec.string |> Codec.minLength 3
 
-    match codec.Decode(JInt 14) with
-    | Ok n -> n |> equal 14
-    | Error _ -> equal "Ok" "Error"
+                    match codec.Decode(JString "ab") with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error msg -> assertThat msg (isEqualTo "must have length >= 3")
+            )
+            test (
+                "nonEmpty accepts non-empty",
+                fun _ ->
+                    let codec = Codec.string |> Codec.nonEmpty
 
-[<Fact>]
-let ``test stacked gt and le rejects above upper`` () =
-    let codec = Codec.int |> Codec.gt 0 |> Codec.le 14
+                    match codec.Decode(JString "x") with
+                    | Ok s -> assertThat s (isEqualTo "x")
+                    | Error _ -> assertThat "Error" (isEqualTo "Ok")
+            )
+            test (
+                "nonEmpty rejects empty",
+                fun _ ->
+                    let codec = Codec.string |> Codec.nonEmpty
 
-    match codec.Decode(JInt 15) with
-    | Ok _ -> equal "Error" "Ok"
-    | Error msg -> msg |> equal "must be <= 14"
-
-[<Fact>]
-let ``test minLength rejects shorter strings`` () =
-    let codec = Codec.string |> Codec.minLength 3
-
-    match codec.Decode(JString "ab") with
-    | Ok _ -> equal "Error" "Ok"
-    | Error msg -> msg |> equal "must have length >= 3"
-
-[<Fact>]
-let ``test nonEmpty accepts non-empty`` () =
-    let codec = Codec.string |> Codec.nonEmpty
-
-    match codec.Decode(JString "x") with
-    | Ok s -> s |> equal "x"
-    | Error _ -> equal "Ok" "Error"
-
-[<Fact>]
-let ``test nonEmpty rejects empty`` () =
-    let codec = Codec.string |> Codec.nonEmpty
-
-    match codec.Decode(JString "") with
-    | Ok _ -> equal "Error" "Ok"
-    | Error msg -> msg |> equal "must be non-empty"
+                    match codec.Decode(JString "") with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error msg -> assertThat msg (isEqualTo "must be non-empty")
+            )
+        ]
+    )
 
 // ============================================================================
 // Named wrapper type with static JsonCodec member (registered for auto)
@@ -116,50 +132,60 @@ let private codecs: CodecRegistry = emptyRegistry |> register DayCount.JsonCodec
 // PascalCase fields lowercase consistently in both paths.
 type Req = { Days: DayCount; Name: string }
 
-[<Fact>]
-let ``test auto with custom codec accepts valid value`` () =
-    let codec =
-        autoWith<Req> codecs
-        |> withCaseRules CaseRules.SnakeCase
+let private namedWrapperTypeTests =
+    testList (
+        "Named wrapper type with static JsonCodec member (registered for auto)",
+        [
+            test (
+                "auto with custom codec accepts valid value",
+                fun _ ->
+                    let codec =
+                        autoWith<Req> codecs
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let map = parseRaw """{"days":7, "name":"hello"}"""
+                    let map = parseRaw """{"days":7, "name":"hello"}"""
 
-    match codec.decode map with
-    | Ok r ->
-        let (DayCount n) = r.Days
-        n |> equal 7
-        r.Name |> equal "hello"
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok r ->
+                        let (DayCount n) = r.Days
+                        assertThat n (isEqualTo 7)
+                        assertThat r.Name (isEqualTo "hello")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "auto with custom codec rejects out-of-range value",
+                fun _ ->
+                    let codec =
+                        autoWith<Req> codecs
+                        |> withCaseRules CaseRules.SnakeCase
 
-[<Fact>]
-let ``test auto with custom codec rejects out-of-range value`` () =
-    let codec =
-        autoWith<Req> codecs
-        |> withCaseRules CaseRules.SnakeCase
+                    let map = parseRaw """{"days":15, "name":"hello"}"""
 
-    let map = parseRaw """{"days":15, "name":"hello"}"""
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errs ->
+                        // The error from Codec.le surfaces through the registry into the FieldError list.
+                        let formatted = formatErrors errs
+                        assertThat (formatted.Contains("days")) isTrue
+                        assertThat (formatted.Contains("must be <= 14")) isTrue
+            )
+            test (
+                "auto with custom codec rejects zero",
+                fun _ ->
+                    let codec =
+                        autoWith<Req> codecs
+                        |> withCaseRules CaseRules.SnakeCase
 
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errs ->
-        // The error from Codec.le surfaces through the registry into the FieldError list.
-        let formatted = formatErrors errs
-        formatted.Contains("days") |> equal true
-        formatted.Contains("must be <= 14") |> equal true
+                    let map = parseRaw """{"days":0, "name":"hello"}"""
 
-[<Fact>]
-let ``test auto with custom codec rejects zero`` () =
-    let codec =
-        autoWith<Req> codecs
-        |> withCaseRules CaseRules.SnakeCase
-
-    let map = parseRaw """{"days":0, "name":"hello"}"""
-
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errs ->
-        let formatted = formatErrors errs
-        formatted.Contains("must be > 0") |> equal true
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errs ->
+                        let formatted = formatErrors errs
+                        assertThat (formatted.Contains("must be > 0")) isTrue
+            )
+        ]
+    )
 
 // ============================================================================
 // withModel — cross-field validator (Pydantic @model_validator)
@@ -170,52 +196,63 @@ let ``test auto with custom codec rejects zero`` () =
 // `Until` here to keep the test cross-backend.
 type Range = { Start: int; Until: int }
 
-[<Fact>]
-let ``test withModel accepts valid cross-field invariant`` () =
-    let codec =
-        auto<Range> ()
-        |> withCaseRules CaseRules.SnakeCase
-        |> withModel (fun r ->
-            if r.Start <= r.Until then
-                Ok r
-            else
-                Error [
-                    {
-                        path = ""
-                        message = "start must precede end"
-                    }
-                ])
+let private withModelTests =
+    testList (
+        "withModel — cross-field validator (Pydantic @model_validator)",
+        [
+            test (
+                "withModel accepts valid cross-field invariant",
+                fun _ ->
+                    let codec =
+                        auto<Range> ()
+                        |> withCaseRules CaseRules.SnakeCase
+                        |> withModel (fun r ->
+                            if r.Start <= r.Until then
+                                Ok r
+                            else
+                                Error [
+                                    {
+                                        path = ""
+                                        message = "start must precede end"
+                                    }
+                                ])
 
-    let map = parseRaw """{"start":1, "until":10}"""
+                    let map = parseRaw """{"start":1, "until":10}"""
 
-    match codec.decode map with
-    | Ok r ->
-        r.Start |> equal 1
-        r.Until |> equal 10
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.Start (isEqualTo 1)
+                        assertThat r.Until (isEqualTo 10)
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "withModel rejects invalid cross-field invariant",
+                fun _ ->
+                    let codec =
+                        auto<Range> ()
+                        |> withCaseRules CaseRules.SnakeCase
+                        |> withModel (fun r ->
+                            if r.Start <= r.Until then
+                                Ok r
+                            else
+                                Error [
+                                    {
+                                        path = ""
+                                        message = "start must precede end"
+                                    }
+                                ])
 
-[<Fact>]
-let ``test withModel rejects invalid cross-field invariant`` () =
-    let codec =
-        auto<Range> ()
-        |> withCaseRules CaseRules.SnakeCase
-        |> withModel (fun r ->
-            if r.Start <= r.Until then
-                Ok r
-            else
-                Error [
-                    {
-                        path = ""
-                        message = "start must precede end"
-                    }
-                ])
+                    let map = parseRaw """{"start":10, "until":1}"""
 
-    let map = parseRaw """{"start":10, "until":1}"""
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errs ->
+                        let formatted = formatErrors errs
 
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errs ->
-        let formatted = formatErrors errs
+                        assertThat (formatted.Contains("start must precede end")) isTrue
+            )
+        ]
+    )
 
-        formatted.Contains("start must precede end")
-        |> equal true
+let tests =
+    testList ("Codec", [ pipelineCompositionTests; namedWrapperTypeTests; withModelTests ])

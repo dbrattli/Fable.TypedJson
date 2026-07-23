@@ -1,9 +1,9 @@
 (**
 # Testing — Test utilities for Fable.TypedJson
 
-Cross-backend test helpers. `equal` raises when expected ≠ actual so that
-both BEAM (whose `Fable.Core.Testing.Assert.AreEqual` silently returns a
-bool) and Python's pytest see real failures.
+Cross-backend test helpers. Assertions and the runner come from Scriptorium
+(Nib + Quill), which compiles to every Fable target; what is left here is the
+glue the suite needs to read values back out of a backend's JSON map.
 
 The `getString`/`getInt`/`getFloat`/`getBool` helpers go through
 `IJsonBackend.IsX` / `AsX` so they work on raw native values returned by
@@ -11,22 +11,14 @@ The `getString`/`getInt`/`getFloat`/`getBool` helpers go through
 without assuming a particular wrapping. This mirrors the production
 schema layer, which switched off pattern-matching `JsonValue` for the
 same portability reason.
+
+adr: assertions come from Nib (`assertThat` + `isEqualTo`), not a local `equal` — one failure format on every target
+invariant: helpers here dispatch through `IJsonBackend.IsX` / `AsX`, never on a backend's native representation
 *)
 
 module Fable.TypedJson.Testing
 
 open Fable.TypedJson.Backend
-
-type FactAttribute() =
-    inherit System.Attribute()
-
-let inline equal expected actual : unit =
-    if not (LanguagePrimitives.GenericEquality expected actual) then
-        failwithf "expected %A but got %A" expected actual
-
-let inline notEqual expected actual : unit =
-    if LanguagePrimitives.GenericEquality expected actual then
-        failwithf "expected NOT %A but got %A" expected actual
 
 // ----------------------------------------------------------------------------
 // Backend-portable Get / ArrayAt extractors

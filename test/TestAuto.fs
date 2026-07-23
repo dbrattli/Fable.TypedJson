@@ -9,6 +9,8 @@ module Fable.TypedJson.Tests.Auto
 
 open Fable.TypedJson.Testing
 open Fable.TypedJson.Json
+open Scriptorium.Nib.Assertion
+open type Scriptorium.Quill.Test
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
@@ -51,181 +53,213 @@ type RecordWithBool = { Active: bool; Count: int }
 // Decode Tests
 // ============================================================================
 
-[<Fact>]
-let ``test auto decode simple record`` () =
-    let codec =
-        auto<SimpleRecord> ()
-        |> withCaseRules CaseRules.SnakeCase
+let private decodeTests =
+    testList (
+        "Decode",
+        [
+            test (
+                "auto decode simple record",
+                fun _ ->
+                    let codec =
+                        auto<SimpleRecord> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let map = parseRaw """{"name":"Alice","age":30}"""
+                    let map = parseRaw """{"name":"Alice","age":30}"""
 
-    match codec.decode map with
-    | Ok record ->
-        record.Name |> equal "Alice"
-        record.Age |> equal 30
-    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
+                    match codec.decode map with
+                    | Ok record ->
+                        assertThat record.Name (isEqualTo "Alice")
+                        assertThat record.Age (isEqualTo 30)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "auto decode float record",
+                fun _ ->
+                    let codec =
+                        auto<RecordWithFloat> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-[<Fact>]
-let ``test auto decode float record`` () =
-    let codec =
-        auto<RecordWithFloat> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    let map = parseRaw """{"air_temperature":22.5,"relative_humidity":65.0}"""
 
-    let map = parseRaw """{"air_temperature":22.5,"relative_humidity":65.0}"""
+                    match codec.decode map with
+                    | Ok record ->
+                        assertThat record.AirTemperature (isEqualTo 22.5)
+                        assertThat record.RelativeHumidity (isEqualTo 65.0)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "auto decode with option some",
+                fun _ ->
+                    let codec =
+                        auto<RecordWithOption> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    match codec.decode map with
-    | Ok record ->
-        record.AirTemperature |> equal 22.5
-        record.RelativeHumidity |> equal 65.0
-    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
+                    let map = parseRaw """{"name":"Alice","email":"a@b.com"}"""
 
-[<Fact>]
-let ``test auto decode with option some`` () =
-    let codec =
-        auto<RecordWithOption> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    match codec.decode map with
+                    | Ok record ->
+                        assertThat record.Name (isEqualTo "Alice")
+                        assertThat record.Email (isEqualTo (Some "a@b.com"))
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "auto decode with option none",
+                fun _ ->
+                    let codec =
+                        auto<RecordWithOption> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let map = parseRaw """{"name":"Alice","email":"a@b.com"}"""
+                    let map = parseRaw """{"name":"Alice"}"""
 
-    match codec.decode map with
-    | Ok record ->
-        record.Name |> equal "Alice"
-        record.Email |> equal (Some "a@b.com")
-    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
+                    match codec.decode map with
+                    | Ok record ->
+                        assertThat record.Name (isEqualTo "Alice")
+                        assertThat record.Email (isEqualTo None)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "auto decode missing required field",
+                fun _ ->
+                    let codec =
+                        auto<SimpleRecord> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-[<Fact>]
-let ``test auto decode with option none`` () =
-    let codec =
-        auto<RecordWithOption> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    let map = parseRaw """{"name":"Alice"}"""
 
-    let map = parseRaw """{"name":"Alice"}"""
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        assertThat errors.Length (isEqualTo 1)
+                        assertThat (errors.[0].path) (isEqualTo "age")
+            )
+            test (
+                "auto decode accumulates all errors",
+                fun _ ->
+                    let codec =
+                        auto<SimpleRecord> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    match codec.decode map with
-    | Ok record ->
-        record.Name |> equal "Alice"
-        record.Email |> equal None
-    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
+                    let map = parseRaw """{}"""
 
-[<Fact>]
-let ``test auto decode missing required field`` () =
-    let codec =
-        auto<SimpleRecord> ()
-        |> withCaseRules CaseRules.SnakeCase
-
-    let map = parseRaw """{"name":"Alice"}"""
-
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors ->
-        errors.Length |> equal 1
-        errors.[0].path |> equal "age"
-
-[<Fact>]
-let ``test auto decode accumulates all errors`` () =
-    let codec =
-        auto<SimpleRecord> ()
-        |> withCaseRules CaseRules.SnakeCase
-
-    let map = parseRaw """{}"""
-
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errors -> errors.Length |> equal 2
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat errors.Length (isEqualTo 2)
+            )
+        ]
+    )
 
 // ============================================================================
 // Encode Tests
 // ============================================================================
 
-[<Fact>]
-let ``test auto encode simple record`` () =
-    let codec =
-        auto<SimpleRecord> ()
-        |> withCaseRules CaseRules.SnakeCase
+let private encodeTests =
+    testList (
+        "Encode",
+        [
+            test (
+                "auto encode simple record",
+                fun _ ->
+                    let codec =
+                        auto<SimpleRecord> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let record = { Name = "Bob"; Age = 25 }
-    let json = codec.encode record
-    let map = parseRaw json
-    let name = getString backend map "name"
-    let age = getInt backend map "age"
-    name |> equal "Bob"
-    age |> equal 25
+                    let record = { Name = "Bob"; Age = 25 }
+                    let json = codec.encode record
+                    let map = parseRaw json
+                    let name = getString backend map "name"
+                    let age = getInt backend map "age"
+                    assertThat name (isEqualTo "Bob")
+                    assertThat age (isEqualTo 25)
+            )
+            test (
+                "auto encode float record",
+                fun _ ->
+                    let codec =
+                        auto<RecordWithFloat> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-[<Fact>]
-let ``test auto encode float record`` () =
-    let codec =
-        auto<RecordWithFloat> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    let record = {
+                        AirTemperature = 22.5
+                        RelativeHumidity = 65.0
+                    }
 
-    let record = {
-        AirTemperature = 22.5
-        RelativeHumidity = 65.0
-    }
+                    let json = codec.encode record
+                    let map = parseRaw json
+                    let temp = getFloat backend map "air_temperature"
+                    let humidity = getFloat backend map "relative_humidity"
+                    assertThat temp (isEqualTo 22.5)
+                    assertThat humidity (isEqualTo 65.0)
+            )
+            test (
+                "auto encode with option some",
+                fun _ ->
+                    let codec =
+                        auto<RecordWithOption> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let json = codec.encode record
-    let map = parseRaw json
-    let temp = getFloat backend map "air_temperature"
-    let humidity = getFloat backend map "relative_humidity"
-    temp |> equal 22.5
-    humidity |> equal 65.0
+                    let record = {
+                        Name = "Alice"
+                        Email = Some "a@b.com"
+                    }
 
-[<Fact>]
-let ``test auto encode with option some`` () =
-    let codec =
-        auto<RecordWithOption> ()
-        |> withCaseRules CaseRules.SnakeCase
-
-    let record = {
-        Name = "Alice"
-        Email = Some "a@b.com"
-    }
-
-    let json = codec.encode record
-    let map = parseRaw json
-    let name = getString backend map "name"
-    let email = getString backend map "email"
-    name |> equal "Alice"
-    email |> equal "a@b.com"
+                    let json = codec.encode record
+                    let map = parseRaw json
+                    let name = getString backend map "name"
+                    let email = getString backend map "email"
+                    assertThat name (isEqualTo "Alice")
+                    assertThat email (isEqualTo "a@b.com")
+            )
+        ]
+    )
 
 // ============================================================================
 // Round-trip Tests
 // ============================================================================
 
-[<Fact>]
-let ``test auto round-trip simple record`` () =
-    let codec =
-        auto<SimpleRecord> ()
-        |> withCaseRules CaseRules.SnakeCase
+let private roundTripTests =
+    testList (
+        "Round-trip",
+        [
+            test (
+                "auto round-trip simple record",
+                fun _ ->
+                    let codec =
+                        auto<SimpleRecord> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let original = { Name = "Charlie"; Age = 40 }
-    let json = codec.encode original
-    let map = parseRaw json
+                    let original = { Name = "Charlie"; Age = 40 }
+                    let json = codec.encode original
+                    let map = parseRaw json
 
-    match codec.decode map with
-    | Ok decoded ->
-        decoded.Name |> equal original.Name
-        decoded.Age |> equal original.Age
-    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
+                    match codec.decode map with
+                    | Ok decoded ->
+                        assertThat decoded.Name (isEqualTo original.Name)
+                        assertThat decoded.Age (isEqualTo original.Age)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "auto round-trip float record",
+                fun _ ->
+                    let codec =
+                        auto<RecordWithFloat> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-[<Fact>]
-let ``test auto round-trip float record`` () =
-    let codec =
-        auto<RecordWithFloat> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    let original = {
+                        AirTemperature = -5.3
+                        RelativeHumidity = 88.2
+                    }
 
-    let original = {
-        AirTemperature = -5.3
-        RelativeHumidity = 88.2
-    }
+                    let json = codec.encode original
+                    let map = parseRaw json
 
-    let json = codec.encode original
-    let map = parseRaw json
+                    match codec.decode map with
+                    | Ok decoded ->
+                        assertThat decoded.AirTemperature (isEqualTo original.AirTemperature)
 
-    match codec.decode map with
-    | Ok decoded ->
-        decoded.AirTemperature
-        |> equal original.AirTemperature
+                        assertThat decoded.RelativeHumidity (isEqualTo original.RelativeHumidity)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+        ]
+    )
 
-        decoded.RelativeHumidity
-        |> equal original.RelativeHumidity
-    | Error errors -> equal "Ok" (sprintf "Error: %A" errors)
+let tests = testList ("Auto", [ decodeTests; encodeTests; roundTripTests ])

@@ -98,25 +98,26 @@ build_test_path := justfile_directory() / "build/tests"
 # Run all backend test suites
 test: test-beam test-python test-js test-dotnet
 
-# Build and run Fable.TypedJson tests on BEAM
+# Build and run Fable.TypedJson tests on BEAM. Quill runs the suite
+# synchronously and calls `halt/1` with the exit code, so a failing test
+# makes `erl` return non-zero. Fable emits a `main.erl` shim that dispatches
+# to [<EntryPoint>].
 test-beam: build-test-beam
     @echo ""
     cd {{build_test_path}} && erl -noshell \
         -pa _build/default/lib/*/ebin \
-        -eval 'test_runner:main(["_build/default/lib/fable_typedjson_test/ebin"])' \
-        -s init stop
+        -eval 'main:main([])'
 
 # Transpile tests to Erlang and compile with rebar3
 build-test-beam:
     dotnet build test
     {{fable}} test --exclude Fable.Core --lang beam --outDir {{build_test_path}}
-    cp test/test_runner.erl {{build_test_path}}/src/
     cp test/rebar.config {{build_test_path}}/rebar.config
     cd {{build_test_path}} && rebar3 compile
 
-# Run the full F# test suite as Python via pytest.
+# Run the full F# test suite as Python. Quill is the runner — no pytest.
 test-python: build-test-python
-    uv run pytest -q build/python_test
+    uv run python build/python_test/main.py
 
 # Transpile the test project to Python. FableTarget=python is read by the
 # test fsproj's ProjectReference Condition (so it picks the Python shim),
@@ -126,9 +127,11 @@ build-test-python:
     FableTarget=python dotnet build test
     FableTarget=python {{fable}} test --define PYTHON --exclude Fable.Core --lang python --outDir build/python_test
 
-# Run the full F# test suite as JavaScript via a Node runner.
+# Run the full F# test suite as JavaScript under Node. Node cannot block, so
+# Quill chains `process.exit` onto the resolved promise itself.
 test-js: build-test-js
-    node test_js/runner.mjs
+    echo '{"type":"module"}' > build/js_test/package.json
+    node build/js_test/Main.js
 
 # Transpile the test project to JavaScript. Mirrors `build-test-python`:
 # FableTarget=js routes the test fsproj to the JS shim, and `--define JS`
@@ -139,7 +142,7 @@ build-test-js:
 
 # Run the full F# test suite natively on the .NET CLR. No Fable transpile —
 # the test project compiles directly to .NET IL with FableTarget=dotnet,
-# which drops FABLE_COMPILER and references the .NET shim. The reflection
-# runner in Main.fs walks for [<Fact>]-tagged statics and invokes them.
+# which drops FABLE_COMPILER and references the .NET shim. Quill's runner in
+# Main.fs drives the same suite the Fable targets run.
 test-dotnet:
     FableTarget=dotnet dotnet run --project test
