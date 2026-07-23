@@ -11,12 +11,12 @@ All workflows go through `just` (see `justfile`). Builds run Fable to transpile 
 - `just restore` — restore .NET tools (Fable, Paket, Fantomas) and Paket deps. Run once after clone.
 - `just build` — clean, then `build-beam` (Fable + rebar3 to `apps/`), `build-python` (Fable to `build/python/`), and `build-js` (Fable to `build/js/`).
 - `just check` — `dotnet build` of every src project (type-check only, no Fable).
-- `just test` — runs `test-beam` and `test-python` (no JS test runner yet).
-- `just build-test-beam` / `build-test-python` — transpile tests to a single backend; useful when debugging compile failures.
+- `just test` — runs the same suite on all four targets: `test-beam`, `test-python`, `test-js`, `test-dotnet`.
+- `just build-test-beam` / `build-test-python` / `build-test-js` — transpile tests to a single backend; useful when debugging compile failures.
 - `just format` — Fantomas over `src/` and `test/`.
 - `just dev=true build` — use a local Fable repo at `../Fable` instead of the `dotnet fable` tool. Same flag works for `test`.
 
-There is no single-test runner; `test_runner.erl` discovers all `test_*` modules from compiled `.beam` files and runs every `test_*/0` export. Narrow scope by temporarily renaming or removing `[<Fact>]` attributes.
+There is no single-test filter on the command line. Narrow scope with Quill's marks instead: `ftest` / `ftestList` focuses (everything else is skipped), `xtest` / `xtestList` marks pending.
 
 ## Architecture
 
@@ -53,4 +53,10 @@ Implement `IJsonBackend` in a new `Fable.TypedJson.<Target>` project, plus a `<T
 
 ## Tests
 
-Tests live in `test/` and are transpiled to Erlang. They use `Fable.Core.Testing.Assert` wrapped by `Testing.fs` (`Fact`, `equal`, `notEqual`). `Main.fs` is empty under `FABLE_COMPILER` — the Erlang `test_runner` is the entry point. New test modules need a `module Fable.TypedJson.Tests.X` matching the file, and they must be added to `Fable.TypedJson.Test.fsproj` in compile order.
+Tests live in `test/` and are compiled to all four targets from one source set, selected by the `FableTarget` MSBuild property (see the `#if PYTHON | JS | DOTNET` header in each file).
+
+Tests are written with [Scriptorium](https://github.com/fable-hub/Scriptorium) — Quill for the test DSL and runner, Nib for assertions — both of which compile to every target. Each module groups its tests into `testList`s named after the file's `// ====` section banners and exposes a single `let tests`; `Main.fs` is the one `[<EntryPoint>]`, handing that list to Quill's `runTests`, which returns the process exit code on every target. `Testing.fs` keeps only the backend-portable `getString` / `getInt` / … extractors.
+
+Known per-target divergences are marked with Quill's `skipIfJavaScript` / `skipIfDotNet` configurers colocated with the test, each carrying a comment explaining the gap. Quill has no skip-reason field, so the comment is the record.
+
+New test modules need a `module Fable.TypedJson.Tests.X` matching the file, must be added to `Fable.TypedJson.Test.fsproj` in compile order, and their `tests` value must be added to the list in `Main.fs` — a module that is not listed there is silently not run.

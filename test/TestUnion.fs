@@ -17,6 +17,8 @@ module Fable.TypedJson.Tests.Union
 open Fable.TypedJson.Testing
 open Fable.TypedJson.Schema
 open Fable.TypedJson.Json
+open Scriptorium.Nib.Assertion
+open type Scriptorium.Quill.Test
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
@@ -52,95 +54,110 @@ type Tool =
     | Calculate of CalcInput
     | Ping
 
-[<Fact>]
-let ``test decode tagged union top-level — search case`` () =
-    let codec = auto<Tool> ()
-    let map = parseRaw """{"type":"search","query":"hello","maxResults":5}"""
+let private topLevelUnionTests =
+    testList (
+        "Tagged DU as the top-level type",
+        [
+            test (
+                "decode tagged union top-level — search case",
+                fun _ ->
+                    let codec = auto<Tool> ()
+                    let map = parseRaw """{"type":"search","query":"hello","maxResults":5}"""
 
-    match codec.decode map with
-    | Ok(Search input) ->
-        input.Query |> equal "hello"
-        input.MaxResults |> equal 5
-    | Ok other -> equal "Search" (sprintf "%A" other)
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok(Search input) ->
+                        assertThat input.Query (isEqualTo "hello")
+                        assertThat input.MaxResults (isEqualTo 5)
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "Search")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "decode tagged union top-level — calculate case",
+                fun _ ->
+                    let codec = auto<Tool> ()
+                    let map = parseRaw """{"type":"calculate","expression":"1+1"}"""
 
-[<Fact>]
-let ``test decode tagged union top-level — calculate case`` () =
-    let codec = auto<Tool> ()
-    let map = parseRaw """{"type":"calculate","expression":"1+1"}"""
+                    match codec.decode map with
+                    | Ok(Calculate input) -> assertThat input.Expression (isEqualTo "1+1")
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "Calculate")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "decode tagged union — fieldless case",
+                fun _ ->
+                    let codec = auto<Tool> ()
+                    let map = parseRaw """{"type":"ping"}"""
 
-    match codec.decode map with
-    | Ok(Calculate input) -> input.Expression |> equal "1+1"
-    | Ok other -> equal "Calculate" (sprintf "%A" other)
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok Ping -> ()
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "Ping")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "decode tagged union — unknown discriminator value",
+                fun _ ->
+                    let codec = auto<Tool> ()
+                    let map = parseRaw """{"type":"bogus","query":"x"}"""
 
-[<Fact>]
-let ``test decode tagged union — fieldless case`` () =
-    let codec = auto<Tool> ()
-    let map = parseRaw """{"type":"ping"}"""
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errs ->
+                        let formatted = formatErrors errs
+                        assertThat (formatted.Contains("bogus")) isTrue
+            )
+            test (
+                "decode tagged union — missing discriminator",
+                fun _ ->
+                    let codec = auto<Tool> ()
+                    let map = parseRaw """{"query":"x"}"""
 
-    match codec.decode map with
-    | Ok Ping -> ()
-    | Ok other -> equal "Ping" (sprintf "%A" other)
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode map with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errs ->
+                        let formatted = formatErrors errs
+                        assertThat (formatted.Contains("type")) isTrue
+            )
+            test (
+                "encode tagged union — search case",
+                fun _ ->
+                    let codec = auto<Tool> ()
+                    let value = Search { Query = "hello"; MaxResults = 5 }
+                    let json = codec.encode value
+                    let parsed = parseRaw json
 
-[<Fact>]
-let ``test decode tagged union — unknown discriminator value`` () =
-    let codec = auto<Tool> ()
-    let map = parseRaw """{"type":"bogus","query":"x"}"""
+                    assertThat (getString backend parsed "type") (isEqualTo "search")
+                    assertThat (getString backend parsed "query") (isEqualTo "hello")
+                    assertThat (getInt backend parsed "maxResults") (isEqualTo 5)
+            )
+            test (
+                "encode tagged union — fieldless case",
+                fun _ ->
+                    let codec = auto<Tool> ()
+                    let json = codec.encode Ping
+                    let parsed = parseRaw json
 
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errs ->
-        let formatted = formatErrors errs
-        formatted.Contains("bogus") |> equal true
+                    assertThat (getString backend parsed "type") (isEqualTo "ping")
+            )
+            test (
+                "round-trip tagged union — every case",
+                fun _ ->
+                    let codec = auto<Tool> ()
 
-[<Fact>]
-let ``test decode tagged union — missing discriminator`` () =
-    let codec = auto<Tool> ()
-    let map = parseRaw """{"query":"x"}"""
+                    let cases = [
+                        Search { Query = "q"; MaxResults = 3 }
+                        Calculate { Expression = "2*3" }
+                        Ping
+                    ]
 
-    match codec.decode map with
-    | Ok _ -> equal "Error" "Ok"
-    | Error errs ->
-        let formatted = formatErrors errs
-        formatted.Contains("type") |> equal true
+                    for original in cases do
+                        let json = codec.encode original
 
-[<Fact>]
-let ``test encode tagged union — search case`` () =
-    let codec = auto<Tool> ()
-    let value = Search { Query = "hello"; MaxResults = 5 }
-    let json = codec.encode value
-    let parsed = parseRaw json
-
-    getString backend parsed "type" |> equal "search"
-    getString backend parsed "query" |> equal "hello"
-    getInt backend parsed "maxResults" |> equal 5
-
-[<Fact>]
-let ``test encode tagged union — fieldless case`` () =
-    let codec = auto<Tool> ()
-    let json = codec.encode Ping
-    let parsed = parseRaw json
-
-    getString backend parsed "type" |> equal "ping"
-
-[<Fact>]
-let ``test round-trip tagged union — every case`` () =
-    let codec = auto<Tool> ()
-
-    let cases = [
-        Search { Query = "q"; MaxResults = 3 }
-        Calculate { Expression = "2*3" }
-        Ping
-    ]
-
-    for original in cases do
-        let json = codec.encode original
-
-        match codec.decode (parseRaw json) with
-        | Ok roundtripped -> roundtripped |> equal original
-        | Error errs -> equal "Ok" (formatErrors errs)
+                        match codec.decode (parseRaw json) with
+                        | Ok roundtripped -> assertThat roundtripped (isEqualTo original)
+                        | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+        ]
+    )
 
 // ============================================================================
 // Tagged DU as a record field
@@ -148,20 +165,28 @@ let ``test round-trip tagged union — every case`` () =
 
 type Envelope = { Id: int; Tool: Tool }
 
-[<Fact>]
-let ``test tagged union as record field — round-trip`` () =
-    let codec = auto<Envelope> ()
+let private unionAsRecordFieldTests =
+    testList (
+        "Tagged DU as a record field",
+        [
+            test (
+                "tagged union as record field — round-trip",
+                fun _ ->
+                    let codec = auto<Envelope> ()
 
-    let original = {
-        Id = 42
-        Tool = Search { Query = "fsharp"; MaxResults = 10 }
-    }
+                    let original = {
+                        Id = 42
+                        Tool = Search { Query = "fsharp"; MaxResults = 10 }
+                    }
 
-    let json = codec.encode original
+                    let json = codec.encode original
 
-    match codec.decode (parseRaw json) with
-    | Ok roundtripped -> roundtripped |> equal original
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    match codec.decode (parseRaw json) with
+                    | Ok roundtripped -> assertThat roundtripped (isEqualTo original)
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+        ]
+    )
 
 // ============================================================================
 // Snake-case discriminator tags (Anthropic content-block style)
@@ -180,65 +205,77 @@ type ContentBlock =
     | ToolUse of ToolUsePayload
     | ToolResult
 
-[<Fact>]
-let ``test snake_case union tag — encode multi-word case`` () =
-    let codec =
-        auto<ContentBlock> ()
-        |> withCaseRules CaseRules.SnakeCase
+let private snakeCaseDiscriminatorTests =
+    testList (
+        "Snake-case discriminator tags (Anthropic content-block style)",
+        [
+            test (
+                "snake_case union tag — encode multi-word case",
+                fun _ ->
+                    let codec =
+                        auto<ContentBlock> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    let value = ToolUse { Id = "abc"; Name = "search" }
-    let json = codec.encode value
-    let parsed = parseRaw json
+                    let value = ToolUse { Id = "abc"; Name = "search" }
+                    let json = codec.encode value
+                    let parsed = parseRaw json
 
-    getString backend parsed "type"
-    |> equal "tool_use"
+                    assertThat (getString backend parsed "type") (isEqualTo "tool_use")
 
-    getString backend parsed "id" |> equal "abc"
-    getString backend parsed "name" |> equal "search"
+                    assertThat (getString backend parsed "id") (isEqualTo "abc")
+                    assertThat (getString backend parsed "name") (isEqualTo "search")
+            )
+            test (
+                "snake_case union tag — decode multi-word case",
+                fun _ ->
+                    let codec =
+                        auto<ContentBlock> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-[<Fact>]
-let ``test snake_case union tag — decode multi-word case`` () =
-    let codec =
-        auto<ContentBlock> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    let map = parseRaw """{"type":"tool_use","id":"xyz","name":"calc"}"""
 
-    let map = parseRaw """{"type":"tool_use","id":"xyz","name":"calc"}"""
+                    match codec.decode map with
+                    | Ok(ToolUse p) ->
+                        assertThat p.Id (isEqualTo "xyz")
+                        assertThat p.Name (isEqualTo "calc")
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "ToolUse")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "snake_case union tag — fieldless multi-word case",
+                fun _ ->
+                    let codec =
+                        auto<ContentBlock> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    match codec.decode map with
-    | Ok(ToolUse p) ->
-        p.Id |> equal "xyz"
-        p.Name |> equal "calc"
-    | Ok other -> equal "ToolUse" (sprintf "%A" other)
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    let json = codec.encode ToolResult
+                    let parsed = parseRaw json
 
-[<Fact>]
-let ``test snake_case union tag — fieldless multi-word case`` () =
-    let codec =
-        auto<ContentBlock> ()
-        |> withCaseRules CaseRules.SnakeCase
+                    assertThat (getString backend parsed "type") (isEqualTo "tool_result")
 
-    let json = codec.encode ToolResult
-    let parsed = parseRaw json
+                    match codec.decode (parseRaw """{"type":"tool_result"}""") with
+                    | Ok ToolResult -> ()
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "ToolResult")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "snake_case union tag — round-trip every case",
+                fun _ ->
+                    let codec =
+                        auto<ContentBlock> ()
+                        |> withCaseRules CaseRules.SnakeCase
 
-    getString backend parsed "type"
-    |> equal "tool_result"
+                    let cases = [ Text { Text = "hello" }; ToolUse { Id = "id-1"; Name = "tool" }; ToolResult ]
 
-    match codec.decode (parseRaw """{"type":"tool_result"}""") with
-    | Ok ToolResult -> ()
-    | Ok other -> equal "ToolResult" (sprintf "%A" other)
-    | Error errs -> equal "Ok" (formatErrors errs)
+                    for original in cases do
+                        let json = codec.encode original
 
-[<Fact>]
-let ``test snake_case union tag — round-trip every case`` () =
-    let codec =
-        auto<ContentBlock> ()
-        |> withCaseRules CaseRules.SnakeCase
+                        match codec.decode (parseRaw json) with
+                        | Ok roundtripped -> assertThat roundtripped (isEqualTo original)
+                        | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+        ]
+    )
 
-    let cases = [ Text { Text = "hello" }; ToolUse { Id = "id-1"; Name = "tool" }; ToolResult ]
-
-    for original in cases do
-        let json = codec.encode original
-
-        match codec.decode (parseRaw json) with
-        | Ok roundtripped -> roundtripped |> equal original
-        | Error errs -> equal "Ok" (formatErrors errs)
+let tests =
+    testList ("Union", [ topLevelUnionTests; unionAsRecordFieldTests; snakeCaseDiscriminatorTests ])

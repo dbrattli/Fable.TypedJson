@@ -4,3 +4,5 @@ group Test
     Fable.Beam
     Fable.Beam.Jsx
     Fable.Python
+    Scriptorium.Quill
+    Scriptorium.Nib
