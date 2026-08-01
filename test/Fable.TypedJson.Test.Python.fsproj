@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Python test project. `PYTHON` activates the matching `#if PYTHON` blocks in the shared
+test sources; the reference set carries only Fable.Python.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>false</GenerateProgramFile>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+    <LangVersion>preview</LangVersion>
+    <OutputType>Exe</OutputType>
+    <DefineConstants>PYTHON;FABLE_COMPILER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
+    <ProjectReference Include="../src/Fable.TypedJson.Python/Fable.TypedJson.Python.fsproj" />
+  </ItemGroup>
+  <Import Project="Tests.props" />
+  <Import Project="..\.paket\Paket.Restore.targets" />
+</Project>

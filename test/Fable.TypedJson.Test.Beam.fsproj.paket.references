@@ -1,0 +1,7 @@
+group Test
+    FSharp.Core
+    Fable.Core
+    Fable.Beam
+    Fable.Beam.Jsx
+    Scriptorium.Quill
+    Scriptorium.Nib
