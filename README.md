@@ -337,7 +337,7 @@ just test           # run all four backend test suites from the same F# sources
 just test-beam      # transpile tests to Erlang, run on the BEAM VM
 just test-python    # transpile tests to Python, run under python
 just test-js        # transpile tests to JavaScript, run under node
-just test-dotnet    # build tests for net10.0 with FableTarget=dotnet, run natively on the CLR
+just test-dotnet    # build the .NET test project for net10.0, run natively on the CLR
 ```
 
 The same F# test sources compile to all four targets via `#if PYTHON | JS | DOTNET` blocks that swap a few backend-specific imports. Tests are written with [Scriptorium](https://github.com/fable-hub/Scriptorium) — Quill for the test DSL and runner, Nib for assertions — both of which compile to every target, so a single `runTests` entry point in `Main.fs` replaces the per-target runners. Quill exits non-zero on failure on all four targets, so CI gates on it.

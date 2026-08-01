@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+JavaScript test project. `JS` activates the matching `#if JS` blocks in the shared test
+sources; the JS shim needs only Fable.Core, so no backend bindings package is referenced.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>false</GenerateProgramFile>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+    <LangVersion>preview</LangVersion>
+    <OutputType>Exe</OutputType>
+    <DefineConstants>JS;FABLE_COMPILER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
+    <ProjectReference Include="../src/Fable.TypedJson.JS/Fable.TypedJson.JS.fsproj" />
+  </ItemGroup>
+  <Import Project="Tests.props" />
+  <Import Project="..\.paket\Paket.Restore.targets" />
+</Project>

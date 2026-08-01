@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+.NET test project — runs natively on the CLR with no Fable transpile step, so it drops
+FABLE_COMPILER.
+
+adr: System.Text.Json is not referenced here — with no Fable source-walking involved it
+     flows transitively through the ProjectReference to the .NET shim
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>false</GenerateProgramFile>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+    <LangVersion>preview</LangVersion>
+    <OutputType>Exe</OutputType>
+    <DefineConstants>DOTNET</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
+    <ProjectReference Include="../src/Fable.TypedJson.DotNet/Fable.TypedJson.DotNet.fsproj" />
+  </ItemGroup>
+  <Import Project="Tests.props" />
+  <Import Project="..\.paket\Paket.Restore.targets" />
+</Project>
