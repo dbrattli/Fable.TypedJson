@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+BEAM test project. Its reference set is exactly what a Fable.TypedJson.Beam consumer
+gets — see Fable.TypedJson.Test.Beam.fsproj.paket.references.
+
+adr: one project per target rather than one project with FableTarget conditions — Fable
+     merges referenced projects' sources into the root compilation and resolves their
+     packages from the root reference set, so a four-target project referenced all four
+     backends' bindings and emitted e.g. Fable.Python's sources into the Erlang build
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>false</GenerateProgramFile>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+    <LangVersion>preview</LangVersion>
+    <OutputType>Exe</OutputType>
+    <DefineConstants>FABLE_COMPILER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
+    <ProjectReference Include="../src/Fable.TypedJson.Beam/Fable.TypedJson.Beam.fsproj" />
+  </ItemGroup>
+  <Import Project="Tests.props" />
+  <Import Project="..\.paket\Paket.Restore.targets" />
+</Project>

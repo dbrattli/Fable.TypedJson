@@ -1,8 +1,5 @@
 group Test
     FSharp.Core
     Fable.Core
-    Fable.Beam
-    Fable.Beam.Jsx
-    Fable.Python
     Scriptorium.Quill
     Scriptorium.Nib

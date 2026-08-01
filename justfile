@@ -69,36 +69,6 @@ check-test-registry:
     fi
     echo "test registry OK — $(echo "$declared" | wc -l | tr -d ' ') modules registered"
 
-# Guard: every BEAM package Fable emits is covered by test/rebar.config's allowlist.
-#
-# project_app_dirs is an allowlist (see the comment in test/rebar.config for why),
-# so a newly referenced BEAM package that matches no pattern is dropped from the
-# build without a word. Fable.Python is the one deliberate exclusion. Requires a
-# prior `just build-test-beam` — it reads the emitted tree.
-check-beam-app-dirs:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    emitted={{build_test_path}}/fable_modules
-    if [ ! -d "$emitted" ]; then
-        echo "error: $emitted not found — run 'just build-test-beam' first" >&2
-        exit 1
-    fi
-    unmatched=""
-    for d in "$emitted"/*/; do
-        name=$(basename "$d")
-        case "$name" in
-            fable-library-beam|Fable.Beam*|Scriptorium*) ;;
-            Fable.Python*) ;;  # deliberate exclusion — Python-only sources, do not compile as Erlang
-            *) unmatched="$unmatched $name" ;;
-        esac
-    done
-    if [ -n "$unmatched" ]; then
-        echo "error: BEAM package(s) emitted but not in test/rebar.config project_app_dirs:$unmatched" >&2
-        echo "  add a matching pattern there, or add an exclusion case here if it is Python/JS-only" >&2
-        exit 1
-    fi
-    echo "beam app dirs OK — all emitted packages accounted for"
-
 # Type check via dotnet build
 check: check-test-registry
     dotnet build src/Fable.TypedJson
@@ -176,23 +146,20 @@ test-beam: build-test-beam
 
 # Transpile tests to Erlang and compile with rebar3
 build-test-beam:
-    dotnet build test
-    {{fable}} test --exclude Fable.Core --lang beam --outDir {{build_test_path}}
+    dotnet build test/Fable.TypedJson.Test.Beam.fsproj
+    {{fable}} test/Fable.TypedJson.Test.Beam.fsproj --exclude Fable.Core --lang beam --outDir {{build_test_path}}
     cp test/rebar.config {{build_test_path}}/rebar.config
-    @just check-beam-app-dirs
     cd {{build_test_path}} && rebar3 compile
 
 # Run the full F# test suite as Python. Quill is the runner — no pytest.
 test-python: build-test-python
     uv run python build/python_test/main.py
 
-# Transpile the test project to Python. FableTarget=python is read by the
-# test fsproj's ProjectReference Condition (so it picks the Python shim),
-# and `--define PYTHON` activates the matching `#if PYTHON` blocks in F#.
-# Fable's CLI doesn't forward MSBuild properties, so we pass via env.
+# Transpile the Python test project. It references only the Python shim and
+# Fable.Python, so nothing from the other backends lands in the output.
 build-test-python:
-    FableTarget=python dotnet build test
-    FableTarget=python {{fable}} test --define PYTHON --exclude Fable.Core --lang python --outDir build/python_test
+    dotnet build test/Fable.TypedJson.Test.Python.fsproj
+    {{fable}} test/Fable.TypedJson.Test.Python.fsproj --define PYTHON --exclude Fable.Core --lang python --outDir build/python_test
 
 # Run the full F# test suite as JavaScript under Node. Node cannot block, so
 # Quill chains `process.exit` onto the resolved promise itself.
@@ -200,16 +167,15 @@ test-js: build-test-js
     echo '{"type":"module"}' > build/js_test/package.json
     node build/js_test/Main.js
 
-# Transpile the test project to JavaScript. Mirrors `build-test-python`:
-# FableTarget=js routes the test fsproj to the JS shim, and `--define JS`
-# activates the matching `#if JS` blocks in F#.
+# Transpile the JavaScript test project. Mirrors `build-test-python`; the JS
+# shim needs only Fable.Core, so no bindings package is referenced at all.
 build-test-js:
-    FableTarget=js dotnet build test
-    FableTarget=js {{fable}} test --define JS --exclude Fable.Core --lang javascript --outDir build/js_test
+    dotnet build test/Fable.TypedJson.Test.JS.fsproj
+    {{fable}} test/Fable.TypedJson.Test.JS.fsproj --define JS --exclude Fable.Core --lang javascript --outDir build/js_test
 
 # Run the full F# test suite natively on the .NET CLR. No Fable transpile —
-# the test project compiles directly to .NET IL with FableTarget=dotnet,
-# which drops FABLE_COMPILER and references the .NET shim. Quill's runner in
-# Main.fs drives the same suite the Fable targets run.
+# the .NET test project compiles directly to IL, drops FABLE_COMPILER and
+# references the .NET shim. Quill's runner in Main.fs drives the same suite
+# the Fable targets run.
 test-dotnet:
-    FableTarget=dotnet dotnet run --project test
+    dotnet run --project test/Fable.TypedJson.Test.DotNet.fsproj

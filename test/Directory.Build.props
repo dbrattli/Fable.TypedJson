@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Four test projects share this directory, one per Fable target.
+
+adr: obj/ and bin/ are scoped per project name — NuGet writes project.assets.json into
+     obj/ and the last writer would win if they shared it
+assumption: this must stay in Directory.Build.props — by the time an fsproj body is
+     evaluated, NuGet's targets have already read BaseIntermediateOutputPath
+-->
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <BaseOutputPath>bin/$(MSBuildProjectName)/</BaseOutputPath>
+  </PropertyGroup>
+</Project>

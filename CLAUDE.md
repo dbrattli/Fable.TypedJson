@@ -53,10 +53,10 @@ Implement `IJsonBackend` in a new `Fable.TypedJson.<Target>` project, plus a `<T
 
 ## Tests
 
-Tests live in `test/` and are compiled to all four targets from one source set, selected by the `FableTarget` MSBuild property (see the `#if PYTHON | JS | DOTNET` header in each file).
+Tests live in `test/` and are compiled to all four targets from one source set. Each target has its own project (`Fable.TypedJson.Test.Beam.fsproj`, `.Python`, `.JS`, `.DotNet`) sharing the compile order in `Tests.props`, and each carries its own `<project>.fsproj.paket.references` naming only that backend's bindings — so a target's build matches what a consumer of that package actually gets. The `#if PYTHON | JS | DOTNET` header in each file selects the matching shim.
 
 Tests are written with [Scriptorium](https://github.com/fable-hub/Scriptorium) — Quill for the test DSL and runner, Nib for assertions — both of which compile to every target. Each module groups its tests into `testList`s named after the file's `// ====` section banners and exposes a single `let tests`; `Main.fs` is the one `[<EntryPoint>]`, handing that list to Quill's `runTests`, which returns the process exit code on every target. `Testing.fs` keeps only the backend-portable `getString` / `getInt` / … extractors.
 
 Known per-target divergences are marked with Quill's `skipIfJavaScript` / `skipIfDotNet` configurers colocated with the test, each carrying a comment explaining the gap. Quill has no skip-reason field, so the comment is the record.
 
-New test modules need a `module Fable.TypedJson.Tests.X` matching the file, must be added to `Fable.TypedJson.Test.fsproj` in compile order, and their `tests` value must be added to the list in `Main.fs` — a module that is not listed there is silently not run.
+New test modules need a `module Fable.TypedJson.Tests.X` matching the file, must be added to `Tests.props` in compile order, and their `tests` value must be added to the list in `Main.fs` — a module that is not listed there is silently not run.

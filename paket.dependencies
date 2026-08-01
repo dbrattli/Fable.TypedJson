@@ -66,14 +66,15 @@ group DotNet
     nuget System.Text.Json >= 8.0.5 lowest_matching: true
 
 # Test runner (host process). The same F# source is transpiled to every
-# target via #if PYTHON / #if JS / #if DOTNET, so this group carries every
-# backend's Fable bindings: Fable's source-walking compiler merges the
-# referenced shim projects into this compilation and resolves their packages
-# from the root project's reference set. Scriptorium (Quill runner + Nib
-# assertions) compiles to all four targets, so one suite drives them all.
+# target via #if PYTHON / #if JS / #if DOTNET, and Scriptorium (Quill runner +
+# Nib assertions) compiles to all four, so one suite drives them all.
 #
-# The cost is that Fable emits every referenced package for every target —
-# see test/rebar.config for how the BEAM build skips the Python bindings.
+# This group is the union of what the four targets need, but no single project
+# references all of it: each test/<project>.fsproj.paket.references names only
+# its own backend. That matters because Fable's source-walking compiler merges
+# a referenced shim project into the root compilation and resolves the shim's
+# packages from the root project's reference set — so a project that named all
+# four backends would emit e.g. Fable.Python's sources into the Erlang build.
 group Test
     source https://api.nuget.org/v3/index.json
     storage: none
