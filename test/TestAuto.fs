@@ -49,6 +49,17 @@ type RecordWithOption = { Name: string; Email: string option }
 
 type RecordWithBool = { Active: bool; Count: int }
 
+(**
+adr: lowercase-first fields kept as their own types — every other test record is PascalCase, which cannot catch BEAM reflection drift
+assumption: Fable BEAM keys a record map with `sanitizeFieldName` and reflection's `erl_name` derives from the same function
+*)
+type LowerFirst = { alpha: string; beta: int }
+
+type LowerFirstMultiWord = {
+    airTemperature: float
+    relativeHumidity: float
+}
+
 // ============================================================================
 // Decode Tests
 // ============================================================================
@@ -262,4 +273,75 @@ let private roundTripTests =
         ]
     )
 
-let tests = testList ("Auto", [ decodeTests; encodeTests; roundTripTests ])
+// ============================================================================
+// Lowercase-first Field Tests
+// ============================================================================
+
+(**
+Regression guard for fable-compiler/Fable#4849 (fixed in Fable 5.13.0): BEAM keyed a
+record map with `sanitizeFieldName` (trailing `_` on lowercase-first names) while
+reflection metadata derived `erl_name` with `sanitizeErlangName` (no underscore). Encode
+crashed with `{badkey,alpha}`; decode built a map the compiled accessor could not read.
+
+invariant: `auto<'T>` handles lowercase-first record fields identically on all four targets
+adr: decode asserts through the compiled accessor (`decoded.alpha`), not reflection — that is the direction MakeRecord corrupts silently
+adr: JSON keys stay derived from `PropertyInfo.Name`, so the BEAM disambiguating `_` never reaches the wire
+*)
+let private lowercaseFirstTests =
+    testList (
+        "Lowercase-first fields",
+        [
+            test (
+                "auto decode lowercase-first record",
+                fun _ ->
+                    let codec =
+                        auto<LowerFirst> ()
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let map = parseRaw """{"alpha":"a","beta":1}"""
+
+                    match codec.decode map with
+                    | Ok record ->
+                        assertThat record.alpha (isEqualTo "a")
+                        assertThat record.beta (isEqualTo 1)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "auto encode lowercase-first record",
+                fun _ ->
+                    let codec =
+                        auto<LowerFirst> ()
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let json = codec.encode { alpha = "a"; beta = 1 }
+                    let map = parseRaw json
+                    assertThat (getString backend map "alpha") (isEqualTo "a")
+                    assertThat (getInt backend map "beta") (isEqualTo 1)
+            )
+            test (
+                "auto round-trip camelCase multi-word record",
+                fun _ ->
+                    let codec =
+                        auto<LowerFirstMultiWord> ()
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let original = {
+                        airTemperature = 22.5
+                        relativeHumidity = 65.0
+                    }
+
+                    let json = codec.encode original
+                    let map = parseRaw json
+                    assertThat (getFloat backend map "air_temperature") (isEqualTo 22.5)
+
+                    match codec.decode map with
+                    | Ok decoded ->
+                        assertThat decoded.airTemperature (isEqualTo original.airTemperature)
+                        assertThat decoded.relativeHumidity (isEqualTo original.relativeHumidity)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+        ]
+    )
+
+let tests =
+    testList ("Auto", [ decodeTests; encodeTests; roundTripTests; lowercaseFirstTests ])
