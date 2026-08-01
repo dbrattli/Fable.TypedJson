@@ -43,9 +43,22 @@ build-js:
 check-test-registry:
     #!/usr/bin/env bash
     set -euo pipefail
-    declared=$(for f in test/Test*.fs; do
-        grep -oE '^module Fable\.TypedJson\.Tests\.[A-Za-z0-9_]+' "$f" | sed 's/.*\.//'
-    done | sort)
+    # LC_ALL=C pins glob and sort order — under a UTF-8 collation Testing.fs sorts
+    # mid-list instead of last, which previously masked a failure in this loop.
+    export LC_ALL=C
+    declared=""
+    for f in test/Test*.fs; do
+        # Testing.fs is the shared extractor helpers, not a test module — it is
+        # caught by the glob but declares `module Fable.TypedJson.Testing`.
+        [ "$f" = "test/Testing.fs" ] && continue
+        name=$(grep -oE '^module Fable\.TypedJson\.Tests\.[A-Za-z0-9_]+' "$f" | sed 's/.*\.//') || true
+        if [ -z "$name" ]; then
+            echo "error: $f declares no 'module Fable.TypedJson.Tests.<Name>'" >&2
+            exit 1
+        fi
+        declared+="$name"$'\n'
+    done
+    declared=$(printf '%s' "$declared" | sort)
     listed=$(grep -E '^[[:space:]]+[A-Za-z0-9_]+\.tests[[:space:]]*$' test/Main.fs \
         | sed -E 's/[[:space:]]//g; s/\.tests$//' | sort)
     if [ "$declared" != "$listed" ]; then
