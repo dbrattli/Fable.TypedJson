@@ -127,6 +127,20 @@ release: pack
 shipit *args:
     dotnet shipit {{args}}
 
+# --- Benchmarks ---
+
+# Run the .NET benchmark suite (BenchmarkDotNet). Not a competitive comparison —
+# it exists to catch pathologies against a known-good baseline (see Main.fs).
+# Pass BenchmarkDotNet flags directly, e.g. `just bench --job short --filter '*Decode*'`.
+#
+# --artifacts is pinned because `dotnet run --project` leaves the working directory
+# at the repo root, so BDN would otherwise scatter output wherever it was invoked
+# from. The default filter is quoted because just splices {{args}} into the shell
+# line verbatim — a bare `*` glob-expands to repo filenames before BDN sees it.
+bench *args='--filter "*"':
+    dotnet run -c Release --project benchmarks/dotnet/Fable.TypedJson.DotNet.Benchmark.fsproj \
+        -- --artifacts benchmarks/dotnet/BenchmarkDotNet.Artifacts {{args}}
+
 # --- Test ---
 
 build_test_path := justfile_directory() / "build/tests"
