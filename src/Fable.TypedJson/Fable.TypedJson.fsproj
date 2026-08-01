@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Backend.fs" />
+    <Compile Include="Casing.fs" />
     <Compile Include="Schema.fs" />
     <Compile Include="Codec.fs" />
     <Compile Include="Refined.fs" />
