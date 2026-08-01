@@ -57,48 +57,31 @@ let private separateUpper (separator: string) (name: string) : string =
 
 let private toSnakeCase (name: string) : string = separateUpper "_" name
 
-let private lowerFirst (name: string) : string =
-    if name.Length = 0 then
-        name
-    else
-        string (System.Char.ToLowerInvariant name.[0])
-        + name.[1..]
-
 let private dashify (separator: string) (name: string) : string = separateUpper separator name
 
 /// Convert a snake_case name back to PascalCase.
-let fromSnakeCase (name: string) : string =
-    name.Split '_'
-    |> Array.map (fun part ->
-        if part.Length = 0 then
-            part
-        else
-            string (System.Char.ToUpperInvariant part.[0])
-            + part.[1..])
-    |> String.concat ""
-
-/// True if the name contains any uppercase letter (i.e., looks like Pascal/camelCase
-/// rather than snake_case). Used to decide whether to convert before applying a rule.
-let private hasUpper (name: string) : bool = String.exists System.Char.IsUpper name
+/// Re-exported from `Casing` so `Schema` can share the pivot — `Schema`
+/// compiles first, and this name is public API.
+let fromSnakeCase (name: string) : string = Casing.fromSnakeCase name
 
 /// Apply a case rule to a field name.
-/// Reflection-supplied names differ across Fable targets — BEAM lowercases
-/// (`AirTemperature` → `air_temperature`), Python preserves the F# spelling
-/// (`AirTemperature`). The rule normalizes to a canonical PascalCase form
-/// internally, then emits the requested casing, so the same rule produces
-/// consistent output regardless of source casing.
+/// Reflection reports the F# spelling (`AirTemperature`) on every target, but
+/// the rule still normalizes to a canonical PascalCase form before emitting the
+/// requested casing — so it produces the same output whether it is handed an F#
+/// field name, a snake_case name, or a name already in the target casing.
+/// BEAM reflection reported snake_case before Fable 5.8.1
+/// (fable-compiler/Fable#4766); the normalization keeps that input working too.
 let applyCaseRule (caseRule: CaseRules) (name: string) : string =
     match caseRule with
     | CaseRules.None -> name
     | _ ->
-        // Pascal is our canonical pivot. If the name contains any uppercase
-        // letter we treat it as already Pascal/camelCase; otherwise we treat
-        // it as snake_case.
-        let pascal = if hasUpper name then name else fromSnakeCase name
+        // Pascal is our canonical pivot — see `Casing`. Shared with
+        // `Schema.lowerFirstTransform` so both key paths agree.
+        let pascal = Casing.toCanonicalPascal name
 
         match caseRule with
         | CaseRules.SnakeCase -> toSnakeCase pascal
-        | CaseRules.LowerFirst -> lowerFirst pascal
+        | CaseRules.LowerFirst -> Casing.lowerFirst pascal
         | CaseRules.SnakeCaseAllCaps -> (toSnakeCase pascal).ToUpperInvariant()
         | CaseRules.KebabCase -> dashify "-" pascal
         | CaseRules.PascalCase -> pascal

@@ -59,7 +59,32 @@ let resolveJsonKey (aliases: Map<string, string>) (caseRules: Json.CaseRules) (f
     | Some alias -> alias
     | None -> Json.applyCaseRule caseRules fieldName
 
-let rec schemaForType (registry: CodecRegistry) (caseRules: Json.CaseRules) (t: System.Type) : JsonSchemaValue =
+(**
+## Cycle guard
+
+A self-referential record (`type Tree = { Children: Tree list }`) would otherwise
+recurse forever here — the emitter has no natural base case, because a record's
+schema is defined in terms of its fields' schemas. `visited` carries the chain of
+record `FullName`s on the path from the root to the current node; re-entering a
+record already on that chain emits a truncated `{"type": "object", "title": ...}`
+instead of descending again.
+
+On BEAM this was previously masked: `typeof<Tree>` crashed the compiler before
+reflection could reach the emitter (fable-compiler/Fable#4766). It has always
+been reachable on .NET, Python and JS.
+
+invariant: `visited` is the root-to-node path, not a global accumulator — sibling fields of the same type each expand fully
+adr: truncate to a title-only object rather than emit `$ref`/`$defs` — LLM tool-call validators handle flat schemas far better
+adr: `string list` over `Set` — the chain is nesting-depth short, and `List` is the best-supported collection on all four targets
+tradeoff: a recursive type's schema is lossy past the first cycle; the alternative is a schema many consumers reject
+assumption: `t.FullName` distinguishes record types on every backend (same key `CodecRegistry` already dispatches on)
+*)
+let rec private schemaForTypeIn
+    (visited: string list)
+    (registry: CodecRegistry)
+    (caseRules: Json.CaseRules)
+    (t: System.Type)
+    : JsonSchemaValue =
     let fullName = t.FullName
 
     // 1. User-registered custom codec wins — its schema was stored at
@@ -79,7 +104,7 @@ let rec schemaForType (registry: CodecRegistry) (caseRules: Json.CaseRules) (t: 
             // 3. Option<T> — emit the inner type's schema; "required" is
             //    handled at the parent record level.
             if isOptionType fullName then
-                schemaForType registry caseRules (getGenericInnerType t)
+                schemaForTypeIn visited registry caseRules (getGenericInnerType t)
 
             // 4. F# list / .NET array → JSON array.
             elif isFSharpListType fullName || t.IsArray then
@@ -89,24 +114,39 @@ let rec schemaForType (registry: CodecRegistry) (caseRules: Json.CaseRules) (t: 
                     else
                         getGenericInnerType t
 
-                SVDict(Map.ofList [ "type", SVStr "array"; "items", schemaForType registry caseRules elementType ])
+                SVDict(
+                    Map.ofList [
+                        "type", SVStr "array"
+                        "items", schemaForTypeIn visited registry caseRules elementType
+                    ]
+                )
 
             // 5. F# record → recursive object schema (no aliases — only the
             //    top-level codec's aliases are honored; nested records use
-            //    plain CaseRules).
+            //    plain CaseRules). A record already on the path back to the
+            //    root is truncated rather than re-expanded — see the cycle
+            //    guard note above.
             elif FSharpType.IsRecord t then
-                SVDict(schemaForRecord registry Map.empty caseRules t)
+                if List.contains fullName visited then
+                    SVDict(Map.ofList [ "type", SVStr "object"; "title", SVStr t.Name ])
+                else
+                    SVDict(schemaForRecordIn visited registry Map.empty caseRules t)
 
             else
                 // Unknown — fall back to a permissive empty object.
                 SVDict emptySchema
 
-and schemaForRecord
+and private schemaForRecordIn
+    (visited: string list)
     (registry: CodecRegistry)
     (aliases: Map<string, string>)
     (caseRules: Json.CaseRules)
     (recordType: System.Type)
     : JsonSchema =
+    // The record joins the path before its fields are walked, so a field
+    // referring straight back to it truncates instead of descending.
+    let visited = recordType.FullName :: visited
+
     // Walk the fields once, computing the JSON key + required-ness + schema
     // per field. Avoids resolving the key twice (once for properties, once
     // for required) and a redundant Array.toList copy per pass.
@@ -116,7 +156,7 @@ and schemaForRecord
         |> Array.map (fun fi ->
             let key = resolveJsonKey aliases caseRules fi.Name
             let isOpt = isOptionType fi.PropertyType.FullName
-            let propSchema = schemaForType registry caseRules fi.PropertyType
+            let propSchema = schemaForTypeIn visited registry caseRules fi.PropertyType
             key, isOpt, propSchema)
 
     let propertyEntries =
@@ -140,6 +180,21 @@ and schemaForRecord
         baseSchema
     else
         Map.add "required" (SVList required) baseSchema
+
+/// Emit the JSON Schema fragment for an arbitrary type. Entry point for the
+/// recursive emitter — starts with an empty cycle-guard path.
+let schemaForType (registry: CodecRegistry) (caseRules: Json.CaseRules) (t: System.Type) : JsonSchemaValue =
+    schemaForTypeIn [] registry caseRules t
+
+/// Emit the JSON Schema object for a record type. Entry point for the
+/// recursive emitter — starts with an empty cycle-guard path.
+let schemaForRecord
+    (registry: CodecRegistry)
+    (aliases: Map<string, string>)
+    (caseRules: Json.CaseRules)
+    (recordType: System.Type)
+    : JsonSchema =
+    schemaForRecordIn [] registry aliases caseRules recordType
 
 /// Generate a JSON Schema document for record type `'T`, given a registry of
 /// custom codecs and the case rule used for field-name → JSON-key mapping.

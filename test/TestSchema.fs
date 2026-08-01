@@ -44,6 +44,14 @@ type SimpleInput = { Name: string; Age: int }
 
 type FloatInput = { Temperature: float; Humidity: float }
 
+(**
+adr: multi-word fields kept as their own type — every other record here is single-word, where `lowerFirstTransform` is a no-op and cannot catch key drift
+*)
+type MultiWordInput = {
+    AirTemperature: float
+    RelativeHumidity: float
+}
+
 type BoolInput = { Active: bool; Debug: bool }
 
 type OptionalInput = { Name: string; Email: string option }
@@ -436,6 +444,80 @@ let private dumpTests =
         ]
     )
 
+// ============================================================================
+// Multi-word field keys
+// ============================================================================
+
+(**
+`dump` / `validateJson` / `validateString` bypass `CaseRules` and key off
+`lowerFirstTransform` directly. Every other record in this file is single-word,
+where that transform is a no-op — so nothing here pinned the multi-word key, the
+one place the backends could disagree. BEAM emitted `air_temperature` while
+Python, JS and .NET emitted `airTemperature` until `PropertyInfo.Name` started
+reporting the F# field name on BEAM (fable-compiler/Fable#4766, Fable 5.8.1).
+
+invariant: `dump` and `validateJson` agree on the key, so a dumped map round-trips back through validate
+invariant: the key is camelCase (`airTemperature`) on all four targets — never snake_case, never PascalCase
+*)
+let private multiWordKeyTests =
+    testList (
+        "Multi-word field keys",
+        [
+            test (
+                "dump emits camelCase keys",
+                fun _ ->
+                    let map =
+                        dump {
+                            AirTemperature = 22.5
+                            RelativeHumidity = 65.0
+                        }
+
+                    assertThat (getFloat backend map "airTemperature") (isEqualTo 22.5)
+                    assertThat (getFloat backend map "relativeHumidity") (isEqualTo 65.0)
+
+                    // Guard the two spellings the backends used to drift to.
+                    assertThat (backend.ContainsKey(map, "air_temperature")) isFalse
+                    assertThat (backend.ContainsKey(map, "AirTemperature")) isFalse
+            )
+            test (
+                "validateJson reads camelCase keys",
+                fun _ ->
+                    let map = parseRaw """{"airTemperature":22.5,"relativeHumidity":65.0}"""
+
+                    match validateJson<MultiWordInput> map with
+                    | Ok record ->
+                        assertThat record.AirTemperature (isEqualTo 22.5)
+                        assertThat record.RelativeHumidity (isEqualTo 65.0)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "validateMap reads camelCase keys",
+                fun _ ->
+                    let map = Map.ofList [ "airTemperature", "22.5"; "relativeHumidity", "65.0" ]
+
+                    match validateMap<MultiWordInput> map with
+                    | Ok record ->
+                        assertThat record.AirTemperature (isEqualTo 22.5)
+                        assertThat record.RelativeHumidity (isEqualTo 65.0)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "dump round-trips through validateJson",
+                fun _ ->
+                    let original = {
+                        AirTemperature = -3.5
+                        RelativeHumidity = 91.0
+                    }
+
+                    match validateJson<MultiWordInput> (dump original) with
+                    | Ok decoded ->
+                        assertThat decoded.AirTemperature (isEqualTo original.AirTemperature)
+                        assertThat decoded.RelativeHumidity (isEqualTo original.RelativeHumidity)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+        ]
+    )
+
 let tests =
     testList (
         "Schema",
@@ -445,5 +527,6 @@ let tests =
             coercionTests
             formatErrorsTests
             dumpTests
+            multiWordKeyTests
         ]
     )

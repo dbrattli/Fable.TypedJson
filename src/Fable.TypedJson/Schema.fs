@@ -295,24 +295,27 @@ let formatErrors (errors: FieldError list) : string =
 
 /// Identity key transform — passes the F# field name through unchanged.
 /// Useful when callers control both the lookup keys and the F# field names
-/// (rare). Most call sites should use `lowerFirstTransform` so the JSON key
-/// is consistent across backends (BEAM and Python lowercase F# field
-/// names in reflection; JS preserves PascalCase).
+/// (rare). Most call sites should use `lowerFirstTransform`, which emits the
+/// same JSON key from the same F# field name on every backend.
 let identityTransform (s: string) : string = s
 
-/// Default key transform — `LowerFirst` (camelCase). Lowercases the first
-/// character; if the input is already snake_case (no uppercase letters)
-/// returns it unchanged. Stable across BEAM/Python (already lowercase) and
-/// JS (PascalCase → camelCase).
+(**
+Default key transform — `LowerFirst` (camelCase), used by `dump`,
+`validateJson` and `validateMap`, which key off the field name directly
+instead of going through `CaseRules`.
+
+It normalizes through `Casing.toCanonicalPascal` first, so a backend that hands
+back a snake_case name yields the same key as one that hands back the F# name:
+`air_temperature` and `AirTemperature` both produce `airTemperature`. Without
+that pivot the key tracked whichever spelling the compiler produced — BEAM
+emitted `air_temperature` before Fable 5.8.1 and Python before 5.14.0, while JS
+and .NET emitted `airTemperature`.
+
+invariant: `dump` and `validateJson` share this transform — a dumped map must validate back
+invariant: the emitted key is a function of the F# field name only, identical on all four targets
+*)
 let lowerFirstTransform (s: string) : string =
-    if
-        s.Length = 0
-        || not (String.exists System.Char.IsUpper s)
-    then
-        s
-    else
-        string (System.Char.ToLowerInvariant s.[0])
-        + s.[1..]
+    Casing.lowerFirst (Casing.toCanonicalPascal s)
 
 /// Lazily wrap a backend-native value as a `JsonValue` for hand-off to
 /// user codecs (`IJsonCodec.Decode`). Internal `coerce` never calls this
@@ -753,9 +756,8 @@ and resolveField
     (lookup: string -> obj option)
     : Result<obj, FieldError> =
     // Use the case-rule-derived JSON key as the error path so messages
-    // match what the user sees in their JSON, and so the path is consistent
-    // across backends (BEAM lowercases `fi.Name`, Python and JS preserve
-    // PascalCase — we route them all through the same transform).
+    // match what the user sees in their JSON rather than the F# field name
+    // `fi.Name` reports.
     let name = keyTransform fi.Name
     let value = lookup name
 
@@ -772,10 +774,11 @@ and resolveField
 ## auto
 
 Creates a Schema for an F# record type using FSharp.Reflection.
-Field names from reflection (snake_case on BEAM) are used as lookup keys.
+Field names from reflection, put through `keyTransform`, are the lookup keys.
 
 invariant: all fields validated, errors accumulated (not fail-fast)
 adr: inline required so Fable resolves typeof<'T> at each call site
+assumption: `PropertyInfo.Name` reports the F# field name on every target (BEAM since Fable 5.8.1)
 *)
 
 (**
@@ -963,10 +966,10 @@ let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
     let fields = FSharpType.GetRecordFields typ
     let values = FSharpValue.GetRecordFields(box record)
 
-    // BEAM lowercases F# field names in reflection; Python and JS preserve
-    // PascalCase. `lowerFirstTransform` normalizes both (no-ops on the
-    // already-lowercase BEAM names, lowercases the first letter on Python/JS)
-    // so the dumped map's keys are stable across all targets.
+    // Reflection reports the F# field name on every target, so
+    // `lowerFirstTransform` puts the same camelCase key in the dumped map
+    // regardless of backend. This is the mirror of the `validateJson` /
+    // `validateString` key transform — dump and validate must agree.
     Array.zip fields values
     |> Array.fold
         (fun acc (fi, v) ->

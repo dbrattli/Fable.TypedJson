@@ -229,6 +229,116 @@ let private refinedTypesTests =
         ]
     )
 
+// ============================================================================
+// Recursive types terminate
+// ============================================================================
+
+(**
+`schemaForRecord` is defined in terms of its fields' schemas, so a record that
+reaches itself has no natural base case — before the cycle guard these types
+recursed until the stack blew. On BEAM the failure was previously masked:
+`typeof<Tree>` killed the *compiler* (fable-compiler/Fable#4766, fixed in Fable
+5.8.1), so the emitter was never reached. These tests are the regression guard
+for both.
+
+invariant: a record already on the path back to the root emits `{type, title}` and nothing deeper
+adr: the diamond test is what pins `visited` to the path — a global accumulator would truncate `Right`
+*)
+type Tree = { Label: string; Children: Tree list }
+
+type Node = { Name: string; Next: Node option }
+
+type Parent = { Tag: string; Child: Child option }
+
+and Child = { Kind: string; Owner: Parent option }
+
+type Leaf = { Value: int }
+
+type Diamond = { Left: Leaf; Right: Leaf }
+
+let private recursiveTypesTests =
+    testList (
+        "Recursive types terminate",
+        [
+            test (
+                "self-reference through a list truncates",
+                fun _ ->
+                    let json = jsonSchemaOf<Tree> emptyRegistry CaseRules.SnakeCase
+                    let parsed = parseRaw json
+
+                    let props = backend.Get(parsed, "properties")
+
+                    // The non-recursive field is unaffected.
+                    assertThat (getString backend (backend.Get(props, "label")) "type") (isEqualTo "string")
+
+                    let children = backend.Get(props, "children")
+                    assertThat (getString backend children "type") (isEqualTo "array")
+
+                    // `items` is Tree again — named, but not expanded.
+                    let items = backend.Get(children, "items")
+                    assertThat (getString backend items "type") (isEqualTo "object")
+                    assertThat (getString backend items "title") (isEqualTo "Tree")
+                    assertThat (backend.ContainsKey(items, "properties")) isFalse
+            )
+            test (
+                "self-reference through an option truncates and stays optional",
+                fun _ ->
+                    let json = jsonSchemaOf<Node> emptyRegistry CaseRules.SnakeCase
+                    let parsed = parseRaw json
+
+                    let props = backend.Get(parsed, "properties")
+                    let next = backend.Get(props, "next")
+
+                    assertThat (getString backend next "type") (isEqualTo "object")
+                    assertThat (getString backend next "title") (isEqualTo "Node")
+                    assertThat (backend.ContainsKey(next, "properties")) isFalse
+
+                    // Truncation must not promote the field into `required`.
+                    let required = backend.Get(parsed, "required")
+                    assertThat (backend.ArrayLength required) (isEqualTo 1)
+                    assertThat (arrayAtString backend required 0) (isEqualTo "name")
+            )
+            test (
+                "mutual recursion truncates at the second hop",
+                fun _ ->
+                    let json = jsonSchemaOf<Parent> emptyRegistry CaseRules.SnakeCase
+                    let parsed = parseRaw json
+
+                    // Parent → Child expands fully...
+                    let child = backend.Get(backend.Get(parsed, "properties"), "child")
+
+                    assertThat (getString backend child "title") (isEqualTo "Child")
+
+                    let childProps = backend.Get(child, "properties")
+                    assertThat (getString backend (backend.Get(childProps, "kind")) "type") (isEqualTo "string")
+
+                    // ...and Child → Parent closes the cycle, so it truncates.
+                    let owner = backend.Get(childProps, "owner")
+                    assertThat (getString backend owner "type") (isEqualTo "object")
+                    assertThat (getString backend owner "title") (isEqualTo "Parent")
+                    assertThat (backend.ContainsKey(owner, "properties")) isFalse
+            )
+            test (
+                "repeated sibling type is not mistaken for a cycle",
+                fun _ ->
+                    let json = jsonSchemaOf<Diamond> emptyRegistry CaseRules.SnakeCase
+                    let parsed = parseRaw json
+
+                    let props = backend.Get(parsed, "properties")
+
+                    // Leaf appears twice, but never on its own path — both
+                    // sides expand. A global visited set would truncate one.
+                    for side in [ "left"; "right" ] do
+                        let leaf = backend.Get(props, side)
+                        assertThat (getString backend leaf "title") (isEqualTo "Leaf")
+                        assertThat (backend.ContainsKey(leaf, "properties")) isTrue
+
+                        let value = backend.Get(backend.Get(leaf, "properties"), "value")
+                        assertThat (getString backend value "type") (isEqualTo "integer")
+            )
+        ]
+    )
+
 let tests =
     testList (
         "JsonSchema",
@@ -238,5 +348,6 @@ let tests =
             listsTests
             caseRulesPropertyKeysTests
             refinedTypesTests
+            recursiveTypesTests
         ]
     )
