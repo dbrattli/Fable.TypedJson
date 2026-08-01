@@ -84,5 +84,5 @@ group Test
     nuget Fable.Beam >= 5.0.0-rc.34
     nuget Fable.Beam.Jsx >= 5.0.0-rc.8
     nuget Fable.Python >= 5.1.0
-    nuget Scriptorium.Quill >= 0.5.0
-    nuget Scriptorium.Nib >= 0.4.0
+    nuget Scriptorium.Quill >= 0.5.1
+    nuget Scriptorium.Nib >= 0.4.1

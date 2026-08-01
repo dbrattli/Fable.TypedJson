@@ -25,8 +25,16 @@ jobs:
       - name: Restore dependencies
         run: just restore-net
 
+      # Guards that every test module is listed in test/Main.fs — Quill runs only
+      # what that list names, so an unlisted module is silently not run.
+      - name: Check test registry
+        run: just check-test-registry
+
       - name: Type check (.NET build)
         run: just check
+
+      - name: Check formatting
+        run: just format-check
 
   test:
     runs-on: ubuntu-latest
