@@ -1,0 +1,6 @@
+group Benchmark
+    FSharp.Core
+    BenchmarkDotNet
+    Thoth.Json
+    Thoth.Json.System.Text.Json
+    Thoth.Json.Net

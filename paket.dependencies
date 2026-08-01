@@ -87,3 +87,20 @@ group Test
     nuget Fable.Python >= 5.1.0
     nuget Scriptorium.Quill >= 0.5.1
     nuget Scriptorium.Nib >= 0.4.1
+
+# Benchmarks (host process, .NET only — benchmarks/dotnet). Never shipped; this
+# group exists so the benchmark project restores. BenchmarkDotNet drives the run;
+# Thoth.Json supplies the comparison baselines (hand-written Decode.object via the
+# System.Text.Json backend, and reflection-driven Decode.Auto via the Net backend).
+# System.Text.Json itself arrives transitively through the .NET shim's project
+# reference, so it is not listed here.
+group Benchmark
+    source https://api.nuget.org/v3/index.json
+    storage: none
+    framework: net10.0
+
+    nuget FSharp.Core
+    nuget BenchmarkDotNet ~> 0.14.0
+    nuget Thoth.Json
+    nuget Thoth.Json.System.Text.Json
+    nuget Thoth.Json.Net
