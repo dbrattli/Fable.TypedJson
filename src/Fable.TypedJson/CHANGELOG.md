@@ -1,5 +1,5 @@
 ---
-last_commit_released: 98a8b39e6ff95f652d9add3b92ce73ae7b781b80
+last_commit_released: 9a1c1d7df3abe8101394a3152a8083dab978be07
 name: Fable.TypedJson
 ---
 
@@ -12,6 +12,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 0.4.1 - 2026-08-01
+
+### 🐞 Bug Fixes
+
+* *(schema)* Terminate recursive schema generation, stabilize JSON keys across targets (#41) ([9a1c1d7](https://github.com/dbrattli/Fable.TypedJson/commit/9a1c1d7df3abe8101394a3152a8083dab978be07))
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/98a8b39e6ff95f652d9add3b92ce73ae7b781b80..9a1c1d7df3abe8101394a3152a8083dab978be07)</small></strong>
 
 ## 0.4.0 - 2026-05-21
 
