@@ -33,8 +33,74 @@ build-python:
 build-js:
     {{fable}} src/Fable.TypedJson.JS --exclude Fable.Core --lang javascript --outDir build/js --noCache
 
+# Guard: every test module is registered in test/Main.fs.
+#
+# Quill runs exactly the list Main.fs hands it, so a module that compiles but is
+# not listed there is silently not run — the old BEAM runner's "discovered zero
+# modules is a failure" check went away with the Scriptorium migration, and this
+# recipe replaces it. Compares the `module Fable.TypedJson.Tests.X` declaration
+# in each test/Test*.fs against the `X.tests` entries in Main.fs.
+check-test-registry:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # LC_ALL=C pins glob and sort order — under a UTF-8 collation Testing.fs sorts
+    # mid-list instead of last, which previously masked a failure in this loop.
+    export LC_ALL=C
+    declared=""
+    for f in test/Test*.fs; do
+        # Testing.fs is the shared extractor helpers, not a test module — it is
+        # caught by the glob but declares `module Fable.TypedJson.Testing`.
+        [ "$f" = "test/Testing.fs" ] && continue
+        name=$(grep -oE '^module Fable\.TypedJson\.Tests\.[A-Za-z0-9_]+' "$f" | sed 's/.*\.//') || true
+        if [ -z "$name" ]; then
+            echo "error: $f declares no 'module Fable.TypedJson.Tests.<Name>'" >&2
+            exit 1
+        fi
+        declared+="$name"$'\n'
+    done
+    declared=$(printf '%s' "$declared" | sort)
+    listed=$(grep -E '^[[:space:]]+[A-Za-z0-9_]+\.tests[[:space:]]*$' test/Main.fs \
+        | sed -E 's/[[:space:]]//g; s/\.tests$//' | sort)
+    if [ "$declared" != "$listed" ]; then
+        echo "error: test modules are out of sync with test/Main.fs" >&2
+        diff <(echo "$declared") <(echo "$listed") \
+            | sed -n 's/^< /  not run — add to Main.fs: /p; s/^> /  listed in Main.fs but no module declares it: /p' >&2
+        exit 1
+    fi
+    echo "test registry OK — $(echo "$declared" | wc -l | tr -d ' ') modules registered"
+
+# Guard: every BEAM package Fable emits is covered by test/rebar.config's allowlist.
+#
+# project_app_dirs is an allowlist (see the comment in test/rebar.config for why),
+# so a newly referenced BEAM package that matches no pattern is dropped from the
+# build without a word. Fable.Python is the one deliberate exclusion. Requires a
+# prior `just build-test-beam` — it reads the emitted tree.
+check-beam-app-dirs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    emitted={{build_test_path}}/fable_modules
+    if [ ! -d "$emitted" ]; then
+        echo "error: $emitted not found — run 'just build-test-beam' first" >&2
+        exit 1
+    fi
+    unmatched=""
+    for d in "$emitted"/*/; do
+        name=$(basename "$d")
+        case "$name" in
+            fable-library-beam|Fable.Beam*|Scriptorium*) ;;
+            Fable.Python*) ;;  # deliberate exclusion — Python-only sources, do not compile as Erlang
+            *) unmatched="$unmatched $name" ;;
+        esac
+    done
+    if [ -n "$unmatched" ]; then
+        echo "error: BEAM package(s) emitted but not in test/rebar.config project_app_dirs:$unmatched" >&2
+        echo "  add a matching pattern there, or add an exclusion case here if it is Python/JS-only" >&2
+        exit 1
+    fi
+    echo "beam app dirs OK — all emitted packages accounted for"
+
 # Type check via dotnet build
-check:
+check: check-test-registry
     dotnet build src/Fable.TypedJson
     dotnet build src/Fable.TypedJson.Beam
     dotnet build src/Fable.TypedJson.Python
@@ -113,6 +179,7 @@ build-test-beam:
     dotnet build test
     {{fable}} test --exclude Fable.Core --lang beam --outDir {{build_test_path}}
     cp test/rebar.config {{build_test_path}}/rebar.config
+    @just check-beam-app-dirs
     cd {{build_test_path}} && rebar3 compile
 
 # Run the full F# test suite as Python. Quill is the runner — no pytest.
