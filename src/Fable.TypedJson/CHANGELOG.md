@@ -1,4 +1,5 @@
 ---
+force_version: 5.0.0-rc.1
 last_commit_released: 9a1c1d7df3abe8101394a3152a8083dab978be07
 name: Fable.TypedJson
 ---

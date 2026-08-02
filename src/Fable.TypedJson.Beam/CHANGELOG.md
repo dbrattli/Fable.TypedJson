@@ -1,4 +1,5 @@
 ---
+force_version: 5.0.0-rc.1
 last_commit_released: 33b94f4e2dfde262fad19673e4bdcb03f3a070fd
 name: Fable.TypedJson.Beam
 ---
