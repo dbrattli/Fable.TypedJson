@@ -6,6 +6,7 @@
     <Author>Dag Brattli</Author>
     <Copyright>Dag Brattli</Copyright>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>fsharp;fable;json;validation;javascript;js</PackageTags>
     <Description>JavaScript backend shim for Fable.TypedJson. Wires `JSON.parse` / `JSON.stringify` and JavaScript's native object/array/number/string/boolean/null types into the IJsonBackend abstraction.</Description>
   </PropertyGroup>

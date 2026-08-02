@@ -6,6 +6,7 @@
     <Author>Dag Brattli</Author>
     <Copyright>Dag Brattli</Copyright>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>fsharp;json;validation;dotnet;system.text.json</PackageTags>
     <Description>.NET backend shim for Fable.TypedJson. Wires System.Text.Json into the IJsonBackend abstraction so the same codecs run natively on the CLR (alongside the Fable BEAM/JS/Python targets).</Description>
   </PropertyGroup>

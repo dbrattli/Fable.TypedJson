@@ -6,6 +6,7 @@
     <Author>Dag Brattli</Author>
     <Copyright>Dag Brattli</Copyright>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>fsharp;fable;json;validation;python</PackageTags>
     <Description>Python backend shim for Fable.TypedJson. Wires Python's `json` stdlib into the IJsonBackend abstraction; wraps native ints / floats as Fable's int32 / float64 at the read boundary so erased JsonValue patterns dispatch correctly.</Description>
   </PropertyGroup>
