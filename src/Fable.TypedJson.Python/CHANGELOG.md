@@ -1,6 +1,5 @@
 ---
-force_version: 5.0.0-rc.1
-last_commit_released: 8f6e40d622209bce15ce75ff6c22f3e4c7c4454c
+last_commit_released: d34e1f4c55505495b907aace4de33c34b73822a3
 name: Fable.TypedJson.Python
 ---
 
@@ -13,6 +12,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 5.0.0-rc.1 - 2026-08-02
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/8f6e40d622209bce15ce75ff6c22f3e4c7c4454c..d34e1f4c55505495b907aace4de33c34b73822a3)</small></strong>
 
 ## 0.4.0 - 2026-05-21
 
