@@ -1,4 +1,5 @@
 ---
+force_version: 5.0.0-rc.1
 last_commit_released: 8f6e40d622209bce15ce75ff6c22f3e4c7c4454c
 name: Fable.TypedJson.DotNet
 ---
