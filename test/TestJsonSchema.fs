@@ -339,6 +339,63 @@ let private recursiveTypesTests =
         ]
     )
 
+// ============================================================================
+// Tagged unions emit oneOf
+// ============================================================================
+
+(**
+Decode and encode have handled tagged DUs since 0.4.0, but the schema emitter
+was a separate walker with no union branch and fell through to a permissive
+`{}` — a validator built from the schema accepted documents the codec would
+reject. Now that all three faces come off one plan node, a union that decodes
+is a union that has a schema.
+
+invariant: every case the decoder accepts appears as a `oneOf` branch with its discriminator pinned
+*)
+type Query = { Text: string }
+
+type Command =
+    | Search of Query
+    | Refresh
+
+let private unionSchemaTests =
+    testList (
+        "Tagged unions emit oneOf",
+        [
+            test (
+                "union schema lists one branch per case",
+                fun _ ->
+                    let parsed = parseRaw (jsonSchemaOf<Command> emptyRegistry CaseRules.SnakeCase)
+                    let branches = backend.Get(parsed, "oneOf")
+                    assertThat (backend.IsArray branches) isTrue
+                    assertThat (backend.ArrayLength branches) (isEqualTo 2)
+            )
+            test (
+                "a payload case pins its discriminator and flattens its fields",
+                fun _ ->
+                    let parsed = parseRaw (jsonSchemaOf<Command> emptyRegistry CaseRules.SnakeCase)
+                    let first = backend.ArrayAt(backend.Get(parsed, "oneOf"), 0)
+                    let props = backend.Get(first, "properties")
+
+                    // Discriminator is constrained to this case's tag ...
+                    assertThat (getString backend (backend.Get(props, "type")) "const") (isEqualTo "search")
+
+                    // ... and the payload's own keys sit alongside it, matching
+                    // the flattened shape the decoder reads.
+                    assertThat (getString backend (backend.Get(props, "text")) "type") (isEqualTo "string")
+            )
+            test (
+                "a fieldless case requires only the discriminator",
+                fun _ ->
+                    let parsed = parseRaw (jsonSchemaOf<Command> emptyRegistry CaseRules.SnakeCase)
+                    let second = backend.ArrayAt(backend.Get(parsed, "oneOf"), 1)
+                    let required = backend.Get(second, "required")
+                    assertThat (backend.ArrayLength required) (isEqualTo 1)
+                    assertThat (arrayAtString backend required 0) (isEqualTo "type")
+            )
+        ]
+    )
+
 let tests =
     testList (
         "JsonSchema",
@@ -349,5 +406,6 @@ let tests =
             caseRulesPropertyKeysTests
             refinedTypesTests
             recursiveTypesTests
+            unionSchemaTests
         ]
     )

@@ -57,6 +57,10 @@ type Plan = {
     Decode: obj -> Result<obj, FieldError list>
     /// boxed F# value of this node's type -> backend-native JSON value
     Encode: obj -> obj
+    /// JSON Schema fragment describing what this node accepts. Produced by the
+    /// SAME walk as Decode/Encode, which is why the emitter can no longer lack
+    /// a case the other two handle — `JsonSchemaGen` had no union branch.
+    Schema: JsonSchemaValue
 }
 
 [<NoComparison; NoEquality>]
@@ -130,6 +134,9 @@ let private under (path: string) (errs: FieldError list) : FieldError list =
 let private leafError (message: string) : Result<obj, FieldError list> =
     Error [ { path = ""; message = message } ]
 
+let private primitiveNode (typeName: string) : JsonSchemaValue =
+    SVDict(Map.ofList [ "type", SVStr typeName ])
+
 // ============================================================================
 // The walker
 // ============================================================================
@@ -172,6 +179,9 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
                         | Ok x -> Ok x
                         | Error msg -> leafError msg
                 Encode = fun v -> fromJsonValue b (encode v)
+                // The codec's own schema, captured at registration — this is
+                // how a refined type's constraints reach the emitted document.
+                Schema = SVDict entry.schema
             }
         | None ->
 
@@ -200,6 +210,7 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
                 {
                     Decode = fun _ -> leafError message
                     Encode = id
+                    Schema = SVDict emptySchema
                 }
 
 // --- Primitive nodes --------------------------------------------------------
@@ -223,6 +234,7 @@ and private planString (b: IJsonBackend) : Plan = {
                 leafError (sprintf "cannot coerce %s to System.String" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
+    Schema = primitiveNode "string"
 }
 
 and private planInt (b: IJsonBackend) : Plan = {
@@ -240,6 +252,7 @@ and private planInt (b: IJsonBackend) : Plan = {
                 leafError (sprintf "cannot coerce %s to System.Int32" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
+    Schema = primitiveNode "integer"
 }
 
 and private planInt64 (b: IJsonBackend) : Plan = {
@@ -257,6 +270,7 @@ and private planInt64 (b: IJsonBackend) : Plan = {
                 leafError (sprintf "cannot coerce %s to System.Int64" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
+    Schema = primitiveNode "integer"
 }
 
 and private planFloat (b: IJsonBackend) : Plan = {
@@ -274,6 +288,7 @@ and private planFloat (b: IJsonBackend) : Plan = {
                 leafError (sprintf "cannot coerce %s to System.Double" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
+    Schema = primitiveNode "number"
 }
 
 and private planBool (b: IJsonBackend) : Plan = {
@@ -289,6 +304,7 @@ and private planBool (b: IJsonBackend) : Plan = {
                 leafError (sprintf "cannot coerce %s to System.Boolean" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
+    Schema = primitiveNode "boolean"
 }
 
 // --- Sequences --------------------------------------------------------------
@@ -311,6 +327,7 @@ and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> 
     let expected = sprintf "expected JSON array for %s[]" elementType.Name
 
     {
+        Schema = SVDict(Map.ofList [ "type", SVStr "array"; "items", element.Schema ])
         Encode =
             fun v ->
                 extract v
@@ -437,6 +454,35 @@ and encodeRecordInto (b: IJsonBackend) (rp: RecordPlan) (acc0: obj) (record: obj
 
     acc
 
+/// The object schema for a record plan. `properties` reads the same `Key` the
+/// decoder looks up and the encoder writes, so a case rule or alias cannot
+/// apply to two of the three and not the third.
+///
+/// An optional field contributes its inner type's schema and is simply absent
+/// from `required` — JSON Schema has no separate notion of optionality.
+and recordSchema (rp: RecordPlan) : JsonSchema =
+    let properties =
+        rp.Fields
+        |> Array.map (fun f -> f.Key, f.Inner.Schema)
+        |> Array.toList
+
+    let required =
+        rp.Fields
+        |> Array.choose (fun f -> if f.Optional then Option.None else Some(SVStr f.Key))
+        |> Array.toList
+
+    let baseSchema =
+        Map.ofList [
+            "type", SVStr "object"
+            "title", SVStr rp.Title
+            "properties", SVDict(Map.ofList properties)
+        ]
+
+    if List.isEmpty required then
+        baseSchema
+    else
+        Map.add "required" (SVList required) baseSchema
+
 and private planRecord (ctx: BuildCtx) (t: System.Type) : Plan =
     let b = ctx.Backend
     let rp = buildRecordPlan ctx t
@@ -450,6 +496,7 @@ and private planRecord (ctx: BuildCtx) (t: System.Type) : Plan =
                 else
                     leafError expected
         Encode = fun v -> encodeRecordInto b rp (b.NewMap()) v
+        Schema = SVDict(recordSchema rp)
     }
 
 // --- Unions -----------------------------------------------------------------
@@ -568,6 +615,48 @@ and private planUnion (ctx: BuildCtx) (t: System.Type) : Plan =
     let typeName = t.Name
     let expected = sprintf "expected JSON object for %s" typeName
 
+    // `oneOf` over the cases. The old standalone emitter had no union branch
+    // at all and fell through to `{}` for any tagged DU, even though decode
+    // and encode both handled them — the clearest symptom of the schema
+    // walker being a third, separate implementation.
+    let caseSchema (c: CasePlan) =
+        let discriminator =
+            Map.ofList [ discriminatorKey, SVDict(Map.ofList [ "const", SVStr c.Tag ]) ]
+
+        match c.Payload with
+        | None ->
+            SVDict(
+                Map.ofList [
+                    "type", SVStr "object"
+                    "title", SVStr c.Info.Name
+                    "properties", SVDict discriminator
+                    "required", SVList [ SVStr discriminatorKey ]
+                ]
+            )
+        | Some rp ->
+            // The payload's keys flatten alongside the discriminator, so the
+            // schema merges them rather than nesting.
+            let payload = recordSchema rp
+
+            let properties =
+                match Map.tryFind "properties" payload with
+                | Some(SVDict p) -> Map.fold (fun acc k v -> Map.add k v acc) discriminator p
+                | _ -> discriminator
+
+            let required =
+                match Map.tryFind "required" payload with
+                | Some(SVList r) -> SVStr discriminatorKey :: r
+                | _ -> [ SVStr discriminatorKey ]
+
+            SVDict(
+                Map.ofList [
+                    "type", SVStr "object"
+                    "title", SVStr c.Info.Name
+                    "properties", SVDict properties
+                    "required", SVList required
+                ]
+            )
+
     {
         Decode =
             fun v ->
@@ -576,6 +665,13 @@ and private planUnion (ctx: BuildCtx) (t: System.Type) : Plan =
                 else
                     leafError expected
         Encode = fun v -> encodeUnionWith b byIndex t v
+        Schema =
+            SVDict(
+                Map.ofList [
+                    "title", SVStr typeName
+                    "oneOf", SVList [ for c in byIndex -> caseSchema c ]
+                ]
+            )
     }
 
 // --- Cycle guard ------------------------------------------------------------
@@ -589,6 +685,11 @@ and private planDeferred (ctx: BuildCtx) (t: System.Type) : Plan =
     {
         Decode = fun v -> (forTypeIn restart t).Decode v
         Encode = fun v -> (forTypeIn restart t).Encode v
+        // Truncate to a title-only object rather than emit `$ref` / `$defs`.
+        // LLM tool-call validators handle flat schemas far better, and the
+        // schema of a cyclic type is lossy past the first hop either way.
+        // tradeoff: a recursive type's schema is lossy past the first cycle — accepted, the alternative is a schema many consumers reject
+        Schema = SVDict(Map.ofList [ "type", SVStr "object"; "title", SVStr t.Name ])
     }
 
 // ============================================================================
