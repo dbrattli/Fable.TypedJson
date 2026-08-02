@@ -290,10 +290,22 @@ let private validateJsonTests =
 // Coercion Tests
 // ============================================================================
 
-// `coerce` operates on backend-native values (`obj`) — what the
-// adapters and `IJsonBackend.Get` actually produce — not on `JsonValue`
-// case wrappers. The DU is reserved for the `IJsonCodec` boundary.
-// Pass `box "42"` / `box 42` / etc. directly here.
+(**
+Coercion operates on backend-native values (`obj`) — what the adapters and
+`IJsonBackend.Get` actually produce — not on `JsonValue` case wrappers. The DU
+is reserved for the `IJsonCodec` boundary. Pass `box "42"` / `box 42` directly.
+
+These used to call `Schema.coerce`, which dispatched on `targetType.FullName`
+per value. That ladder is gone: a plan resolves the target type once and hands
+back a closure that already knows it. `coerceTo` keeps the tests reading the
+same way while exercising the path the codec actually takes.
+
+invariant: cross-type coercion is preserved — LLM tool calls deliver every argument as a string
+*)
+let inline private coerceTo<'T> (v: obj) : Result<obj, string> =
+    match (Fable.TypedJson.Plan.forType backend emptyRegistry identityTransform identityTransform typeof<'T>).Decode v with
+    | Ok x -> Ok x
+    | Error errs -> Error(formatErrors errs)
 
 let private coercionTests =
     testList (
@@ -302,70 +314,70 @@ let private coercionTests =
             test (
                 "coercion string to int",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "42") with
+                    match coerceTo<int> (box "42") with
                     | Ok v -> assertThat (unbox<int> v) (isEqualTo 42)
                     | Error e -> assertThat e (isEqualTo "Ok")
             )
             test (
                 "coercion string to float",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "3.14") with
+                    match coerceTo<float> (box "3.14") with
                     | Ok v -> assertThat (unbox<float> v) (isEqualTo 3.14)
                     | Error e -> assertThat e (isEqualTo "Ok")
             )
             test (
                 "coercion string to bool true",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "true") with
+                    match coerceTo<bool> (box "true") with
                     | Ok v -> assertThat (unbox<bool> v) isTrue
                     | Error e -> assertThat e (isEqualTo "Ok")
             )
             test (
                 "coercion string to bool false",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "false") with
+                    match coerceTo<bool> (box "false") with
                     | Ok v -> assertThat (unbox<bool> v) isFalse
                     | Error e -> assertThat e (isEqualTo "Ok")
             )
             test (
                 "coercion int to float",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box 42) with
+                    match coerceTo<float> (box 42) with
                     | Ok v -> assertThat (unbox<float> v) (isEqualTo 42.0)
                     | Error e -> assertThat e (isEqualTo "Ok")
             )
             test (
                 "coercion float to int",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box 42.0) with
+                    match coerceTo<int> (box 42.0) with
                     | Ok v -> assertThat (unbox<int> v) (isEqualTo 42)
                     | Error e -> assertThat e (isEqualTo "Ok")
             )
             test (
                 "coercion int to string",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<string> (box 42) with
+                    match coerceTo<string> (box 42) with
                     | Ok v -> assertThat (unbox<string> v) (isEqualTo "42")
                     | Error e -> assertThat e (isEqualTo "Ok")
             )
             test (
                 "coercion invalid string to int",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "not_a_number") with
+                    match coerceTo<int> (box "not_a_number") with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
                     | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
             )
             test (
                 "coercion invalid string to float",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "not_a_number") with
+                    match coerceTo<float> (box "not_a_number") with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
                     | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
             )
             test (
                 "coercion invalid string to bool",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "maybe") with
+                    match coerceTo<bool> (box "maybe") with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
                     | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
             )

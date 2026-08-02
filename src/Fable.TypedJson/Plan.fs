@@ -137,6 +137,13 @@ let private leafError (message: string) : Result<obj, FieldError list> =
 let private primitiveNode (typeName: string) : JsonSchemaValue =
     SVDict(Map.ofList [ "type", SVStr typeName ])
 
+/// Discriminator key for tagged DUs. Matches the Pydantic / OpenAPI
+/// convention. v1 hardcodes it; a future combinator can override per codec.
+///
+/// Lives here rather than in `Schema` because all three faces that read it —
+/// decode, encode and schema emission — are now built in this module.
+let discriminatorKey = "type"
+
 // ============================================================================
 // The walker
 // ============================================================================

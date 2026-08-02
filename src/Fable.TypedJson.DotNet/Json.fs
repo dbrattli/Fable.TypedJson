@@ -33,10 +33,10 @@ let inline validateWith<'T> (registry: CodecRegistry) (map: JsonMap) : Result<'T
     Fable.TypedJson.Json.validateWith<'T> dotnet registry map
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
-    Fable.TypedJson.Schema.validateJson<'T> dotnet map
+    Fable.TypedJson.Json.validateJson<'T> dotnet map
 
 let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError list> =
-    Fable.TypedJson.Schema.validateMap<'T> dotnet map
+    Fable.TypedJson.Json.validateMap<'T> dotnet map
 
 let inline dump<'T> (record: 'T) : obj =
     Fable.TypedJson.Json.dump<'T> dotnet record

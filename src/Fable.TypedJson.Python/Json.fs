@@ -31,10 +31,10 @@ let inline validateWith<'T> (registry: CodecRegistry) (map: JsonMap) : Result<'T
     Fable.TypedJson.Json.validateWith<'T> python registry map
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
-    Fable.TypedJson.Schema.validateJson<'T> python map
+    Fable.TypedJson.Json.validateJson<'T> python map
 
 let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError list> =
-    Fable.TypedJson.Schema.validateMap<'T> python map
+    Fable.TypedJson.Json.validateMap<'T> python map
 
 let inline dump<'T> (record: 'T) : obj =
     Fable.TypedJson.Json.dump<'T> python record

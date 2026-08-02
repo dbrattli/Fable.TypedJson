@@ -32,10 +32,10 @@ let inline validateWith<'T> (registry: CodecRegistry) (map: JsonMap) : Result<'T
     Fable.TypedJson.Json.validateWith<'T> beam registry map
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
-    Fable.TypedJson.Schema.validateJson<'T> beam map
+    Fable.TypedJson.Json.validateJson<'T> beam map
 
 let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError list> =
-    Fable.TypedJson.Schema.validateMap<'T> beam map
+    Fable.TypedJson.Json.validateMap<'T> beam map
 
 let inline dump<'T> (record: 'T) : obj =
     Fable.TypedJson.Json.dump<'T> beam record

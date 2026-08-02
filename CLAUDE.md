@@ -20,27 +20,33 @@ There is no single-test filter on the command line. Narrow scope with Quill's ma
 
 ## Architecture
 
-Three layers, each in its own module, designed so the core is backend-agnostic and a per-Fable-target shim provides the JSON map plumbing.
+**The library is a staged compiler.** Stage 1 (codec construction) walks `typeof<'T>` once and emits a tree of closures; stage 2 (per decode/encode call) runs them. No `System.Type`, no `FullName` comparison and no `FSharpType` call survives into stage 2, at any depth. Build a codec once and reuse it — that is where the design puts the cost.
 
 ```
-Schema  (format-agnostic validation, reflection over record fields)
-   │      Schema.fs   — auto<'T>, coerce, JsonValue, IJsonCodec, codecRegistry
+Json      (public API: CaseRules + aliases + TypedJson<'T> + combinators)
+   │       TypedJson.fs
    ▼
-TypedJson (JSON layer: CaseRules + Encode + decode/encode pair)
-   │      TypedJson.fs
+Plan      (THE type-walker: one walk emits decode + encode + JSON Schema)
+   │       Plan.fs      — forType, forTypeFromLookup
    ▼
-IJsonBackend (per-target shim: NewMap/Get/Put/Parse/Stringify)
+Schema    (vocabulary: JsonValue, FieldError, IJsonCodec, registry, reflection helpers)
+   │       Schema.fs, Primitives.fs (the one coercion table), Casing.fs (the PascalCase pivot)
+   ▼
+IJsonBackend (per-target shim: NewMap/Get/Put/Parse/Stringify + type tests + accessors)
           Backend.fs (interface)
           Fable.TypedJson.Beam/Backend.fs (concrete BEAM impl over jsx + maps)
 ```
 
-- `Schema<'T>` is `(string -> JsonValue option) -> Result<'T, FieldError list>` — a function from a lookup to an accumulated-errors result. Adapters (`stringMapAdapter`, `jsonMapAdapter`) bridge concrete sources to that lookup. Errors accumulate, not fail-fast.
-- `JsonValue` is an `[<Erase>]` DU. At runtime `JString s` IS the underlying BEAM binary; pattern matching compiles to Erlang type guards. Treat it as zero-cost — do not introduce boxed wrappers.
-- Coercion is dispatched on `PropertyType.FullName` strings (e.g., `"System.Int32"`), not `System.Type` identity, so it is portable across Fable backends. Cross-type coercion (`JString "42"` → `int`) is intentional — LLM tool calls deliver everything as strings.
-- `IJsonCodec<'T>` + `codecRegistry` is the validators-as-types path. Users call `Codec.register<'T> codec` at module init; `Schema.coerce` falls through to the registry when the target isn't a known primitive. Combinators in `Codec.fs` (`gt`, `le`, `pattern`, `refine`, `map`, …) decorate a base codec with extra `Decode`-side validation.
-- `auto<'T>` must be `inline` so Fable resolves `typeof<'T>` at the call site on each backend.
+- **There is exactly one walker.** `Plan.forType` returns a `Plan` carrying `Decode`, `Encode` and `Schema` for the same node. Do not add a second traversal of the type tree — the three used to be separate and drifted: the schema emitter had no union branch at all, and encode silently dropped payloads decode rejected. Anything that needs to know a type's shape reads it off the plan.
+- `JsonValue` is `[<Struct>]`, not `[<Erase>]`. It exists only at the `IJsonCodec` boundary — `toJsonValue` / `fromJsonValue` are the only constructors. The hot path never builds one; it goes through `IJsonBackend.IsX` / `AsX`.
+- Type resolution dispatches on `FullName` strings, not `System.Type` identity, so it is portable across Fable backends — but this happens **once per codec**, not per value. Cross-type coercion (`"42"` → `int`) is intentional: LLM tool calls deliver everything as strings.
+- `Primitives.fs` is the single coercion table, compiled ahead of both `Schema.fs` and `Codec.fs` so neither can fork it. `Schema.coerce` and `Codec.float` once had independent copies and disagreed on locale handling.
+- `IJsonCodec<'T>` + `CodecRegistry` is the validators-as-types path, and it drives **both** directions — a registered codec's `Encode` is what stops a wrapper DU being mistaken for a tagged union. Combinators in `Codec.fs` (`gt`, `le`, `pattern`, `refine`, `map`, …) decorate a base codec with extra `Decode`-side validation.
+- `auto<'T>` must be `inline` so Fable resolves `typeof<'T>` at the call site on each backend. Keep the body to a single call into a non-inline function taking `System.Type` — anything an inline body touches must be public at consumer call sites, which is what inflated the exported surface.
+- Unsupported shapes (multi-field union cases, non-record payloads) are rejected at **codec construction**, not per value.
+- Recursive types (`Tree = { Children: Tree list }`) would make an eager walk non-terminating. `Plan`'s `Building` path defers the sub-walk on re-entry rather than tying a knot through a mutable `ref` — captured refs are the one construct whose Fable BEAM lowering is unverified.
 - **What `PropertyInfo.Name` reports is not uniform across targets, and has changed over time.** .NET and JS always gave the F# field name (`AirTemperature`); BEAM gave snake_case until Fable 5.8.1 ([Fable#4766](https://github.com/fable-compiler/Fable/pull/4766)); Python gives snake_case (`air_temperature`) until Fable 5.14.0 ([Fable#4852](https://github.com/fable-compiler/Fable/pull/4852)). Never assume a spelling — pin any new key derivation to `Casing.toCanonicalPascal` and it stops mattering.
-- `Casing.fs` (compiled before `Schema.fs`) holds that pivot: normalize to PascalCase, then emit. Both key paths go through it — `Schema.lowerFirstTransform` (backing `dump` / `validateJson` / `validateMap`) and `Json.applyCaseRule` (backing `CaseRules`). Keep the two-step path when adding rules; it is what makes a JSON key a function of the F# field name alone, on every target and Fable version. The reverse is lossy for adjacent capitals (`HTTPStatus` → `httpstatus` → `Httpstatus`), which only Fable#4852 truly fixes.
+- `Casing.fs` (compiled before `Schema.fs`) holds that pivot: normalize to PascalCase, then emit. Every key now goes through `Json.applyCaseRule` — `dump` / `validateJson` / `validateMap` use `Json.camelCaseKey`, which is the same function partially applied, so the shortcut entry points and a default-configured codec cannot disagree. Keep the two-step path when adding rules; it is what makes a JSON key a function of the F# field name alone, on every target and Fable version. The reverse is lossy for adjacent capitals (`HTTPStatus` → `httpstatus` → `Httpstatus`), which only Fable#4852 truly fixes.
 
 ### Adding a new backend
 

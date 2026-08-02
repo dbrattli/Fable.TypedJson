@@ -1,16 +1,17 @@
 (**
-# Fable.TypedJson — JSON Encode/Decode Layer
+# Fable.TypedJson — the public codec API
 
-Thin wrapper over Fable.TypedJson.Schema that adds JSON serialization
-via an `IJsonBackend` shim and CaseRules for key transformation.
+`CaseRules` and aliases (how an F# field name becomes a JSON key), the
+`TypedJson<'T>` codec record, and the combinators that rebuild one. The work
+of walking a type belongs to `Plan`; this module decides what the keys are and
+hands the walker a transform.
 
-Schema handles format-agnostic validation and coercion.
-TypedJson handles JSON-specific concerns (serialization, casing).
-
-principle: TypedJson is a thin layer -- validation logic lives in Schema
+principle: TypedJson is a thin layer — walking a type lives in Plan, the vocabulary in Schema
 principle: explicit casing at call site, not baked into type definitions
 principle: backend-agnostic core; per-backend shim provides Parse/Stringify
 adr: CaseRules implemented at runtime since Fable.Core.CaseRules is compile-time only
+adr: one plan per (type, case rule, aliases), built at codec construction and captured — build a codec once and reuse it
+invariant: `decode`, `encode` and the emitted JSON Schema all read the same plan, so they cannot disagree about a wire shape
 *)
 
 module Fable.TypedJson.Json
@@ -201,6 +202,20 @@ let resolveKey (aliases: Map<string, string>) (caseRules: CaseRules) (fieldName:
     | Some alias -> alias
     | None -> applyCaseRule caseRules fieldName
 
+(**
+The key and tag transforms the registry-free shortcut entry points
+(`validateMap`, `validateJson`, `dump`) use: camelCase, no aliases.
+
+Byte-identical to what `Schema.lowerFirstTransform` produced, and to the
+codec's own `LowerFirst` default — which is what let the shortcut flow move
+onto the codec's walker without a wire-format change.
+
+invariant: the shortcut entry points and a default-configured codec derive the same key from the same field
+*)
+let camelCaseKey: string -> string = resolveKey Map.empty CaseRules.LowerFirst
+
+let camelCaseTag: string -> string = applyCaseRule CaseRules.LowerFirst
+
 let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : TypedJson<'T> =
     let typ = typeof<'T>
 
@@ -288,18 +303,48 @@ messaging, not a hot path.
 invariant: `dump` and `validateJson` agree on every key, at every depth
 *)
 let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
-    (Plan.forType
-        backend
-        Fable.TypedJson.Schema.emptyRegistry
-        (resolveKey Map.empty CaseRules.LowerFirst)
-        (applyCaseRule CaseRules.LowerFirst)
-        typeof<'T>)
-        .Encode(box record)
+    (Plan.forType backend Fable.TypedJson.Schema.emptyRegistry camelCaseKey camelCaseTag typeof<'T>).Encode(box record)
 
 /// Dump a record to a backend-native JSON map, resolving registered codecs.
 let inline dumpWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (record: 'T) : obj =
-    (Plan.forType backend registry (resolveKey Map.empty CaseRules.LowerFirst) (applyCaseRule CaseRules.LowerFirst) typeof<'T>)
-        .Encode(box record)
+    (Plan.forType backend registry camelCaseKey camelCaseTag typeof<'T>).Encode(box record)
+
+(**
+Validate a backend-native JSON map (from `parseRaw`) straight into `'T`.
+
+Shorthand for a default-configured codec: camelCase keys, no aliases, no model
+validator. Anything beyond that — a registry, a case rule, `alias`,
+`withModel` — needs a real codec via `auto` / `autoWith`, which is also the
+form to use when decoding more than once, since these build a plan per call.
+
+invariant: `dump` and `validateJson` agree on every key, at every depth — a dumped map validates back
+*)
+let inline validateJson<'T> (backend: IJsonBackend) (map: obj) : Result<'T, FieldError list> =
+    (Plan.forType backend Fable.TypedJson.Schema.emptyRegistry camelCaseKey camelCaseTag typeof<'T>).Decode map
+    |> Result.map unbox<'T>
+
+/// Validate a backend-native JSON map, resolving registered codecs.
+let inline validateJsonWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: obj) : Result<'T, FieldError list> =
+    (Plan.forType backend registry camelCaseKey camelCaseTag typeof<'T>).Decode map
+    |> Result.map unbox<'T>
+
+(**
+Validate a `Map<string, string>` into `'T` — LLM tool-call arguments, form
+fields, environment variables. Every value arrives as a string and the
+primitive nodes coerce from there, which is the whole reason cross-type
+coercion exists.
+
+Reads through a lookup rather than a native map, so no intermediate JSON
+object has to be built.
+*)
+let inline validateMap<'T> (backend: IJsonBackend) (map: Map<string, string>) : Result<'T, FieldError list> =
+    (Plan.forTypeFromLookup backend Fable.TypedJson.Schema.emptyRegistry camelCaseKey camelCaseTag typeof<'T>) (stringMapAdapter map)
+    |> Result.map unbox<'T>
+
+/// Validate a `Map<string, string>`, resolving registered codecs.
+let inline validateMapWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
+    (Plan.forTypeFromLookup backend registry camelCaseKey camelCaseTag typeof<'T>) (stringMapAdapter map)
+    |> Result.map unbox<'T>
 
 /// Shorthand: create auto codec and decode in one call (uses the codec's default `LowerFirst`).
 let inline validate<'T> (backend: IJsonBackend) (map: JsonMap) : Result<'T, FieldError list> = (auto<'T> backend).decode map
