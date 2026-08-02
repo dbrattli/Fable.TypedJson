@@ -124,9 +124,9 @@ let private pipelineCompositionTests =
 
 (**
 `Codec.int` / `int64` / `float` / `string` / `bool` and the primitive arms of
-`Schema.coerce` implement the same coercion rules independently, and had
-drifted apart. These pin the agreed behaviour ahead of merging the two into a
-single table.
+`Schema.coerce` used to implement the same coercion rules independently, and
+drifted apart. Both now call `Primitives`, so these pin the shared behaviour
+against a future re-fork.
 
 invariant: a primitive codec and the matching `coerce` arm produce the same value for the same input
 *)
@@ -173,6 +173,43 @@ let private primitiveAgreementTests =
                     | Ok n -> assertThat n (isEqualTo 3000000000L)
                     | Error msg -> assertThat msg (isEqualTo "Ok")
             )
+#if DOTNET
+            (**
+            The locale guarantee, exercised rather than assumed. Only the CLR
+            has an ambient thread culture to get this wrong — Fable backends
+            lower to native, locale-immune float handling — so this is a
+            .NET-only test rather than a `skipIf` on the others.
+
+            Under `de-DE`, `,` is the decimal separator and `.` groups
+            thousands, so an unpinned `Double.TryParse` reads "22.5" as 225 —
+            verified: dropping the pin fails this with `225.0`.
+
+            The render half passes without a pin because F#'s `string` operator
+            is already invariant for primitives (unlike `x.ToString()`). It is
+            asserted here anyway so a switch to a culture-sensitive formatter
+            cannot pass unnoticed.
+
+            invariant: float text is `.`-decimal on the wire regardless of ambient culture
+            *)
+            test (
+                "float parse and render ignore the ambient culture",
+                fun _ ->
+                    let original = System.Globalization.CultureInfo.CurrentCulture
+
+                    try
+                        System.Globalization.CultureInfo.CurrentCulture <- System.Globalization.CultureInfo.GetCultureInfo "de-DE"
+
+                        match Codec.float.Decode(JString "22.5") with
+                        | Ok f -> assertThat f (isEqualTo 22.5)
+                        | Error msg -> assertThat msg (isEqualTo "Ok")
+
+                        match Codec.string.Decode(JFloat 3.14) with
+                        | Ok s -> assertThat s (isEqualTo "3.14")
+                        | Error msg -> assertThat msg (isEqualTo "Ok")
+                    finally
+                        System.Globalization.CultureInfo.CurrentCulture <- original
+            )
+#endif
         ]
     )
 

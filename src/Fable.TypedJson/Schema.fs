@@ -445,16 +445,20 @@ let rec coerce
     : Result<obj, string> =
     let targetFullName = targetType.FullName
 
+    // Primitive targets. This arm classifies the backend-native value; every
+    // actual conversion comes from `Primitives`, which `Codec` also uses, so
+    // the two cannot drift apart again.
+    //
     // String target — anything primitive can become a string.
     if targetFullName = "System.String" then
         if backend.IsString fv then
             Ok(box (backend.AsString fv))
         elif backend.IsInt fv then
-            Ok(box (string (backend.AsInt fv)))
+            Ok(box (Primitives.intToString (backend.AsInt fv)))
         elif backend.IsFloat fv then
-            Ok(box (string (backend.AsFloat fv)))
+            Ok(box (Primitives.floatToString (backend.AsFloat fv)))
         elif backend.IsBool fv then
-            Ok(box (if backend.AsBool fv then "true" else "false"))
+            Ok(box (Primitives.boolToString (backend.AsBool fv)))
         else
             Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
@@ -465,11 +469,8 @@ let rec coerce
         elif backend.IsFloat fv then
             Ok(box (int (backend.AsFloat fv)))
         elif backend.IsString fv then
-            let s = backend.AsString fv
-
-            match System.Int32.TryParse(s) with
-            | true, n -> Ok(box n)
-            | _ -> Error(sprintf "cannot parse '%s' as int" s)
+            Primitives.parseInt (backend.AsString fv)
+            |> Result.map box
         else
             Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
@@ -480,11 +481,8 @@ let rec coerce
         elif backend.IsFloat fv then
             Ok(box (int64 (backend.AsFloat fv)))
         elif backend.IsString fv then
-            let s = backend.AsString fv
-
-            match System.Int64.TryParse(s) with
-            | true, n -> Ok(box n)
-            | _ -> Error(sprintf "cannot parse '%s' as int64" s)
+            Primitives.parseInt64 (backend.AsString fv)
+            |> Result.map box
         else
             Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
@@ -495,22 +493,8 @@ let rec coerce
         elif backend.IsInt fv then
             Ok(box (float (backend.AsInt fv)))
         elif backend.IsString fv then
-            let s = backend.AsString fv
-            // JSON numbers are always `.`-as-decimal per RFC 8259. On the
-            // CLR `TryParse(s)` uses the thread culture, which on `.`-as-
-            // thousands locales (es/fr/de/...) misparses "22.5" as 225 —
-            // pin InvariantCulture. Fable backends transpile to native
-            // locale-immune parsers (Erlang `binary_to_float`, Python `float`,
-            // JS `parseFloat`), and Fable doesn't implement the 3-arg overload
-            // (returns 0.0 on BEAM), so the parameterless form is correct
-            // there.
-#if FABLE_COMPILER
-            match System.Double.TryParse(s) with
-#else
-            match System.Double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture) with
-#endif
-            | true, f -> Ok(box f)
-            | _ -> Error(sprintf "cannot parse '%s' as float" s)
+            Primitives.parseFloat (backend.AsString fv)
+            |> Result.map box
         else
             Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 
@@ -519,12 +503,8 @@ let rec coerce
         if backend.IsBool fv then
             Ok(box (backend.AsBool fv))
         elif backend.IsString fv then
-            let s = backend.AsString fv
-
-            match s.ToLower() with
-            | "true" -> Ok(box true)
-            | "false" -> Ok(box false)
-            | _ -> Error(sprintf "cannot parse '%s' as bool" s)
+            Primitives.parseBool (backend.AsString fv)
+            |> Result.map box
         else
             Error(sprintf "cannot coerce %s to %s" (describeValue backend fv) targetFullName)
 

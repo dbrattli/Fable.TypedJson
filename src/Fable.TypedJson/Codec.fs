@@ -46,16 +46,16 @@ let withSchemaKey (key: string) (value: JsonSchemaValue) (codec: IJsonCodec<'T>)
 // Primitive codecs
 // ============================================================================
 
+// Conversions come from `Primitives`, shared with `Schema.coerce`. Only the
+// classification differs: a codec matches a `JsonValue`, `coerce` asks the
+// backend. Keeping the rules in one place is what stopped the two diverging.
 let int: IJsonCodec<int> =
     mk
         (fun jv ->
             match jv with
             | JInt n -> Ok n
             | JFloat f -> Ok(int f)
-            | JString s ->
-                match System.Int32.TryParse s with
-                | true, n -> Ok n
-                | _ -> Error(sprintf "cannot parse '%s' as int" s)
+            | JString s -> Primitives.parseInt s
             | _ -> Error "expected int")
         (fun n -> JInt n)
         (primitiveSchema "integer")
@@ -66,10 +66,7 @@ let int64: IJsonCodec<int64> =
             match jv with
             | JInt n -> Ok(Microsoft.FSharp.Core.Operators.int64 n)
             | JFloat f -> Ok(Microsoft.FSharp.Core.Operators.int64 f)
-            | JString s ->
-                match System.Int64.TryParse s with
-                | true, n -> Ok n
-                | _ -> Error(sprintf "cannot parse '%s' as int64" s)
+            | JString s -> Primitives.parseInt64 s
             | _ -> Error "expected int64")
         // `JsonValue` has no 64-bit integer case, and an unconditional
         // `JInt(int n)` silently WRAPS past Int32 range — 3_000_000_000L
@@ -95,23 +92,7 @@ let float: IJsonCodec<float> =
             match jv with
             | JFloat f -> Ok f
             | JInt n -> Ok(float n)
-            | JString s ->
-                // JSON numbers are always `.`-as-decimal per RFC 8259. On the
-                // CLR the parameterless overload uses the thread culture, which
-                // on `.`-as-thousands locales (es/fr/de/...) misparses "22.5"
-                // as 225 — pin InvariantCulture. Fable backends transpile to
-                // locale-immune native parsers and don't implement the 3-arg
-                // overload, so the short form is correct there. Same split as
-                // `Schema.coerce`'s float arm, which this must agree with.
-#if FABLE_COMPILER
-                match System.Double.TryParse s with
-#else
-                match
-                    System.Double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture)
-                with
-#endif
-                | true, f -> Ok f
-                | _ -> Error(sprintf "cannot parse '%s' as float" s)
+            | JString s -> Primitives.parseFloat s
             | _ -> Error "expected float")
         (fun f -> JFloat f)
         (primitiveSchema "number")
@@ -121,12 +102,9 @@ let string: IJsonCodec<string> =
         (fun jv ->
             match jv with
             | JString s -> Ok s
-            | JInt n -> Ok(sprintf "%d" n)
-            // `string f`, not `sprintf "%f" f` — the latter pads to a fixed 6
-            // decimals, so 3.14 became "3.140000" here while `Schema.coerce`'s
-            // string arm produced "3.14" for the same input.
-            | JFloat f -> Ok(string f)
-            | JBool b -> Ok(if b then "true" else "false")
+            | JInt n -> Ok(Primitives.intToString n)
+            | JFloat f -> Ok(Primitives.floatToString f)
+            | JBool b -> Ok(Primitives.boolToString b)
             | _ -> Error "expected string")
         (fun s -> JString s)
         (primitiveSchema "string")
@@ -136,11 +114,7 @@ let bool: IJsonCodec<bool> =
         (fun jv ->
             match jv with
             | JBool b -> Ok b
-            | JString s ->
-                match s.ToLower() with
-                | "true" -> Ok true
-                | "false" -> Ok false
-                | _ -> Error(sprintf "cannot parse '%s' as bool" s)
+            | JString s -> Primitives.parseBool s
             | _ -> Error "expected bool")
         (fun b -> JBool b)
         (primitiveSchema "boolean")
