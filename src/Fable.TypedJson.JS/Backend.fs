@@ -7,14 +7,16 @@ array, number, string, boolean, and null for the map abstraction.
 adr: a plain JS object (`{}`) is the native parsed-JSON map; `JSON.parse`
      returns nested objects/arrays/primitives, which is exactly what
      `JsonValue` erases to.
-adr: `Put` is non-mutating -- builds a fresh object via spread so the
-     core layer's "fold map updates over an accumulator" pattern works
-     functionally. Mutation would alias the accumulator across folds.
+adr: `Put` mutates in place, per `IJsonBackend.Put`'s linear-ownership
+     contract -- the map handed in is dead after the call. Supersedes the
+     original "non-mutating via spread" decision, which cost a full object
+     copy per key and made an n-field object O(n^2); every call site is an
+     accumulator fold that never reuses its argument, so nothing aliased.
 adr: numbers in JS are all double -- `IsInt` uses `Number.isInteger` to
      distinguish whole-valued numbers from fractional ones, matching the
      coercion expectations of the core (`JString "42"` -> `int 42`).
 adr: prefer `Fable.Core.JS` and `Fable.Core.JsInterop` over raw `[<Emit>]`
-     where possible. Only the spread literal (`Put`) and the `null`
+     where possible. Only the assign-and-return (`Put`) and the `null`
      sentinel still need raw emit -- everything else routes through
      blessed bindings.
 *)
@@ -25,11 +27,16 @@ open Fable.Core
 open Fable.Core.JsInterop
 open Fable.TypedJson.Backend
 
-// Object-spread + computed-key insertion isn't expressible in
-// Fable.Core.JsInterop, so this stays as raw emit. Keeping it functional
-// (non-mutating) matches the IJsonBackend.Put contract.
-[<Emit("({...$0, [$1]: $2})")>]
-let private jsSpreadPut (map: obj) (key: string) (value: obj) : obj = nativeOnly
+// Assign-and-return isn't expressible in Fable.Core.JsInterop, so this stays
+// as raw emit.
+//
+// Was `({...$0, [$1]: $2})` — a full object copy per key, so building an
+// n-field object was O(n^2). `IJsonBackend.Put` now specifies linear
+// ownership (the argument is dead after the call), which makes in-place
+// mutation legal here and brings JS in line with what Python and .NET
+// already did.
+[<Emit("($0[$1] = $2, $0)")>]
+let private jsPut (map: obj) (key: string) (value: obj) : obj = nativeOnly
 
 // `Fable.Core.JS.NumberConstructor` exposes `isNaN` and `isSafeInteger`
 // but not `isInteger` (yet). Bind it directly until upstream catches up.
@@ -47,7 +54,7 @@ type private JSBackendImpl() =
         // `JsInterop.(?)` lowers to `map[key]`.
         member _.Get(map, key) = map?(key)
 
-        member _.Put(map, key, value) = jsSpreadPut map key value
+        member _.Put(map, key, value) = jsPut map key value
 
         member _.ParseRaw(json) = JS.JSON.parse json
 

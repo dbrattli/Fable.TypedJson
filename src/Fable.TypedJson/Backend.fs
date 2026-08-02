@@ -32,7 +32,17 @@ type IJsonBackend =
     /// Get the raw value at `key`. Behavior is undefined if the key is missing —
     /// callers should use `ContainsKey` first.
     abstract member Get: map: obj * key: string -> obj
-    /// Return a new map with `key` set to `value`.
+    /// Set `key` to `value` and return the map to use for the NEXT call.
+    ///
+    /// Linear ownership: the map passed in is DEAD once this returns, and
+    /// callers must use only the returned value. That licenses backends to
+    /// mutate in place. Every call site is an accumulator fold that never
+    /// reuses its argument, so nothing relies on the old contract.
+    ///
+    /// adr: linear ownership, not "returns a new map" — the old wording forced JS
+    ///      into a full object spread per key, making an n-field object O(n^2),
+    ///      while Python and .NET violated it anyway and documented the violation
+    /// invariant: a map handed to `Put` is never read again by the caller
     abstract member Put: map: obj * key: string * value: obj -> obj
     /// Parse a JSON string into the backend's native map representation.
     /// Named `ParseRaw` to emphasize the result is the raw native value
