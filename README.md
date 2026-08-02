@@ -24,15 +24,21 @@ codec.encode { Location = "Oslo"; AirTemperature = 22.5 }
 
 ## Install
 
+Install the core package plus the shim for the target you compile to:
+
 ```sh
-dotnet add package Fable.TypedJson          # core, backend-agnostic
-dotnet add package Fable.TypedJson.Beam     # + the shim for your target:
-dotnet add package Fable.TypedJson.Python   #   .Beam / .Python / .JS  (Fable)
-dotnet add package Fable.TypedJson.JS       #   .DotNet               (native CLR)
-dotnet add package Fable.TypedJson.DotNet
+dotnet add package Fable.TypedJson
+dotnet add package Fable.TypedJson.Beam     # pick one shim
 ```
 
-Core and the Fable shims target **netstandard2.0**; `Fable.TypedJson.DotNet` targets **net10.0** because it runs natively on the CLR over `System.Text.Json`. Opening the backend's `Json` module pre-applies the backend, so `auto` takes `()` and you never thread a backend value yourself.
+| Target | Package | Runs on |
+| --- | --- | --- |
+| BEAM (Erlang) | `Fable.TypedJson.Beam` | Fable → Erlang, over jsx |
+| Python | `Fable.TypedJson.Python` | Fable → Python, over `json` |
+| JavaScript | `Fable.TypedJson.JS` | Fable → JS, over `JSON.parse` |
+| .NET | `Fable.TypedJson.DotNet` | the CLR natively, over `System.Text.Json` |
+
+Core and the Fable shims target **netstandard2.0**; `Fable.TypedJson.DotNet` targets **net10.0**. Opening the backend's `Json` module pre-applies the backend, so `auto` takes `()` and you never thread a backend value yourself.
 
 **Build a codec once and reuse it.** Construction resolves the entire type tree — every nested record, list element and union case — so decoding does no reflection at any depth. Bind codecs at module level, not per request.
 
