@@ -24,20 +24,27 @@ let inline auto<'T> () : TypedJson<'T> = Fable.TypedJson.Json.auto<'T> js
 let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
     Fable.TypedJson.Json.autoWith<'T> js registry
 
-let inline validate<'T> (map: JsonMap) : Result<'T, FieldError list> =
-    Fable.TypedJson.Json.validate<'T> js map
-
-let inline validateWith<'T> (registry: CodecRegistry) (map: JsonMap) : Result<'T, FieldError list> =
-    Fable.TypedJson.Json.validateWith<'T> js registry map
-
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
-    Fable.TypedJson.Schema.validateJson<'T> js map
+    Fable.TypedJson.Json.validateJson<'T> js map
 
 let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError list> =
-    Fable.TypedJson.Schema.validateMap<'T> js map
+    Fable.TypedJson.Json.validateMap<'T> js map
 
-let inline dump<'T> (record: 'T) : obj =
-    Fable.TypedJson.Schema.dump<'T> js record
+// The `…With` variants take a registry, so a record with refined or
+// custom-codec fields can be validated without building a codec. Their
+// absence here was a real gap: the README documented `validateMap` for exactly
+// such a record, and it could not have worked — `validateMap` uses an empty
+// registry, so a `NonEmptyString` field had no codec to dispatch through.
+let inline validateJsonWith<'T> (registry: CodecRegistry) (map: obj) : Result<'T, FieldError list> =
+    Fable.TypedJson.Json.validateJsonWith<'T> js registry map
+
+let inline validateMapWith<'T> (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
+    Fable.TypedJson.Json.validateMapWith<'T> js registry map
+
+let inline dumpWith<'T> (registry: CodecRegistry) (record: 'T) : obj =
+    Fable.TypedJson.Json.dumpWith<'T> js registry record
+
+let inline dump<'T> (record: 'T) : obj = Fable.TypedJson.Json.dump<'T> js record
 
 /// Generate a JSON Schema document for record type `'T`. Uses the supplied
 /// `CodecRegistry` for custom-codec types and `caseRules` to map F# field

@@ -18,6 +18,7 @@ returned as `Result<'T, string>`; the caller (Schema.coerce) surfaces
 them into a `FieldError`.
 *)
 
+[<RequireQualifiedAccess>]
 module Fable.TypedJson.Codec
 
 open System.Text.RegularExpressions
@@ -46,16 +47,16 @@ let withSchemaKey (key: string) (value: JsonSchemaValue) (codec: IJsonCodec<'T>)
 // Primitive codecs
 // ============================================================================
 
+// Conversions come from `Primitives`, shared with `Schema.coerce`. Only the
+// classification differs: a codec matches a `JsonValue`, `coerce` asks the
+// backend. Keeping the rules in one place is what stopped the two diverging.
 let int: IJsonCodec<int> =
     mk
         (fun jv ->
             match jv with
             | JInt n -> Ok n
             | JFloat f -> Ok(int f)
-            | JString s ->
-                match System.Int32.TryParse s with
-                | true, n -> Ok n
-                | _ -> Error(sprintf "cannot parse '%s' as int" s)
+            | JString s -> Primitives.parseInt s
             | _ -> Error "expected int")
         (fun n -> JInt n)
         (primitiveSchema "integer")
@@ -66,12 +67,24 @@ let int64: IJsonCodec<int64> =
             match jv with
             | JInt n -> Ok(Microsoft.FSharp.Core.Operators.int64 n)
             | JFloat f -> Ok(Microsoft.FSharp.Core.Operators.int64 f)
-            | JString s ->
-                match System.Int64.TryParse s with
-                | true, n -> Ok n
-                | _ -> Error(sprintf "cannot parse '%s' as int64" s)
+            | JString s -> Primitives.parseInt64 s
             | _ -> Error "expected int64")
-        (fun n -> JInt(Microsoft.FSharp.Core.Operators.int n))
+        // `JsonValue` has no 64-bit integer case, and an unconditional
+        // `JInt(int n)` silently WRAPS past Int32 range — 3_000_000_000L
+        // encoded as -1_294_967_296. Stay on `JInt` while the value fits (so
+        // ordinary values are unchanged) and fall back to `JFloat`, which is
+        // exact to 2^53 and never wraps, beyond it.
+        // tradeoff: values above 2^53 lose precision — accepted; the alternative is a new JsonValue case
+        (fun n ->
+            if
+                n
+                >= Microsoft.FSharp.Core.Operators.int64 System.Int32.MinValue
+                && n
+                   <= Microsoft.FSharp.Core.Operators.int64 System.Int32.MaxValue
+            then
+                JInt(Microsoft.FSharp.Core.Operators.int n)
+            else
+                JFloat(Microsoft.FSharp.Core.Operators.float n))
         (primitiveSchema "integer")
 
 let float: IJsonCodec<float> =
@@ -80,10 +93,7 @@ let float: IJsonCodec<float> =
             match jv with
             | JFloat f -> Ok f
             | JInt n -> Ok(float n)
-            | JString s ->
-                match System.Double.TryParse s with
-                | true, f -> Ok f
-                | _ -> Error(sprintf "cannot parse '%s' as float" s)
+            | JString s -> Primitives.parseFloat s
             | _ -> Error "expected float")
         (fun f -> JFloat f)
         (primitiveSchema "number")
@@ -93,9 +103,9 @@ let string: IJsonCodec<string> =
         (fun jv ->
             match jv with
             | JString s -> Ok s
-            | JInt n -> Ok(sprintf "%d" n)
-            | JFloat f -> Ok(sprintf "%f" f)
-            | JBool b -> Ok(if b then "true" else "false")
+            | JInt n -> Ok(Primitives.intToString n)
+            | JFloat f -> Ok(Primitives.floatToString f)
+            | JBool b -> Ok(Primitives.boolToString b)
             | _ -> Error "expected string")
         (fun s -> JString s)
         (primitiveSchema "string")
@@ -105,11 +115,7 @@ let bool: IJsonCodec<bool> =
         (fun jv ->
             match jv with
             | JBool b -> Ok b
-            | JString s ->
-                match s.ToLower() with
-                | "true" -> Ok true
-                | "false" -> Ok false
-                | _ -> Error(sprintf "cannot parse '%s' as bool" s)
+            | JString s -> Primitives.parseBool s
             | _ -> Error "expected bool")
         (fun b -> JBool b)
         (primitiveSchema "boolean")

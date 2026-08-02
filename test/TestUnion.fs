@@ -277,5 +277,67 @@ let private snakeCaseDiscriminatorTests =
         ]
     )
 
+// ============================================================================
+// Unsupported union shapes are rejected at construction
+// ============================================================================
+
+(**
+v1 supports fieldless cases and single-record-payload cases. Every other shape
+used to fail in two different ways at two different times: decode returned a
+`FieldError` when a document happened to select that case, while encode emitted
+a bare `{"type": "..."}` and silently discarded the payload, producing JSON
+that could not be read back.
+
+The walker now resolves every case when the codec is built, so an unsupported
+one is rejected there. A DU with a case that cannot round-trip is a broken
+codec whether or not a given document reaches that case, and finding out at
+construction beats finding out on the first request that uses it.
+
+A wrapper type that wants real encoding should register an `IJsonCodec`, which
+takes precedence over union dispatch on both paths.
+
+invariant: an unsupported union shape fails at codec construction, never silently at run time
+adr: reject at construction rather than per value — the failure is a property of the type, not the document
+*)
+type Shape =
+    | Circle of float
+    | Square of float
+
+type Segment = At of int * int
+
+let private unsupportedUnionShapeTests =
+    testList (
+        "Unsupported union shapes are rejected at construction",
+        [
+            test (
+                "non-record single-field case is rejected when the codec is built",
+                fun _ -> assertThat (fun () -> auto<Shape> () |> ignore) throws
+            )
+            test (
+                "multi-positional-field case is rejected when the codec is built",
+                fun _ -> assertThat (fun () -> auto<Segment> () |> ignore) throws
+            )
+            test (
+                "a union of supported shapes still builds",
+                fun _ ->
+                    // Guards the rejection against over-reach: fieldless and
+                    // single-record-payload cases must stay buildable.
+                    // Asserted on the parsed value, not the JSON text — the
+                    // backends differ in separator spacing.
+                    let codec = auto<Tool> ()
+                    let parsed = parseRaw (codec.encode Ping)
+                    assertThat (getString backend parsed "type") (isEqualTo "ping")
+            )
+        ]
+    )
+
 let tests =
-    testList ("Union", [ topLevelUnionTests; unionAsRecordFieldTests; snakeCaseDiscriminatorTests ])
+    testList (
+        "Union",
+        [
+            topLevelUnionTests
+            unionAsRecordFieldTests
+            snakeCaseDiscriminatorTests
+            unsupportedUnionShapeTests
+        ]
+    )

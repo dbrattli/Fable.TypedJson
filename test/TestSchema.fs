@@ -290,10 +290,26 @@ let private validateJsonTests =
 // Coercion Tests
 // ============================================================================
 
-// `coerce` operates on backend-native values (`obj`) — what the
-// adapters and `IJsonBackend.Get` actually produce — not on `JsonValue`
-// case wrappers. The DU is reserved for the `IJsonCodec` boundary.
-// Pass `box "42"` / `box 42` / etc. directly here.
+(**
+Cross-type coercion, exercised through the public entry points rather than the
+walker. `validateMap` feeds every value as a string — the LLM-tool-call shape,
+and the reason cross-type coercion exists at all — while `validateJson` feeds
+backend-native JSON values, so between them they cover both directions a
+primitive node can be reached from.
+
+These used to call `Schema.coerce` directly, which dispatched on
+`targetType.FullName` per value. That function is gone and the plan that
+replaced it is internal, so the tests go through the API a consumer has.
+
+invariant: a string field value coerces to the record's declared primitive type
+*)
+type IntBox = { Value: int }
+
+type FloatBox = { Value: float }
+
+type BoolBox = { Value: bool }
+
+type StringBox = { Value: string }
 
 let private coercionTests =
     testList (
@@ -302,72 +318,79 @@ let private coercionTests =
             test (
                 "coercion string to int",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "42") with
-                    | Ok v -> assertThat (unbox<int> v) (isEqualTo 42)
-                    | Error e -> assertThat e (isEqualTo "Ok")
+                    match validateMap<IntBox> (Map.ofList [ "value", "42" ]) with
+                    | Ok r -> assertThat r.Value (isEqualTo 42)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion string to float",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "3.14") with
-                    | Ok v -> assertThat (unbox<float> v) (isEqualTo 3.14)
-                    | Error e -> assertThat e (isEqualTo "Ok")
+                    match validateMap<FloatBox> (Map.ofList [ "value", "3.14" ]) with
+                    | Ok r -> assertThat r.Value (isEqualTo 3.14)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion string to bool true",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "true") with
-                    | Ok v -> assertThat (unbox<bool> v) isTrue
-                    | Error e -> assertThat e (isEqualTo "Ok")
+                    match validateMap<BoolBox> (Map.ofList [ "value", "true" ]) with
+                    | Ok r -> assertThat r.Value isTrue
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion string to bool false",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "false") with
-                    | Ok v -> assertThat (unbox<bool> v) isFalse
-                    | Error e -> assertThat e (isEqualTo "Ok")
+                    match validateMap<BoolBox> (Map.ofList [ "value", "false" ]) with
+                    | Ok r -> assertThat r.Value isFalse
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion int to float",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box 42) with
-                    | Ok v -> assertThat (unbox<float> v) (isEqualTo 42.0)
-                    | Error e -> assertThat e (isEqualTo "Ok")
+                    match validateJson<FloatBox> (parseRaw """{"value":42}""") with
+                    | Ok r -> assertThat r.Value (isEqualTo 42.0)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion float to int",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box 42.0) with
-                    | Ok v -> assertThat (unbox<int> v) (isEqualTo 42)
-                    | Error e -> assertThat e (isEqualTo "Ok")
+                    match validateJson<IntBox> (parseRaw """{"value":42.9}""") with
+                    | Ok r -> assertThat r.Value (isEqualTo 42)
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion int to string",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<string> (box 42) with
-                    | Ok v -> assertThat (unbox<string> v) (isEqualTo "42")
-                    | Error e -> assertThat e (isEqualTo "Ok")
+                    match validateJson<StringBox> (parseRaw """{"value":42}""") with
+                    | Ok r -> assertThat r.Value (isEqualTo "42")
+                    | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion invalid string to int",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<int> (box "not_a_number") with
+                    match validateMap<IntBox> (Map.ofList [ "value", "not_a_number" ]) with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
-                    | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
+                    | Error errors -> assertThat ((formatErrors errors).Contains "cannot parse") isTrue
             )
             test (
                 "coercion invalid string to float",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<float> (box "not_a_number") with
+                    match validateMap<FloatBox> (Map.ofList [ "value", "not_a_number" ]) with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
-                    | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
+                    | Error errors -> assertThat ((formatErrors errors).Contains "cannot parse") isTrue
             )
             test (
                 "coercion invalid string to bool",
                 fun _ ->
-                    match coerce backend emptyRegistry identityTransform identityTransform typeof<bool> (box "maybe") with
+                    match validateMap<BoolBox> (Map.ofList [ "value", "maybe" ]) with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
-                    | Error msg -> assertThat (msg.Contains("cannot parse")) isTrue
+                    | Error errors -> assertThat ((formatErrors errors).Contains "cannot parse") isTrue
+            )
+            test (
+                "a non-coercible value reports the target type",
+                fun _ ->
+                    match validateJson<IntBox> (parseRaw """{"value":{"nested":1}}""") with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat ((formatErrors errors).Contains "System.Int32") isTrue
             )
         ]
     )
@@ -405,6 +428,10 @@ let private formatErrorsTests =
 // dump — Record to BeamMap
 // ============================================================================
 
+type Street = { Street: string; City: string }
+
+type Outer = { Label: string; Inner: Street }
+
 let private dumpTests =
     testList (
         "dump — Record to BeamMap",
@@ -440,6 +467,33 @@ let private dumpTests =
                     let map = dump record
                     let hasEmail = backend.ContainsKey(map, "email")
                     assertThat hasEmail isFalse
+            )
+            (**
+            `dump` walks only the top level: a record-typed field is `Put` into
+            the map verbatim, so whatever the backend's `Stringify` makes of a
+            raw F# record leaks into the output. The stated invariant is that a
+            dumped map validates back — this pins whether that actually holds
+            one level down.
+
+            invariant: `dump` and `validateJson` agree on nested keys, so a nested record round-trips
+            *)
+            test (
+                "dump round-trips a nested record through validateJson",
+                fun _ ->
+                    let original = {
+                        Label = "outer"
+                        Inner = {
+                            Street.Street = "Main 1"
+                            City = "Oslo"
+                        }
+                    }
+
+                    match validateJson<Outer> (dump original) with
+                    | Ok decoded ->
+                        assertThat decoded.Label (isEqualTo "outer")
+                        assertThat decoded.Inner.Street (isEqualTo "Main 1")
+                        assertThat decoded.Inner.City (isEqualTo "Oslo")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
             )
         ]
     )

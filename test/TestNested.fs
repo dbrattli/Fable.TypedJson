@@ -283,6 +283,206 @@ let private caseRulesRecursiveTests =
         ]
     )
 
+// ============================================================================
+// Recursive types round-trip
+// ============================================================================
+
+(**
+`TestJsonSchema` covers recursive types for the *schema emitter* only, where the
+guard is a `visited` path. Decode and encode have no such guard — they terminate
+because `coerce` recurses lazily at runtime and runs out of document.
+
+These tests pin that behaviour so it survives a move to a codec that resolves
+reflection at construction time. An eagerly built plan tree has no natural base
+case and would hang at `auto<Tree> ()` rather than at decode, so this is the
+regression net for that change.
+
+invariant: a self-referential record round-trips to its full depth — the guard is the data, not the type
+*)
+type Tree = { Label: string; Children: Tree list }
+
+type Node = { Name: string; Next: Node option }
+
+type Branch = { Tag: string; Leaf: Twig option }
+
+and Twig = { Kind: string; Parent: Branch option }
+
+let private recursiveTypeTests =
+    testList (
+        "Recursive types round-trip",
+        [
+            test (
+                "self-referential record decodes nested children",
+                fun _ ->
+                    let codec = auto<Tree> ()
+
+                    let map =
+                        parseRaw
+                            """{"label":"root","children":[{"label":"a","children":[]},{"label":"b","children":[{"label":"b1","children":[]}]}]}"""
+
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.Label (isEqualTo "root")
+                        assertThat r.Children.Length (isEqualTo 2)
+                        assertThat r.Children.[0].Label (isEqualTo "a")
+                        assertThat r.Children.[1].Label (isEqualTo "b")
+                        assertThat r.Children.[1].Children.[0].Label (isEqualTo "b1")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "self-referential record round-trips through encode",
+                fun _ ->
+                    let codec = auto<Tree> ()
+
+                    let original = {
+                        Label = "root"
+                        Children = [
+                            {
+                                Label = "a"
+                                Children = [ { Label = "a1"; Children = [] } ]
+                            }
+                        ]
+                    }
+
+                    match codec.decode (parseRaw (codec.encode original)) with
+                    | Ok r ->
+                        assertThat r.Label (isEqualTo "root")
+                        assertThat r.Children.[0].Label (isEqualTo "a")
+                        assertThat r.Children.[0].Children.[0].Label (isEqualTo "a1")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "option-recursive record decodes a chain",
+                fun _ ->
+                    let codec = auto<Node> ()
+                    let map = parseRaw """{"name":"a","next":{"name":"b","next":{"name":"c"}}}"""
+
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "a")
+
+                        match r.Next with
+                        | Some second ->
+                            assertThat second.Name (isEqualTo "b")
+
+                            match second.Next with
+                            | Some third -> assertThat third.Name (isEqualTo "c")
+                            | Option.None -> assertThat "missing third" (isEqualTo "c")
+                        | Option.None -> assertThat "missing second" (isEqualTo "b")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "option-recursive record terminates on a missing tail",
+                fun _ ->
+                    let codec = auto<Node> ()
+
+                    match codec.decode (parseRaw """{"name":"only"}""") with
+                    | Ok r ->
+                        assertThat r.Name (isEqualTo "only")
+                        assertThat r.Next.IsNone isTrue
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "mutually recursive records round-trip",
+                fun _ ->
+                    let codec = auto<Branch> ()
+                    let map = parseRaw """{"tag":"b","leaf":{"kind":"k"}}"""
+
+                    match codec.decode map with
+                    | Ok r ->
+                        assertThat r.Tag (isEqualTo "b")
+
+                        match r.Leaf with
+                        | Some leaf ->
+                            assertThat leaf.Kind (isEqualTo "k")
+                            assertThat leaf.Parent.IsNone isTrue
+                        | Option.None -> assertThat "missing leaf" (isEqualTo "k")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+        ]
+    )
+
+// ============================================================================
+// Array-typed fields
+// ============================================================================
+
+(**
+`'T[]` record fields had no coverage at all. They take a different path from
+`'T list`: decode goes through `coerceArray` (which builds an `obj[]`, with no
+typed-array counterpart to `buildList`) and encode through `transformValue`'s
+`unbox<obj[]>`. Both are suspect on the CLR, where array covariance covers
+reference types only — so `int[]` and `float[]` are the cases that matter, not
+`string[]`.
+
+invariant: a `'T[]` field behaves the same as the equivalent `'T list` field on every target
+*)
+type Scores = { Player: string; Points: int[] }
+
+type Labels = { Owner: string; Names: string[] }
+
+let private arrayFieldTests =
+    testList (
+        "Array-typed fields",
+        [
+            test (
+                "decodes a value-type array field",
+                fun _ ->
+                    let codec = auto<Scores> ()
+
+                    match codec.decode (parseRaw """{"player":"Alice","points":[1,2,3]}""") with
+                    | Ok r ->
+                        assertThat r.Player (isEqualTo "Alice")
+                        assertThat r.Points.Length (isEqualTo 3)
+                        assertThat r.Points.[0] (isEqualTo 1)
+                        assertThat r.Points.[2] (isEqualTo 3)
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "encodes a value-type array field as a JSON array",
+                fun _ ->
+                    let codec = auto<Scores> ()
+
+                    let parsed =
+                        parseRaw (
+                            codec.encode {
+                                Player = "Alice"
+                                Points = [| 1; 2; 3 |]
+                            }
+                        )
+
+                    let points = backend.Get(parsed, "points")
+                    assertThat (backend.IsArray points) isTrue
+                    assertThat (backend.ArrayLength points) (isEqualTo 3)
+            )
+            test (
+                "round-trips a reference-type array field",
+                fun _ ->
+                    let codec = auto<Labels> ()
+
+                    let original = {
+                        Owner = "Acme"
+                        Names = [| "a"; "b" |]
+                    }
+
+                    match codec.decode (parseRaw (codec.encode original)) with
+                    | Ok r ->
+                        assertThat r.Owner (isEqualTo "Acme")
+                        assertThat r.Names.Length (isEqualTo 2)
+                        assertThat r.Names.[1] (isEqualTo "b")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+            test (
+                "decodes an empty array field",
+                fun _ ->
+                    let codec = auto<Scores> ()
+
+                    match codec.decode (parseRaw """{"player":"Bob","points":[]}""") with
+                    | Ok r -> assertThat r.Points.Length (isEqualTo 0)
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+        ]
+    )
+
 let tests =
     testList (
         "Nested",
@@ -291,5 +491,7 @@ let tests =
             listOfPrimitivesTests
             listOfRecordsTests
             caseRulesRecursiveTests
+            recursiveTypeTests
+            arrayFieldTests
         ]
     )

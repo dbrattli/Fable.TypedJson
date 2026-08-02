@@ -1,16 +1,17 @@
 (**
-# Fable.TypedJson — JSON Encode/Decode Layer
+# Fable.TypedJson — the public codec API
 
-Thin wrapper over Fable.TypedJson.Schema that adds JSON serialization
-via an `IJsonBackend` shim and CaseRules for key transformation.
+`CaseRules` and aliases (how an F# field name becomes a JSON key), the
+`TypedJson<'T>` codec record, and the combinators that rebuild one. The work
+of walking a type belongs to `Plan`; this module decides what the keys are and
+hands the walker a transform.
 
-Schema handles format-agnostic validation and coercion.
-TypedJson handles JSON-specific concerns (serialization, casing).
-
-principle: TypedJson is a thin layer -- validation logic lives in Schema
+principle: TypedJson is a thin layer — walking a type lives in Plan, the vocabulary in Schema
 principle: explicit casing at call site, not baked into type definitions
 principle: backend-agnostic core; per-backend shim provides Parse/Stringify
 adr: CaseRules implemented at runtime since Fable.Core.CaseRules is compile-time only
+adr: one plan per (type, case rule, aliases), built at codec construction and captured — build a codec once and reuse it
+invariant: `decode`, `encode` and the emitted JSON Schema all read the same plan, so they cannot disagree about a wire shape
 *)
 
 module Fable.TypedJson.Json
@@ -123,19 +124,6 @@ type TypedJson<'T> = {
 }
 
 // ============================================================================
-// Applicative Operators
-// ============================================================================
-
-let (<!>) (f: 'a -> 'b) (r: Result<'a, FieldError list>) : Result<'b, FieldError list> = Result.map f r
-
-let (<*>) (fR: Result<('a -> 'b), FieldError list>) (xR: Result<'a, FieldError list>) : Result<'b, FieldError list> =
-    match fR, xR with
-    | Ok f, Ok x -> Ok(f x)
-    | Error e1, Error e2 -> Error(e1 @ e2)
-    | Error e, _ -> Error e
-    | _, Error e -> Error e
-
-// ============================================================================
 // Encode Module
 // ============================================================================
 
@@ -201,199 +189,44 @@ let resolveKey (aliases: Map<string, string>) (caseRules: CaseRules) (fieldName:
     | Some alias -> alias
     | None -> applyCaseRule caseRules fieldName
 
-/// Recursively transform a value into a backend-native form so that any
-/// nested records have their keys mapped through the same CaseRules/aliases
-/// the outer record uses. Without this, nested F# records would be Stringify'd
-/// by the backend using its default reflection casing (Python: PascalCase,
-/// BEAM: lowercase) and leak through to the JSON output. Lists/arrays of
-/// records are walked element-wise and rebuilt as backend-native arrays.
-/// Primitives, already-encoded option payloads, and unknown types pass
-/// through.
-///
-/// Module-level mutual recursion is intentional: nesting `let rec ... and ...`
-/// inside an `inline` function triggers a Fable BEAM codegen bug (captures
-/// lower to `undefined`). At module scope with explicit parameters the bug
-/// doesn't apply — same pattern as Schema.fs `coerce` / `resolveRecord`.
-let rec transformValue (backend: IJsonBackend) (aliases: Map<string, string>) (rules: CaseRules) (t: System.Type) (v: obj) : obj =
-    if isNull v then
-        v
-    elif isOptionType t.FullName then
-        match extractOption v with
-        | Some inner -> transformValue backend aliases rules (getGenericInnerType t) inner
-        | None -> backend.Null
-    elif isFSharpListType t.FullName then
-        let elementType = getGenericInnerType t
+(**
+The key and tag transforms the registry-free shortcut entry points
+(`validateMap`, `validateJson`, `dump`) use: camelCase, no aliases.
 
-        extractList v
-        |> List.map (transformValue backend aliases rules elementType)
-        |> backend.BuildArray
-    elif t.IsArray then
-        let elementType = t.GetElementType()
+Byte-identical to what `Schema.lowerFirstTransform` produced, and to the
+codec's own `LowerFirst` default — which is what let the shortcut flow move
+onto the codec's walker without a wire-format change.
 
-        unbox<obj[]> v
-        |> Array.toList
-        |> List.map (transformValue backend aliases rules elementType)
-        |> backend.BuildArray
-    elif FSharpType.IsRecord t then
-        Encode.object backend (recordEntries backend aliases rules t v)
-    elif FSharpType.IsUnion t then
-        // Tagged DU: emit `{type: "<caseName>", ...payload}`. For a fieldless
-        // case, just `{type: "..."}`. For a single record-field case, flatten
-        // the record's keys alongside the discriminator. Other shapes are
-        // unsupported in v1 (matches Schema.coerceUnion).
-        //
-        // Tag value follows the codec's CaseRules — e.g., SnakeCase produces
-        // `ToolUse` → `"tool_use"`. Decode side mirrors this via the
-        // `tagTransform` passed into `Schema.auto`.
-        let caseInfo, caseValues = FSharpValue.GetUnionFields(v, t)
-        let tag = applyCaseRule rules caseInfo.Name
-        let caseFields = caseInfo.GetFields()
-        let baseEntry = (discriminatorKey, box tag)
+invariant: the shortcut entry points and a default-configured codec derive the same key from the same field
+*)
+let camelCaseKey: string -> string = resolveKey Map.empty CaseRules.LowerFirst
 
-        // `caseValues : obj[]` has a different runtime shape on each Fable
-        // backend (process-dict ref on BEAM, GenericArray on Python, native
-        // array on .NET). Going through `backend.ArrayLength` / `ArrayAt`
-        // gives uniform access.
-        let payloadCount = backend.ArrayLength(box caseValues)
+let camelCaseTag: string -> string = applyCaseRule CaseRules.LowerFirst
 
-        let payload =
-            if payloadCount > 0 then
-                Some(backend.ArrayAt(box caseValues, 0))
-            else
-                None
+(**
+Non-inline core of `autoWith`. Takes the `System.Type` explicitly, so the
+inline entry point below is exactly one call.
 
-        match caseFields.Length, payload with
-        | 0, _
-        | _, None -> Encode.object backend [ baseEntry ]
-        | 1, Some payloadValue ->
-            let payloadType = caseFields.[0].PropertyType
+That shape is load-bearing for the public surface, not a style choice.
+Everything an `inline` body touches must be accessible at the consumer's call
+site, in the consumer's assembly — which is why a substantial inline body
+forced `Plan`, the walker helpers and the reflection primitives to all be
+public. Keep every public `inline` function to a single call into a non-inline
+one and the internals can be hidden.
 
-            if FSharpType.IsRecord payloadType then
-                let payloadEntries = recordEntries backend aliases rules payloadType payloadValue
-                Encode.object backend (baseEntry :: payloadEntries)
-            else
-                // Non-record single-field cases not supported in v1.
-                Encode.object backend [ baseEntry ]
-        | _ ->
-            // Multi-positional-field cases not supported in v1.
-            Encode.object backend [ baseEntry ]
-    else
-        v
+`'T` here is for typing only; the runtime shape comes from `typ`. Fable erases
+it, so the `unbox` inside costs nothing.
 
-/// Walk a record's fields, applying caseRules + aliases to each key and
-/// recursively transforming each value via `transformValue`. Optional fields
-/// with `None` are dropped (no entry emitted).
-///
-/// Uses `FSharpValue.GetRecordField` per-field rather than `GetRecordFields`
-/// (whole record). The latter requires recovering the F# record type from a
-/// boxed obj and Fable BEAM can't — it lowers `box record`'s type to
-/// `System.Object` at runtime. Reading per-field uses the PropertyInfo we
-/// already have from the static `recordType`, so it works on every backend.
-and recordEntries
-    (backend: IJsonBackend)
-    (aliases: Map<string, string>)
-    (rules: CaseRules)
-    (recordType: System.Type)
-    (recordValue: obj)
-    : (string * obj) list =
-    FSharpType.GetRecordFields recordType
-    |> Array.toList
-    |> List.choose (fun fi ->
-        let fv = FSharpValue.GetRecordField(recordValue, fi)
-        let jsonKey = resolveKey aliases rules fi.Name
-
-        if isOptionType fi.PropertyType.FullName then
-            match extractOption fv with
-            | Some inner -> Some(jsonKey, transformValue backend aliases rules (getGenericInnerType fi.PropertyType) inner)
-            | None -> None
-        else
-            Some(jsonKey, transformValue backend aliases rules fi.PropertyType fv))
-
-/// Pre-bake a per-field transformer. `transformValue` dispatches on
-/// `System.Type` characteristics, and that dispatch is identical on every
-/// call for a given field type. Resolve it once per field and capture the
-/// appropriate closure: `id` for primitives, specialised closures for
-/// option/list/array/record/union.
-let buildTransformer (backend: IJsonBackend) (aliases: Map<string, string>) (rules: CaseRules) (innerType: System.Type) : obj -> obj =
-    let fn = innerType.FullName
-
-    if isOptionType fn then
-        let valueType = getGenericInnerType innerType
-
-        fun v ->
-            match extractOption v with
-            | Some inner -> transformValue backend aliases rules valueType inner
-            | Option.None -> backend.Null
-    elif isFSharpListType fn then
-        let elementType = getGenericInnerType innerType
-
-        fun v ->
-            extractList v
-            |> List.map (fun item -> transformValue backend aliases rules elementType item)
-            |> backend.BuildArray
-    elif innerType.IsArray then
-        let elementType = innerType.GetElementType()
-
-        fun v ->
-            unbox<obj[]> v
-            |> Array.toList
-            |> List.map (fun item -> transformValue backend aliases rules elementType item)
-            |> backend.BuildArray
-    elif FSharpType.IsRecord innerType then
-        fun v -> transformValue backend aliases rules innerType v
-    elif FSharpType.IsUnion innerType then
-        fun v -> transformValue backend aliases rules innerType v
-    else
-        // Primitive (string / int / float / bool / ...): identity — matches
-        // `transformValue`'s `else v` branch.
-        id
-
-/// Walk a record's fields and write directly into a backend-native map via
-/// `Put`. Avoids the `(string * obj) list` cons-cell chain that `Encode.object`
-/// builds, and uses pre-baked per-field transformers so each field's
-/// `transformValue` dispatch happens once at codec-construction (not per encode).
-let encodeRecordValues
-    (backend: IJsonBackend)
-    (fields: System.Reflection.PropertyInfo[])
-    (jsonKeys: string[])
-    (isOpts: bool[])
-    (transformers: (obj -> obj)[])
-    (boxedRecord: obj)
-    : obj =
-    let mutable acc = backend.NewMap()
-
-    for i = 0 to fields.Length - 1 do
-        let v = FSharpValue.GetRecordField(boxedRecord, fields.[i])
-
-        if isOpts.[i] then
-            match extractOption v with
-            | Some inner -> acc <- backend.Put(acc, jsonKeys.[i], transformers.[i] inner)
-            | Option.None -> ()
-        else
-            acc <- backend.Put(acc, jsonKeys.[i], transformers.[i] v)
-
-    acc
-
-let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : TypedJson<'T> =
-    let typ = typeof<'T>
-
-    // Records have a stable list of fields known at codec-construction time;
-    // unions don't (the case is value-dependent). Compute the record fields
-    // lazily so this codec works for top-level union types too.
-    let fields =
-        if FSharpType.IsRecord typ then
-            FSharpType.GetRecordFields typ
-        else
-            [||]
+invariant: the body of every public `inline` function is exactly one call to a non-inline function taking System.Type
+*)
+let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: System.Type) : TypedJson<'T> =
 
     // Recursive constructor — building a new codec with different aliases or
     // a different default case rule is a single recursive call away. F#
     // allows `let rec` for nested values that capture each other.
     let rec build (aliases: Map<string, string>) (caseRules: CaseRules) : TypedJson<'T> =
-        // Build the Schema function ONCE for the codec's default rules+aliases
-        // combo. The schema's per-field metadata (jsonKeys, isOpts, innerTypes)
-        // is pre-baked inside Schema.auto's inline body and captured here, so
-        // the per-decode hot path skips the per-field reflection that the old
+        // Build the plan ONCE for the codec's default rules+aliases combo, and
+        // capture it, so the per-call hot path skips the per-field reflection the old
         // build-per-call path used to pay.
         let defaultKeyTransform = resolveKey aliases caseRules
         // Tag transform applies the case rule directly to the F# union case
@@ -401,90 +234,38 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // Encode side mirrors via `applyCaseRule rules caseInfo.Name`.
         let defaultTagTransform = applyCaseRule caseRules
 
-        let defaultSchemaFn =
-            Fable.TypedJson.Schema.auto<'T> backend registry defaultKeyTransform defaultTagTransform
+        // Resolve the whole type tree once, here. `Schema.auto` pre-baked only
+        // the top-level record and left nested records to re-reflect on every
+        // decode; the plan walks to the leaves, so a nested record now costs
+        // the same per decode as a top-level one.
+        let defaultPlan =
+            Plan.forType backend registry defaultKeyTransform defaultTagTransform typ
 
         let decodeWith (rules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
-            // Fast path: caller didn't override the case rule, reuse the
-            // cached schema. The fall-through rebuilds for the rare case
-            // where decodeWith is invoked with a different rules value.
-            let schemaFn =
+            // Fast path: caller didn't override the case rule, reuse the plan.
+            // The fall-through rebuilds for the rare case where decodeWith is
+            // invoked with a different rules value.
+            let plan =
                 if rules = caseRules then
-                    defaultSchemaFn
+                    defaultPlan
                 else
-                    let keyTransform = resolveKey aliases rules
-                    let tagTransform = applyCaseRule rules
-                    Fable.TypedJson.Schema.auto<'T> backend registry keyTransform tagTransform
+                    Plan.forType backend registry (resolveKey aliases rules) (applyCaseRule rules) typ
 
-            // Schema.resolveField applies `keyTransform` itself before looking
-            // up; passing a raw adapter avoids double-transforming the key.
-            schemaFn (jsonMapAdapter backend map)
+            plan.Decode map |> Result.map unbox<'T>
 
-        // Pre-bake the per-field metadata for the default rules so the hot
-        // encode path skips per-call `resolveKey`, `isOptionType`, and
-        // `getGenericInnerType`. Mirrors the decode-side schema cache.
-        //
-        // `fields` is empty (`[||]`) for non-record top-level types (e.g.
-        // tagged DUs), so `Array.map` over it naturally yields `[||]` —
-        // no need to gate each pre-bake step on `FSharpType.IsRecord typ`.
-        let defaultJsonKeys =
-            fields
-            |> Array.map (fun fi -> resolveKey aliases caseRules fi.Name)
-
-        let defaultIsOpts =
-            fields
-            |> Array.map (fun fi -> isOptionType fi.PropertyType.FullName)
-
-        let defaultInnerTypes =
-            Array.map2
-                (fun (fi: System.Reflection.PropertyInfo) isOpt ->
-                    if isOpt then
-                        getGenericInnerType fi.PropertyType
-                    else
-                        fi.PropertyType)
-                fields
-                defaultIsOpts
-
-        // Build transformers against the INNER type (post-option-unwrap)
-        // because `encodeRecordValues` already unwraps the option at the
-        // call site and passes the inner value to `transformers.[i]`.
-        let defaultTransformers =
-            defaultInnerTypes
-            |> Array.map (buildTransformer backend aliases caseRules)
-
+        // Encode reads the same plan decode does, so the two cannot disagree
+        // about a type's wire shape. The old encode side kept its own parallel
+        // pre-bake (`defaultJsonKeys` / `defaultIsOpts` / `defaultTransformers`)
+        // for the top level and re-reflected below it, mirroring the decode
+        // side's split; one plan replaces both halves of both.
         let encodeWith (rules: CaseRules) (record: 'T) : string =
-            // Top-level dispatch mirrors decode (Schema.auto): record →
-            // field-by-field encode; union → discriminator + payload via
-            // transformValue. Anything else: hand off to the backend's
-            // Stringify and hope for the best.
-            if FSharpType.IsRecord typ then
-                let boxed = box record
+            let plan =
+                if rules = caseRules then
+                    defaultPlan
+                else
+                    Plan.forType backend registry (resolveKey aliases rules) (applyCaseRule rules) typ
 
-                let map =
-                    if rules = caseRules then
-                        // Hot path: reuse the pre-baked metadata + transformers.
-                        encodeRecordValues backend fields defaultJsonKeys defaultIsOpts defaultTransformers boxed
-                    else
-                        // Cold path: caller overrode the rule, recompute keys
-                        // and rebuild transformers (rules only enters the
-                        // transformers via the recursive `transformValue`
-                        // calls they make on nested records / lists).
-                        let jsonKeys =
-                            fields
-                            |> Array.map (fun fi -> resolveKey aliases rules fi.Name)
-
-                        let transformers =
-                            defaultInnerTypes
-                            |> Array.map (buildTransformer backend aliases rules)
-
-                        encodeRecordValues backend fields jsonKeys defaultIsOpts transformers boxed
-
-                map |> Encode.toJson backend
-            elif FSharpType.IsUnion typ then
-                transformValue backend aliases rules typ (box record)
-                |> Encode.toJson backend
-            else
-                Encode.toJson backend (box record)
+            plan.Encode(box record) |> Encode.toJson backend
 
         {
             decode = decodeWith caseRules
@@ -499,16 +280,88 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
 
     build Map.empty CaseRules.LowerFirst
 
+let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : TypedJson<'T> =
+    buildCodec<'T> backend registry typeof<'T>
+
 /// Auto codec with the default empty codec registry. Use `autoWith` to pass a registry of custom codecs.
 let inline auto<'T> (backend: IJsonBackend) : TypedJson<'T> =
     autoWith<'T> backend Fable.TypedJson.Schema.emptyRegistry
 
-/// Shorthand: create auto codec and decode in one call (uses the codec's default `LowerFirst`).
-let inline validate<'T> (backend: IJsonBackend) (map: JsonMap) : Result<'T, FieldError list> = (auto<'T> backend).decode map
+(**
+Dump a record to a backend-native JSON map (e.g. for inter-process messaging).
 
-/// Shorthand: create autoWith codec (with custom registry) and decode in one call.
-let inline validateWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: JsonMap) : Result<'T, FieldError list> =
-    (autoWith<'T> backend registry).decode map
+Routed through the same plan the codec's encode path uses, rather than a
+separate top-level-only fold. Two things follow: nested records, lists and
+options are transformed instead of being written verbatim, and the key
+derivation is shared instead of duplicated — `resolveKey Map.empty
+CaseRules.LowerFirst` produces exactly the camelCase key
+`Schema.lowerFirstTransform` does, which is what `validateJson` reads back.
+
+The non-recursive version emitted a nested record in whatever spelling the
+backend's own reflection used, so `validateJson` could not find its keys and
+the round-trip invariant held only for flat records.
+
+Note this builds a plan per call. Prefer a codec built once (`auto<'T> ()`)
+for anything repeated; `dump` is a convenience for one-off inter-process
+messaging, not a hot path.
+
+invariant: `dump` and `validateJson` agree on every key, at every depth
+*)
+let dumpValue (backend: IJsonBackend) (registry: CodecRegistry) (typ: System.Type) (record: obj) : obj =
+    (Plan.forType backend registry camelCaseKey camelCaseTag typ).Encode record
+
+let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
+    dumpValue backend Fable.TypedJson.Schema.emptyRegistry typeof<'T> (box record)
+
+/// Dump a record to a backend-native JSON map, resolving registered codecs.
+let inline dumpWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (record: 'T) : obj =
+    dumpValue backend registry typeof<'T> (box record)
+
+(**
+Validate a backend-native JSON map (from `parseRaw`) straight into `'T`.
+
+Shorthand for a default-configured codec: camelCase keys, no aliases, no model
+validator. Anything beyond that — a registry, a case rule, `alias`,
+`withModel` — needs a real codec via `auto` / `autoWith`, which is also the
+form to use when decoding more than once, since these build a plan per call.
+
+invariant: `dump` and `validateJson` agree on every key, at every depth — a dumped map validates back
+*)
+let decodeJsonAs<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: System.Type) (map: obj) : Result<'T, FieldError list> =
+    (Plan.forType backend registry camelCaseKey camelCaseTag typ).Decode map
+    |> Result.map unbox<'T>
+
+let inline validateJson<'T> (backend: IJsonBackend) (map: obj) : Result<'T, FieldError list> =
+    decodeJsonAs<'T> backend Fable.TypedJson.Schema.emptyRegistry typeof<'T> map
+
+/// Validate a backend-native JSON map, resolving registered codecs.
+let inline validateJsonWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: obj) : Result<'T, FieldError list> =
+    decodeJsonAs<'T> backend registry typeof<'T> map
+
+(**
+Validate a `Map<string, string>` into `'T` — LLM tool-call arguments, form
+fields, environment variables. Every value arrives as a string and the
+primitive nodes coerce from there, which is the whole reason cross-type
+coercion exists.
+
+Reads through a lookup rather than a native map, so no intermediate JSON
+object has to be built.
+*)
+let decodeStringMapAs<'T>
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (typ: System.Type)
+    (map: Map<string, string>)
+    : Result<'T, FieldError list> =
+    (Plan.forTypeFromLookup backend registry camelCaseKey camelCaseTag typ) (stringMapAdapter map)
+    |> Result.map unbox<'T>
+
+let inline validateMap<'T> (backend: IJsonBackend) (map: Map<string, string>) : Result<'T, FieldError list> =
+    decodeStringMapAs<'T> backend Fable.TypedJson.Schema.emptyRegistry typeof<'T> map
+
+/// Validate a `Map<string, string>`, resolving registered codecs.
+let inline validateMapWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
+    decodeStringMapAs<'T> backend registry typeof<'T> map
 
 /// Compose a cross-field model validator onto a codec. Runs after the per-field
 /// decode succeeds. If the validator returns Error, those errors replace the success.

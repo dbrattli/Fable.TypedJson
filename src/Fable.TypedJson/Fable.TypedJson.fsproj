@@ -12,9 +12,15 @@
   <ItemGroup>
     <Compile Include="Backend.fs" />
     <Compile Include="Casing.fs" />
+    <!-- Ahead of both Schema.fs and Codec.fs: they are the two callers whose
+         copies of the primitive coercion rules used to drift apart. -->
+    <Compile Include="Primitives.fs" />
     <Compile Include="Schema.fs" />
     <Compile Include="Codec.fs" />
     <Compile Include="Refined.fs" />
+    <!-- The single type-walker. After Schema.fs (it uses the reflection and
+         registry helpers there) and before TypedJson.fs (which builds on it). -->
+    <Compile Include="Plan.fs" />
     <Compile Include="TypedJson.fs" />
     <Compile Include="JsonSchemaGen.fs" />
   </ItemGroup>

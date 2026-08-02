@@ -19,22 +19,31 @@ open type Scriptorium.Quill.Test
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+
+let backend = python
 #else
 #if JS
 open Fable.TypedJson.JS.Json
+
+let backend = js
 #else
 #if DOTNET
 open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
 #else
 open Fable.TypedJson.Beam.Json
+
+let backend = beam
 #endif
 #endif
 #endif
 
-// Note: we deliberately do NOT `open Fable.TypedJson.Codec` because its
-// `int`, `string`, `float`, `bool` codec values would shadow F# core
-// type conversion functions. Use `Codec.int` etc. throughout.
-module Codec = Fable.TypedJson.Codec
+// `open Fable.TypedJson` brings the module NAME `Codec` into scope without
+// opening it, so `Codec.int` resolves and F#'s `int` is never shadowed. No
+// module alias needed — and `[<RequireQualifiedAccess>]` on the module makes
+// the shadowing impossible even for someone who tries to open it.
+open Fable.TypedJson
 
 // ============================================================================
 // Pipeline composition (Pydantic Annotated equivalent, no new type)
@@ -107,6 +116,101 @@ let private pipelineCompositionTests =
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
                     | Error msg -> assertThat msg (isEqualTo "must be non-empty")
             )
+        ]
+    )
+
+// ============================================================================
+// Primitive codecs agree with Schema.coerce
+// ============================================================================
+
+(**
+`Codec.int` / `int64` / `float` / `string` / `bool` and the primitive arms of
+`Schema.coerce` used to implement the same coercion rules independently, and
+drifted apart. Both now call `Primitives`, so these pin the shared behaviour
+against a future re-fork.
+
+invariant: a primitive codec and the matching `coerce` arm produce the same value for the same input
+*)
+let private primitiveAgreementTests =
+    testList (
+        "Primitive codecs agree with Schema.coerce",
+        [
+            test (
+                "float codec parses a decimal string",
+                fun _ ->
+                    // Pinned to InvariantCulture: on a `.`-as-thousands locale
+                    // the parameterless CLR overload reads "22.5" as 225.
+                    match Codec.float.Decode(JString "22.5") with
+                    | Ok f -> assertThat f (isEqualTo 22.5)
+                    | Error msg -> assertThat msg (isEqualTo "Ok")
+            )
+            test (
+                "string codec renders a float without padding",
+                fun _ ->
+                    // `sprintf "%f"` would give "3.140000"; coerce gives "3.14".
+                    match Codec.string.Decode(JFloat 3.14) with
+                    | Ok s -> assertThat s (isEqualTo "3.14")
+                    | Error msg -> assertThat msg (isEqualTo "Ok")
+            )
+            test (
+                "int64 codec encodes a value beyond Int32 without wrapping",
+                fun _ ->
+                    // 3_000_000_000L wrapped to -1_294_967_296 through JInt.
+                    match Codec.int64.Encode 3000000000L with
+                    | JFloat f -> assertThat f (isEqualTo 3000000000.0)
+                    | other -> assertThat (sprintf "%A" other) (isEqualTo "JFloat 3000000000.0")
+            )
+            test (
+                "int64 codec still encodes in-range values as integers",
+                fun _ ->
+                    match Codec.int64.Encode 42L with
+                    | JInt n -> assertThat n (isEqualTo 42)
+                    | other -> assertThat (sprintf "%A" other) (isEqualTo "JInt 42")
+            )
+            test (
+                "int64 codec round-trips a large value through a string",
+                fun _ ->
+                    match Codec.int64.Decode(JString "3000000000") with
+                    | Ok n -> assertThat n (isEqualTo 3000000000L)
+                    | Error msg -> assertThat msg (isEqualTo "Ok")
+            )
+#if DOTNET
+            (**
+            The locale guarantee, exercised rather than assumed. Only the CLR
+            has an ambient thread culture to get this wrong — Fable backends
+            lower to native, locale-immune float handling — so this is a
+            .NET-only test rather than a `skipIf` on the others.
+
+            Under `de-DE`, `,` is the decimal separator and `.` groups
+            thousands, so an unpinned `Double.TryParse` reads "22.5" as 225 —
+            verified: dropping the pin fails this with `225.0`.
+
+            The render half passes without a pin because F#'s `string` operator
+            is already invariant for primitives (unlike `x.ToString()`). It is
+            asserted here anyway so a switch to a culture-sensitive formatter
+            cannot pass unnoticed.
+
+            invariant: float text is `.`-decimal on the wire regardless of ambient culture
+            *)
+            test (
+                "float parse and render ignore the ambient culture",
+                fun _ ->
+                    let original = System.Globalization.CultureInfo.CurrentCulture
+
+                    try
+                        System.Globalization.CultureInfo.CurrentCulture <- System.Globalization.CultureInfo.GetCultureInfo "de-DE"
+
+                        match Codec.float.Decode(JString "22.5") with
+                        | Ok f -> assertThat f (isEqualTo 22.5)
+                        | Error msg -> assertThat msg (isEqualTo "Ok")
+
+                        match Codec.string.Decode(JFloat 3.14) with
+                        | Ok s -> assertThat s (isEqualTo "3.14")
+                        | Error msg -> assertThat msg (isEqualTo "Ok")
+                    finally
+                        System.Globalization.CultureInfo.CurrentCulture <- original
+            )
+#endif
         ]
     )
 
@@ -184,6 +288,41 @@ let private namedWrapperTypeTests =
                         let formatted = formatErrors errs
                         assertThat (formatted.Contains("must be > 0")) isTrue
             )
+            (**
+            A registered codec must drive BOTH directions. `register` stores an
+            `encode` closure alongside `decode`, so a `DayCount` field is
+            expected to encode as the underlying `7`, exactly as it decodes.
+
+            invariant: a value that decodes through a registered codec re-encodes through the same codec
+            *)
+            test (
+                "auto with custom codec encodes through the codec",
+                fun _ ->
+                    let codec =
+                        autoWith<Req> codecs
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let json = codec.encode { Days = DayCount 7; Name = "hello" }
+                    let parsed = parseRaw json
+                    assertThat (getInt backend parsed "days") (isEqualTo 7)
+                    assertThat (getString backend parsed "name") (isEqualTo "hello")
+            )
+            test (
+                "auto with custom codec round-trips",
+                fun _ ->
+                    let codec =
+                        autoWith<Req> codecs
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let original = { Days = DayCount 7; Name = "hello" }
+
+                    match codec.decode (parseRaw (codec.encode original)) with
+                    | Ok r ->
+                        let (DayCount n) = r.Days
+                        assertThat n (isEqualTo 7)
+                        assertThat r.Name (isEqualTo "hello")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
         ]
     )
 
@@ -255,4 +394,12 @@ let private withModelTests =
     )
 
 let tests =
-    testList ("Codec", [ pipelineCompositionTests; namedWrapperTypeTests; withModelTests ])
+    testList (
+        "Codec",
+        [
+            pipelineCompositionTests
+            primitiveAgreementTests
+            namedWrapperTypeTests
+            withModelTests
+        ]
+    )
