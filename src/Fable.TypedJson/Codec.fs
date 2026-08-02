@@ -71,7 +71,22 @@ let int64: IJsonCodec<int64> =
                 | true, n -> Ok n
                 | _ -> Error(sprintf "cannot parse '%s' as int64" s)
             | _ -> Error "expected int64")
-        (fun n -> JInt(Microsoft.FSharp.Core.Operators.int n))
+        // `JsonValue` has no 64-bit integer case, and an unconditional
+        // `JInt(int n)` silently WRAPS past Int32 range — 3_000_000_000L
+        // encoded as -1_294_967_296. Stay on `JInt` while the value fits (so
+        // ordinary values are unchanged) and fall back to `JFloat`, which is
+        // exact to 2^53 and never wraps, beyond it.
+        // tradeoff: values above 2^53 lose precision — accepted; the alternative is a new JsonValue case
+        (fun n ->
+            if
+                n
+                >= Microsoft.FSharp.Core.Operators.int64 System.Int32.MinValue
+                && n
+                   <= Microsoft.FSharp.Core.Operators.int64 System.Int32.MaxValue
+            then
+                JInt(Microsoft.FSharp.Core.Operators.int n)
+            else
+                JFloat(Microsoft.FSharp.Core.Operators.float n))
         (primitiveSchema "integer")
 
 let float: IJsonCodec<float> =
@@ -81,7 +96,20 @@ let float: IJsonCodec<float> =
             | JFloat f -> Ok f
             | JInt n -> Ok(float n)
             | JString s ->
+                // JSON numbers are always `.`-as-decimal per RFC 8259. On the
+                // CLR the parameterless overload uses the thread culture, which
+                // on `.`-as-thousands locales (es/fr/de/...) misparses "22.5"
+                // as 225 — pin InvariantCulture. Fable backends transpile to
+                // locale-immune native parsers and don't implement the 3-arg
+                // overload, so the short form is correct there. Same split as
+                // `Schema.coerce`'s float arm, which this must agree with.
+#if FABLE_COMPILER
                 match System.Double.TryParse s with
+#else
+                match
+                    System.Double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture)
+                with
+#endif
                 | true, f -> Ok f
                 | _ -> Error(sprintf "cannot parse '%s' as float" s)
             | _ -> Error "expected float")
@@ -94,7 +122,10 @@ let string: IJsonCodec<string> =
             match jv with
             | JString s -> Ok s
             | JInt n -> Ok(sprintf "%d" n)
-            | JFloat f -> Ok(sprintf "%f" f)
+            // `string f`, not `sprintf "%f" f` — the latter pads to a fixed 6
+            // decimals, so 3.14 became "3.140000" here while `Schema.coerce`'s
+            // string arm produced "3.14" for the same input.
+            | JFloat f -> Ok(string f)
             | JBool b -> Ok(if b then "true" else "false")
             | _ -> Error "expected string")
         (fun s -> JString s)

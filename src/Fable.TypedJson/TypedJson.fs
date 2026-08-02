@@ -214,71 +214,111 @@ let resolveKey (aliases: Map<string, string>) (caseRules: CaseRules) (fieldName:
 /// inside an `inline` function triggers a Fable BEAM codegen bug (captures
 /// lower to `undefined`). At module scope with explicit parameters the bug
 /// doesn't apply — same pattern as Schema.fs `coerce` / `resolveRecord`.
-let rec transformValue (backend: IJsonBackend) (aliases: Map<string, string>) (rules: CaseRules) (t: System.Type) (v: obj) : obj =
+let rec transformValue
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (aliases: Map<string, string>)
+    (rules: CaseRules)
+    (t: System.Type)
+    (v: obj)
+    : obj =
     if isNull v then
         v
     elif isOptionType t.FullName then
         match extractOption v with
-        | Some inner -> transformValue backend aliases rules (getGenericInnerType t) inner
+        | Some inner -> transformValue backend registry aliases rules (getGenericInnerType t) inner
         | None -> backend.Null
     elif isFSharpListType t.FullName then
         let elementType = getGenericInnerType t
 
         extractList v
-        |> List.map (transformValue backend aliases rules elementType)
+        |> List.map (transformValue backend registry aliases rules elementType)
         |> backend.BuildArray
     elif t.IsArray then
         let elementType = t.GetElementType()
 
-        unbox<obj[]> v
-        |> Array.toList
-        |> List.map (transformValue backend aliases rules elementType)
+        // `extractArray`, not `unbox<obj[]>` — CLR array covariance covers
+        // reference types only, so the unbox raises on `int[]` / `float[]`.
+        extractArray v
+        |> List.map (transformValue backend registry aliases rules elementType)
         |> backend.BuildArray
-    elif FSharpType.IsRecord t then
-        Encode.object backend (recordEntries backend aliases rules t v)
-    elif FSharpType.IsUnion t then
-        // Tagged DU: emit `{type: "<caseName>", ...payload}`. For a fieldless
-        // case, just `{type: "..."}`. For a single record-field case, flatten
-        // the record's keys alongside the discriminator. Other shapes are
-        // unsupported in v1 (matches Schema.coerceUnion).
-        //
-        // Tag value follows the codec's CaseRules — e.g., SnakeCase produces
-        // `ToolUse` → `"tool_use"`. Decode side mirrors this via the
-        // `tagTransform` passed into `Schema.auto`.
-        let caseInfo, caseValues = FSharpValue.GetUnionFields(v, t)
-        let tag = applyCaseRule rules caseInfo.Name
-        let caseFields = caseInfo.GetFields()
-        let baseEntry = (discriminatorKey, box tag)
-
-        // `caseValues : obj[]` has a different runtime shape on each Fable
-        // backend (process-dict ref on BEAM, GenericArray on Python, native
-        // array on .NET). Going through `backend.ArrayLength` / `ArrayAt`
-        // gives uniform access.
-        let payloadCount = backend.ArrayLength(box caseValues)
-
-        let payload =
-            if payloadCount > 0 then
-                Some(backend.ArrayAt(box caseValues, 0))
-            else
-                None
-
-        match caseFields.Length, payload with
-        | 0, _
-        | _, None -> Encode.object backend [ baseEntry ]
-        | 1, Some payloadValue ->
-            let payloadType = caseFields.[0].PropertyType
-
-            if FSharpType.IsRecord payloadType then
-                let payloadEntries = recordEntries backend aliases rules payloadType payloadValue
-                Encode.object backend (baseEntry :: payloadEntries)
-            else
-                // Non-record single-field cases not supported in v1.
-                Encode.object backend [ baseEntry ]
-        | _ ->
-            // Multi-positional-field cases not supported in v1.
-            Encode.object backend [ baseEntry ]
-    else
+    // Primitives pass through untouched, and are tested BEFORE the registry so
+    // encode dispatch matches `Schema.coerce`, which also resolves primitives
+    // ahead of any registered codec.
+    elif isPrimitiveType t.FullName then
         v
+    else
+        // Non-structural dispatch. Mirrors `Schema.coerce`'s tail exactly:
+        // a user-registered codec wins first, then record, then union.
+        //
+        // The registry check is what makes encode symmetric with decode. Without
+        // it the union branch below claims every single-case wrapper DU
+        // (`DayCount`, `Email`, `NonEmptyString`, ...) and encodes it as
+        // `{"type": "day_count"}`, silently discarding the payload — so a value
+        // that decoded through the registry could not re-encode through it.
+        //
+        // invariant: a type in the registry round-trips through its codec in both directions
+        match tryGetCodecEntry t.FullName registry with
+        | Some entry -> fromJsonValue backend (entry.encode v)
+        | None ->
+
+            if FSharpType.IsRecord t then
+                Encode.object backend (recordEntries backend registry aliases rules t v)
+            elif FSharpType.IsUnion t then
+                // Tagged DU: emit `{type: "<caseName>", ...payload}`. For a fieldless
+                // case, just `{type: "..."}`. For a single record-field case, flatten
+                // the record's keys alongside the discriminator. Other shapes are
+                // unsupported in v1 (matches Schema.coerceUnion).
+                //
+                // Tag value follows the codec's CaseRules — e.g., SnakeCase produces
+                // `ToolUse` → `"tool_use"`. Decode side mirrors this via the
+                // `tagTransform` passed into `Schema.auto`.
+                let caseInfo, caseValues = FSharpValue.GetUnionFields(v, t)
+                let tag = applyCaseRule rules caseInfo.Name
+                let caseFields = caseInfo.GetFields()
+                let baseEntry = (discriminatorKey, box tag)
+
+                // `caseValues : obj[]` has a different runtime shape on each Fable
+                // backend (process-dict ref on BEAM, GenericArray on Python, native
+                // array on .NET). Going through `backend.ArrayLength` / `ArrayAt`
+                // gives uniform access.
+                let payloadCount = backend.ArrayLength(box caseValues)
+
+                let payload =
+                    if payloadCount > 0 then
+                        Some(backend.ArrayAt(box caseValues, 0))
+                    else
+                        None
+
+                match caseFields.Length, payload with
+                | 0, _
+                | _, None -> Encode.object backend [ baseEntry ]
+                | 1, Some payloadValue ->
+                    let payloadType = caseFields.[0].PropertyType
+
+                    if FSharpType.IsRecord payloadType then
+                        let payloadEntries =
+                            recordEntries backend registry aliases rules payloadType payloadValue
+
+                        Encode.object backend (baseEntry :: payloadEntries)
+                    else
+                        // Non-record single-field cases are unsupported in v1, and
+                        // `Schema.resolveUnionFromLookup` rejects them on decode.
+                        // Encode used to emit a bare `{"type": "..."}` here, which
+                        // silently discarded the payload and produced JSON that
+                        // could not be read back. Fail instead — a wrapper type
+                        // wants a registered `IJsonCodec`, which the registry
+                        // branch above resolves.
+                        failwithf
+                            "union case %s has a non-record payload (%s); not supported in v1 — register an IJsonCodec for %s instead"
+                            caseInfo.Name
+                            payloadType.Name
+                            t.Name
+                | n, _ ->
+                    // Multi-positional-field cases: same reasoning as above.
+                    failwithf "union case %s has %d positional fields; multi-field cases are not supported in v1" caseInfo.Name n
+            else
+                v
 
 /// Walk a record's fields, applying caseRules + aliases to each key and
 /// recursively transforming each value via `transformValue`. Optional fields
@@ -291,6 +331,7 @@ let rec transformValue (backend: IJsonBackend) (aliases: Map<string, string>) (r
 /// already have from the static `recordType`, so it works on every backend.
 and recordEntries
     (backend: IJsonBackend)
+    (registry: CodecRegistry)
     (aliases: Map<string, string>)
     (rules: CaseRules)
     (recordType: System.Type)
@@ -304,17 +345,23 @@ and recordEntries
 
         if isOptionType fi.PropertyType.FullName then
             match extractOption fv with
-            | Some inner -> Some(jsonKey, transformValue backend aliases rules (getGenericInnerType fi.PropertyType) inner)
+            | Some inner -> Some(jsonKey, transformValue backend registry aliases rules (getGenericInnerType fi.PropertyType) inner)
             | None -> None
         else
-            Some(jsonKey, transformValue backend aliases rules fi.PropertyType fv))
+            Some(jsonKey, transformValue backend registry aliases rules fi.PropertyType fv))
 
 /// Pre-bake a per-field transformer. `transformValue` dispatches on
 /// `System.Type` characteristics, and that dispatch is identical on every
 /// call for a given field type. Resolve it once per field and capture the
 /// appropriate closure: `id` for primitives, specialised closures for
 /// option/list/array/record/union.
-let buildTransformer (backend: IJsonBackend) (aliases: Map<string, string>) (rules: CaseRules) (innerType: System.Type) : obj -> obj =
+let buildTransformer
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (aliases: Map<string, string>)
+    (rules: CaseRules)
+    (innerType: System.Type)
+    : obj -> obj =
     let fn = innerType.FullName
 
     if isOptionType fn then
@@ -322,27 +369,37 @@ let buildTransformer (backend: IJsonBackend) (aliases: Map<string, string>) (rul
 
         fun v ->
             match extractOption v with
-            | Some inner -> transformValue backend aliases rules valueType inner
+            | Some inner -> transformValue backend registry aliases rules valueType inner
             | Option.None -> backend.Null
     elif isFSharpListType fn then
         let elementType = getGenericInnerType innerType
 
         fun v ->
             extractList v
-            |> List.map (fun item -> transformValue backend aliases rules elementType item)
+            |> List.map (fun item -> transformValue backend registry aliases rules elementType item)
             |> backend.BuildArray
     elif innerType.IsArray then
         let elementType = innerType.GetElementType()
 
         fun v ->
-            unbox<obj[]> v
-            |> Array.toList
-            |> List.map (fun item -> transformValue backend aliases rules elementType item)
+            // See `transformValue`'s array branch — `unbox<obj[]>` raises for
+            // value-type element arrays on the CLR.
+            extractArray v
+            |> List.map (fun item -> transformValue backend registry aliases rules elementType item)
             |> backend.BuildArray
+    // Primitive: identity, and tested ahead of the registry to match
+    // `transformValue` and `Schema.coerce`.
+    elif isPrimitiveType fn then
+        id
+    // Registered codec. Must precede the record / union tests for the same
+    // reason `transformValue` checks the registry first — a wrapper DU would
+    // otherwise be claimed by the union branch.
+    elif (tryGetCodecEntry fn registry).IsSome then
+        fun v -> transformValue backend registry aliases rules innerType v
     elif FSharpType.IsRecord innerType then
-        fun v -> transformValue backend aliases rules innerType v
+        fun v -> transformValue backend registry aliases rules innerType v
     elif FSharpType.IsUnion innerType then
-        fun v -> transformValue backend aliases rules innerType v
+        fun v -> transformValue backend registry aliases rules innerType v
     else
         // Primitive (string / int / float / bool / ...): identity — matches
         // `transformValue`'s `else v` branch.
@@ -450,7 +507,7 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // call site and passes the inner value to `transformers.[i]`.
         let defaultTransformers =
             defaultInnerTypes
-            |> Array.map (buildTransformer backend aliases caseRules)
+            |> Array.map (buildTransformer backend registry aliases caseRules)
 
         let encodeWith (rules: CaseRules) (record: 'T) : string =
             // Top-level dispatch mirrors decode (Schema.auto): record →
@@ -475,13 +532,13 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
 
                         let transformers =
                             defaultInnerTypes
-                            |> Array.map (buildTransformer backend aliases rules)
+                            |> Array.map (buildTransformer backend registry aliases rules)
 
                         encodeRecordValues backend fields jsonKeys defaultIsOpts transformers boxed
 
                 map |> Encode.toJson backend
             elif FSharpType.IsUnion typ then
-                transformValue backend aliases rules typ (box record)
+                transformValue backend registry aliases rules typ (box record)
                 |> Encode.toJson backend
             else
                 Encode.toJson backend (box record)
@@ -502,6 +559,29 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
 /// Auto codec with the default empty codec registry. Use `autoWith` to pass a registry of custom codecs.
 let inline auto<'T> (backend: IJsonBackend) : TypedJson<'T> =
     autoWith<'T> backend Fable.TypedJson.Schema.emptyRegistry
+
+(**
+Dump a record to a backend-native JSON map (e.g. for inter-process messaging).
+
+Routed through `transformValue`, the same walker the codec's encode path uses,
+rather than a separate top-level-only fold. Two things follow from that: nested
+records, lists and options are transformed instead of being written verbatim,
+and the key derivation is shared instead of duplicated —
+`resolveKey Map.empty CaseRules.LowerFirst` produces exactly the camelCase key
+`Schema.lowerFirstTransform` does, which is what `validateJson` reads back.
+
+The non-recursive version emitted a nested record in whatever spelling the
+backend's own reflection used, so `validateJson` could not find its keys and
+the round-trip invariant held only for flat records.
+
+invariant: `dump` and `validateJson` agree on every key, at every depth
+*)
+let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
+    transformValue backend Fable.TypedJson.Schema.emptyRegistry Map.empty CaseRules.LowerFirst typeof<'T> (box record)
+
+/// Dump a record to a backend-native JSON map, resolving registered codecs.
+let inline dumpWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (record: 'T) : obj =
+    transformValue backend registry Map.empty CaseRules.LowerFirst typeof<'T> (box record)
 
 /// Shorthand: create auto codec and decode in one call (uses the codec's default `LowerFirst`).
 let inline validate<'T> (backend: IJsonBackend) (map: JsonMap) : Result<'T, FieldError list> = (auto<'T> backend).decode map

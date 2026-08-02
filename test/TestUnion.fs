@@ -277,5 +277,64 @@ let private snakeCaseDiscriminatorTests =
         ]
     )
 
+// ============================================================================
+// Unsupported union shapes fail loudly on encode
+// ============================================================================
+
+(**
+v1 supports fieldless cases and single-record-payload cases. Decode rejects
+everything else with a clear `FieldError`. Encode used to emit a bare
+`{"type": "..."}` for those same shapes, silently discarding the payload — so
+a value could encode to JSON that would not decode back, with no signal.
+
+`encode` returns a `string`, so there is nowhere to put a `Result`; raising is
+the only way to surface it. A wrapper type that wants real encoding should
+register an `IJsonCodec`, which takes precedence over this branch.
+
+invariant: encode never emits a union payload-dropping placeholder — it raises instead
+adr: raise rather than return a partial encoding — silent data loss is the worse failure
+*)
+type Shape =
+    | Circle of float
+    | Square of float
+
+type Segment = At of int * int
+
+let private unsupportedUnionShapeTests =
+    testList (
+        "Unsupported union shapes fail loudly on encode",
+        [
+            test (
+                "non-record single-field case raises on encode",
+                fun _ ->
+                    let codec = auto<Shape> ()
+                    assertThat (fun () -> codec.encode (Circle 1.5) |> ignore) throws
+            )
+            test (
+                "multi-positional-field case raises on encode",
+                fun _ ->
+                    let codec = auto<Segment> ()
+                    assertThat (fun () -> codec.encode (At(1, 2)) |> ignore) throws
+            )
+            test (
+                "decode rejects the same shapes it cannot encode",
+                fun _ ->
+                    let codec = auto<Shape> ()
+
+                    match codec.decode (parseRaw """{"type":"circle"}""") with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errs -> assertThat ((formatErrors errs).Contains "not supported in v1") isTrue
+            )
+        ]
+    )
+
 let tests =
-    testList ("Union", [ topLevelUnionTests; unionAsRecordFieldTests; snakeCaseDiscriminatorTests ])
+    testList (
+        "Union",
+        [
+            topLevelUnionTests
+            unionAsRecordFieldTests
+            snakeCaseDiscriminatorTests
+            unsupportedUnionShapeTests
+        ]
+    )

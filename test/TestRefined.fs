@@ -16,14 +16,22 @@ open type Scriptorium.Quill.Test
 
 #if PYTHON
 open Fable.TypedJson.Python.Json
+
+let backend = python
 #else
 #if JS
 open Fable.TypedJson.JS.Json
+
+let backend = js
 #else
 #if DOTNET
 open Fable.TypedJson.DotNet.Json
+
+let backend = dotnet
 #else
 open Fable.TypedJson.Beam.Json
+
+let backend = beam
 #endif
 #endif
 #endif
@@ -284,6 +292,67 @@ let private endToEndTests =
         ]
     )
 
+// ============================================================================
+// Refined types encode back to their underlying value
+// ============================================================================
+
+(**
+The bundled refined types are single-case DUs, so without a registry check on
+the encode path the tagged-DU branch claims them and emits
+`{"username": {"type": "non_empty_string"}}` — the value is silently lost, and
+a record that decoded cleanly cannot be re-encoded.
+
+invariant: a refined field encodes as its underlying primitive, never as a tagged DU
+*)
+let private refinedEncodeTests =
+    testList (
+        "Refined types encode back to their underlying value",
+        [
+            test (
+                "refined fields encode as their underlying primitives",
+                fun _ ->
+                    let codec =
+                        autoWith<Account> codecs
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let json =
+                        codec.encode {
+                            Username = NonEmptyString "alice"
+                            Age = NonNegativeInt 30
+                            Contact = Email "alice@example.com"
+                        }
+
+                    let parsed = parseRaw json
+                    assertThat (getString backend parsed "username") (isEqualTo "alice")
+                    assertThat (getInt backend parsed "age") (isEqualTo 30)
+                    assertThat (getString backend parsed "contact") (isEqualTo "alice@example.com")
+            )
+            test (
+                "record of refined types round-trips",
+                fun _ ->
+                    let codec =
+                        autoWith<Account> codecs
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let original = {
+                        Username = NonEmptyString "alice"
+                        Age = NonNegativeInt 30
+                        Contact = Email "alice@example.com"
+                    }
+
+                    match codec.decode (parseRaw (codec.encode original)) with
+                    | Ok r ->
+                        let (NonEmptyString u) = r.Username
+                        assertThat u (isEqualTo "alice")
+                        let (NonNegativeInt a) = r.Age
+                        assertThat a (isEqualTo 30)
+                        let (Email e) = r.Contact
+                        assertThat e (isEqualTo "alice@example.com")
+                    | Error errs -> assertThat (formatErrors errs) (isEqualTo "Ok")
+            )
+        ]
+    )
+
 let tests =
     testList (
         "Refined",
@@ -295,5 +364,6 @@ let tests =
             urlTests
             uuidTests
             endToEndTests
+            refinedEncodeTests
         ]
     )

@@ -39,7 +39,7 @@ let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError li
     Fable.TypedJson.Schema.validateMap<'T> dotnet map
 
 let inline dump<'T> (record: 'T) : obj =
-    Fable.TypedJson.Schema.dump<'T> dotnet record
+    Fable.TypedJson.Json.dump<'T> dotnet record
 
 /// Generate a JSON Schema document for record type `'T`. Uses the supplied
 /// `CodecRegistry` for custom-codec types and `caseRules` to map F# field

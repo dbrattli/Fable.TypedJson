@@ -36,8 +36,7 @@ let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
 let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError list> =
     Fable.TypedJson.Schema.validateMap<'T> js map
 
-let inline dump<'T> (record: 'T) : obj =
-    Fable.TypedJson.Schema.dump<'T> js record
+let inline dump<'T> (record: 'T) : obj = Fable.TypedJson.Json.dump<'T> js record
 
 /// Generate a JSON Schema document for record type `'T`. Uses the supplied
 /// `CodecRegistry` for custom-codec types and `caseRules` to map F# field

@@ -194,6 +194,19 @@ adr: dispatch by FullName string -- preserved on BEAM by Fable codegen
 // Reflection Helpers
 // ============================================================================
 
+/// True for the primitive types `coerce` resolves directly, ahead of any
+/// registered codec. Encode-side dispatch consults this for the same reason,
+/// so a codec registered against e.g. `System.Int32` is inert in BOTH
+/// directions rather than taking effect on encode only.
+///
+/// invariant: primitive dispatch precedes registry dispatch on both the decode and encode paths
+let isPrimitiveType (fullName: string) : bool =
+    fullName = "System.String"
+    || fullName = "System.Int32"
+    || fullName = "System.Int64"
+    || fullName = "System.Double"
+    || fullName = "System.Boolean"
+
 let isOptionType (fullName: string) : bool =
     fullName.StartsWith("Microsoft.FSharp.Core.FSharpOption")
 
@@ -227,6 +240,14 @@ let inline buildOption (_innerType: System.Type) (v: obj) : obj = box (Some v)
 /// Build a `'elementType list` from an `obj list`. Same erasure rationale
 /// as `buildOption`.
 let inline buildList (_elementType: System.Type) (xs: obj list) : obj = box xs
+
+/// Read a `'T[]` as an `obj list`. Erasure makes every array share a runtime
+/// representation on Fable, so the unbox is free.
+let inline extractArray (v: obj) : obj list = unbox<obj[]> v |> List.ofArray
+
+/// Build a `'elementType[]` from an `obj list`. Same erasure rationale as
+/// `buildList`.
+let inline buildArray (_elementType: System.Type) (xs: obj list) : obj = box (List.toArray xs)
 #else
 let extractOption (v: obj) : obj option =
     if isNull v then
@@ -278,6 +299,23 @@ let buildList (elementType: System.Type) (xs: obj list) : obj =
         acc <- FSharpValue.MakeUnion(consCase, [| x; acc |])
 
     acc
+
+/// Read a `'T[]` as an `obj list`. Goes through the non-generic `System.Array`
+/// rather than `unbox<obj[]>`: CLR array covariance covers reference types
+/// only, so `unbox<obj[]> (box [| 1; 2 |])` raises `InvalidCastException` for
+/// every value-type element.
+let extractArray (v: obj) : obj list =
+    let arr = v :?> System.Array
+    [ for i in 0 .. arr.Length - 1 -> arr.GetValue i ]
+
+/// Build a typed `'elementType[]` from an `obj list`. The counterpart to
+/// `buildList` that the array path was missing: a plain `List.toArray` yields
+/// `obj[]`, and `FSharpValue.MakeRecord` rejects it for an `int[]` field — and
+/// for a `string[]` field too, since assignment checks exact array type.
+let buildArray (elementType: System.Type) (xs: obj list) : obj =
+    let arr = System.Array.CreateInstance(elementType, List.length xs)
+    xs |> List.iteri (fun i x -> arr.SetValue(x, i))
+    box arr
 #endif
 
 let getOptionInnerFullName (fi: System.Reflection.PropertyInfo) : string =
@@ -340,6 +378,22 @@ let toJsonValue (backend: IJsonBackend) (fv: obj) : JsonValue =
         JMap fv
     else
         failwithf "toJsonValue: unrecognised value of type %s" (fv.GetType().FullName)
+
+/// Unwrap a `JsonValue` handed back by a user codec's `Encode` into the
+/// backend-native form the encode path builds maps out of. The inverse of
+/// `toJsonValue`, and the encode-side counterpart to `CodecEntry.decode`.
+///
+/// `JArray` / `JMap` payloads are already backend-native (that is what
+/// `toJsonValue` put in them), so they pass straight through.
+let fromJsonValue (backend: IJsonBackend) (jv: JsonValue) : obj =
+    match jv with
+    | JString s -> box s
+    | JInt n -> box n
+    | JFloat f -> box f
+    | JBool b -> box b
+    | JNull -> backend.Null
+    | JArray a -> a
+    | JMap m -> m
 
 /// Render a backend-native value as a short human-readable string for
 /// error messages — replaces the JsonValue pattern match the old
@@ -572,8 +626,11 @@ and coerceArray
     (elementType: System.Type)
     (fv: obj)
     : Result<obj, string> =
+    // `buildArray`, not `List.toArray >> box` — the latter produces `obj[]`,
+    // which `FSharpValue.MakeRecord` refuses to assign to a `'T[]` field on the
+    // CLR. Mirrors `coerceList`'s use of `buildList` for the same reason.
     coerceElements backend registry keyTransform tagTransform elementType fv
-    |> Result.map (List.toArray >> box)
+    |> Result.map (buildArray elementType)
 
 and resolveRecord
     (backend: IJsonBackend)
@@ -960,25 +1017,7 @@ let inline validateJson<'T> (backend: IJsonBackend) (map: obj) : Result<'T, Fiel
 let inline validateJsonWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: obj) : Result<'T, FieldError list> =
     (auto<'T> backend registry lowerFirstTransform lowerFirstTransform) (jsonMapAdapter backend map)
 
-/// Dump a record to a backend-native JSON map (e.g., for inter-process messaging).
-let inline dump<'T> (backend: IJsonBackend) (record: 'T) : obj =
-    let typ = typeof<'T>
-    let fields = FSharpType.GetRecordFields typ
-    let values = FSharpValue.GetRecordFields(box record)
-
-    // Reflection reports the F# field name on every target, so
-    // `lowerFirstTransform` puts the same camelCase key in the dumped map
-    // regardless of backend. This is the mirror of the `validateJson` /
-    // `validateString` key transform — dump and validate must agree.
-    Array.zip fields values
-    |> Array.fold
-        (fun acc (fi, v) ->
-            let key = lowerFirstTransform fi.Name
-
-            if isOptionType fi.PropertyType.FullName then
-                match extractOption v with
-                | Some inner -> backend.Put(acc, key, inner)
-                | None -> acc
-            else
-                backend.Put(acc, key, v))
-        (backend.NewMap())
+// `dump` lives in `Fable.TypedJson.Json` — it needs the recursive encode
+// walker, which is defined there because it depends on `CaseRules`. Keeping a
+// second, non-recursive copy here is what let a dumped nested record stop
+// matching what `validateJson` reads back.

@@ -405,6 +405,10 @@ let private formatErrorsTests =
 // dump — Record to BeamMap
 // ============================================================================
 
+type Street = { Street: string; City: string }
+
+type Outer = { Label: string; Inner: Street }
+
 let private dumpTests =
     testList (
         "dump — Record to BeamMap",
@@ -440,6 +444,33 @@ let private dumpTests =
                     let map = dump record
                     let hasEmail = backend.ContainsKey(map, "email")
                     assertThat hasEmail isFalse
+            )
+            (**
+            `dump` walks only the top level: a record-typed field is `Put` into
+            the map verbatim, so whatever the backend's `Stringify` makes of a
+            raw F# record leaks into the output. The stated invariant is that a
+            dumped map validates back — this pins whether that actually holds
+            one level down.
+
+            invariant: `dump` and `validateJson` agree on nested keys, so a nested record round-trips
+            *)
+            test (
+                "dump round-trips a nested record through validateJson",
+                fun _ ->
+                    let original = {
+                        Label = "outer"
+                        Inner = {
+                            Street.Street = "Main 1"
+                            City = "Oslo"
+                        }
+                    }
+
+                    match validateJson<Outer> (dump original) with
+                    | Ok decoded ->
+                        assertThat decoded.Label (isEqualTo "outer")
+                        assertThat decoded.Inner.Street (isEqualTo "Main 1")
+                        assertThat decoded.Inner.City (isEqualTo "Oslo")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
             )
         ]
     )
