@@ -458,24 +458,24 @@ let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : Type
         // Encode side mirrors via `applyCaseRule rules caseInfo.Name`.
         let defaultTagTransform = applyCaseRule caseRules
 
-        let defaultSchemaFn =
-            Fable.TypedJson.Schema.auto<'T> backend registry defaultKeyTransform defaultTagTransform
+        // Resolve the whole type tree once, here. `Schema.auto` pre-baked only
+        // the top-level record and left nested records to re-reflect on every
+        // decode; the plan walks to the leaves, so a nested record now costs
+        // the same per decode as a top-level one.
+        let defaultPlan =
+            Plan.forType backend registry defaultKeyTransform defaultTagTransform typ
 
         let decodeWith (rules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
-            // Fast path: caller didn't override the case rule, reuse the
-            // cached schema. The fall-through rebuilds for the rare case
-            // where decodeWith is invoked with a different rules value.
-            let schemaFn =
+            // Fast path: caller didn't override the case rule, reuse the plan.
+            // The fall-through rebuilds for the rare case where decodeWith is
+            // invoked with a different rules value.
+            let plan =
                 if rules = caseRules then
-                    defaultSchemaFn
+                    defaultPlan
                 else
-                    let keyTransform = resolveKey aliases rules
-                    let tagTransform = applyCaseRule rules
-                    Fable.TypedJson.Schema.auto<'T> backend registry keyTransform tagTransform
+                    Plan.forType backend registry (resolveKey aliases rules) (applyCaseRule rules) typ
 
-            // Schema.resolveField applies `keyTransform` itself before looking
-            // up; passing a raw adapter avoids double-transforming the key.
-            schemaFn (jsonMapAdapter backend map)
+            plan.Decode map |> Result.map unbox<'T>
 
         // Pre-bake the per-field metadata for the default rules so the hot
         // encode path skips per-call `resolveKey`, `isOptionType`, and

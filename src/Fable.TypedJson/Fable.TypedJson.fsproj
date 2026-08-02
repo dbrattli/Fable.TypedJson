@@ -18,6 +18,9 @@
     <Compile Include="Schema.fs" />
     <Compile Include="Codec.fs" />
     <Compile Include="Refined.fs" />
+    <!-- The single type-walker. After Schema.fs (it uses the reflection and
+         registry helpers there) and before TypedJson.fs (which builds on it). -->
+    <Compile Include="Plan.fs" />
     <Compile Include="TypedJson.fs" />
     <Compile Include="JsonSchemaGen.fs" />
   </ItemGroup>

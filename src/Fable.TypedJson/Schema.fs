@@ -398,7 +398,7 @@ let fromJsonValue (backend: IJsonBackend) (jv: JsonValue) : obj =
 /// Render a backend-native value as a short human-readable string for
 /// error messages — replaces the JsonValue pattern match the old
 /// coerce-error path used.
-let private describeValue (backend: IJsonBackend) (fv: obj) : string =
+let describeValue (backend: IJsonBackend) (fv: obj) : string =
     if backend.IsString fv then
         sprintf "string '%s'" (backend.AsString fv)
     elif backend.IsInt fv then
