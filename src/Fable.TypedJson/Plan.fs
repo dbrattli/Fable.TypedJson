@@ -55,6 +55,8 @@ open Fable.TypedJson.Schema
 type Plan = {
     /// backend-native JSON value -> boxed F# value of this node's type
     Decode: obj -> Result<obj, FieldError list>
+    /// boxed F# value of this node's type -> backend-native JSON value
+    Encode: obj -> obj
 }
 
 [<NoComparison; NoEquality>]
@@ -68,6 +70,10 @@ type FieldPlan = {
     Inner: Plan
     /// `id` for a required field, `buildOption innerType` for an optional one
     Wrap: obj -> obj
+    /// Read this field off a boxed record. Per-field `GetRecordField`, never
+    /// `GetRecordFields(box record)` — Fable BEAM lowers a boxed record's type
+    /// to `System.Object`, so the whole-record form cannot recover the fields.
+    Read: obj -> obj
 }
 
 [<NoComparison; NoEquality>]
@@ -75,6 +81,22 @@ type RecordPlan = {
     Fields: FieldPlan[]
     Make: obj[] -> obj
     Title: string
+}
+
+(**
+One case of a tagged DU. Built once per case, and used from both directions:
+decode looks up by wire `Tag`, encode indexes by the case's runtime tag.
+
+invariant: encode and decode read the same case table, so a shape one accepts the other cannot drop
+*)
+[<NoComparison; NoEquality>]
+type CasePlan = {
+    /// wire discriminator value — tag rule already applied
+    Tag: string
+    Info: UnionCaseInfo
+    /// `None` for a fieldless case; `Some` for a single record payload, whose
+    /// keys flatten alongside the discriminator
+    Payload: RecordPlan option
 }
 
 [<NoComparison; NoEquality>]
@@ -136,11 +158,12 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
         planBool b
     else
         match tryGetCodecEntry fullName ctx.Registry with
-        // A user codec wins over compound dispatch. `toJsonValue` is the only
-        // place a `JsonValue` is constructed — it exists solely to cross this
-        // boundary.
+        // A user codec drives BOTH directions. `toJsonValue` / `fromJsonValue`
+        // are the only places a `JsonValue` is built or unwrapped — they exist
+        // solely to cross this boundary.
         | Some entry ->
             let decode = entry.decode
+            let encode = entry.encode
 
             {
                 Decode =
@@ -148,15 +171,16 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
                         match decode (toJsonValue b v) with
                         | Ok x -> Ok x
                         | Error msg -> leafError msg
+                Encode = fun v -> fromJsonValue b (encode v)
             }
         | None ->
 
             // F# list MUST precede the union test: `FSharpList<'T>` is itself a DU,
             // so `IsUnion` returns true for it on the CLR and would mis-route.
             if isFSharpListType fullName then
-                planSeq ctx (getGenericInnerType t) buildList
+                planSeq ctx (getGenericInnerType t) extractList buildList
             elif t.IsArray then
-                planSeq ctx (t.GetElementType()) buildArray
+                planSeq ctx (t.GetElementType()) extractArray buildArray
             elif FSharpType.IsRecord t then
                 if List.contains fullName ctx.Building then
                     planDeferred ctx t
@@ -168,8 +192,15 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
                 else
                     planUnion ctx t
             else
+                // Unknown types pass through on encode, matching the old
+                // `transformValue`'s `else v`, and fail on decode where there
+                // is nothing to construct.
                 let message = sprintf "cannot decode %s" fullName
-                { Decode = fun _ -> leafError message }
+
+                {
+                    Decode = fun _ -> leafError message
+                    Encode = id
+                }
 
 // --- Primitive nodes --------------------------------------------------------
 //
@@ -190,6 +221,8 @@ and private planString (b: IJsonBackend) : Plan = {
                 Ok(box (Primitives.boolToString (b.AsBool v)))
             else
                 leafError (sprintf "cannot coerce %s to System.String" (describeValue b v))
+    // Primitives are already the backend's native form.
+    Encode = id
 }
 
 and private planInt (b: IJsonBackend) : Plan = {
@@ -205,6 +238,8 @@ and private planInt (b: IJsonBackend) : Plan = {
                 | Error msg -> leafError msg
             else
                 leafError (sprintf "cannot coerce %s to System.Int32" (describeValue b v))
+    // Primitives are already the backend's native form.
+    Encode = id
 }
 
 and private planInt64 (b: IJsonBackend) : Plan = {
@@ -220,6 +255,8 @@ and private planInt64 (b: IJsonBackend) : Plan = {
                 | Error msg -> leafError msg
             else
                 leafError (sprintf "cannot coerce %s to System.Int64" (describeValue b v))
+    // Primitives are already the backend's native form.
+    Encode = id
 }
 
 and private planFloat (b: IJsonBackend) : Plan = {
@@ -235,6 +272,8 @@ and private planFloat (b: IJsonBackend) : Plan = {
                 | Error msg -> leafError msg
             else
                 leafError (sprintf "cannot coerce %s to System.Double" (describeValue b v))
+    // Primitives are already the backend's native form.
+    Encode = id
 }
 
 and private planBool (b: IJsonBackend) : Plan = {
@@ -248,6 +287,8 @@ and private planBool (b: IJsonBackend) : Plan = {
                 | Error msg -> leafError msg
             else
                 leafError (sprintf "cannot coerce %s to System.Boolean" (describeValue b v))
+    // Primitives are already the backend's native form.
+    Encode = id
 }
 
 // --- Sequences --------------------------------------------------------------
@@ -264,12 +305,17 @@ array, because the native sequence shape differs per backend.
 adr: fail-fast on the first bad element, unlike record fields which accumulate —
      an element index is rarely actionable in bulk and this keeps one traversal
 *)
-and private planSeq (ctx: BuildCtx) (elementType: System.Type) (build: System.Type -> obj list -> obj) : Plan =
+and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> obj list) (build: System.Type -> obj list -> obj) : Plan =
     let b = ctx.Backend
     let element = forTypeIn ctx elementType
     let expected = sprintf "expected JSON array for %s[]" elementType.Name
 
     {
+        Encode =
+            fun v ->
+                extract v
+                |> List.map element.Encode
+                |> b.BuildArray
         Decode =
             fun v ->
                 if not (b.IsArray v) then
@@ -319,6 +365,7 @@ and private buildRecordPlan (ctx: BuildCtx) (t: System.Type) : RecordPlan =
                 TypeName = innerType.Name
                 Inner = forTypeIn inner innerType
                 Wrap = if isOpt then buildOption innerType else id
+                Read = fun record -> FSharpValue.GetRecordField(record, fi)
             })
 
     {
@@ -370,6 +417,26 @@ and decodeRecordWith (b: IJsonBackend) (rp: RecordPlan) (lookup: string -> obj o
     else
         Error(List.rev errs)
 
+/// Stage 2, encode side. Mirror of `decodeRecordWith`: same field array, same
+/// keys, so the two cannot disagree about what a record looks like on the wire.
+///
+/// adr: an absent optional field emits no key at all, rather than an explicit null
+and encodeRecordInto (b: IJsonBackend) (rp: RecordPlan) (acc0: obj) (record: obj) : obj =
+    let mutable acc = acc0
+
+    for i = 0 to rp.Fields.Length - 1 do
+        let f = rp.Fields.[i]
+        let v = f.Read record
+
+        if f.Optional then
+            match extractOption v with
+            | Some inner -> acc <- b.Put(acc, f.Key, f.Inner.Encode inner)
+            | None -> ()
+        else
+            acc <- b.Put(acc, f.Key, f.Inner.Encode v)
+
+    acc
+
 and private planRecord (ctx: BuildCtx) (t: System.Type) : Plan =
     let b = ctx.Backend
     let rp = buildRecordPlan ctx t
@@ -382,6 +449,7 @@ and private planRecord (ctx: BuildCtx) (t: System.Type) : Plan =
                     decodeRecordWith b rp (mapLookup b v)
                 else
                     leafError expected
+        Encode = fun v -> encodeRecordInto b rp (b.NewMap()) v
     }
 
 // --- Unions -----------------------------------------------------------------
@@ -395,7 +463,7 @@ codec, not on the first document that happens to use that case.
 
 invariant: an unsupported union shape fails at codec construction, never silently at run time
 *)
-and private buildCasePlans (ctx: BuildCtx) (t: System.Type) : Map<string, UnionCaseInfo * RecordPlan option> =
+and buildCasePlans (ctx: BuildCtx) (t: System.Type) : CasePlan[] =
     let inner = {
         ctx with
             Building = t.FullName :: ctx.Building
@@ -421,12 +489,21 @@ and private buildCasePlans (ctx: BuildCtx) (t: System.Type) : Map<string, UnionC
                         t.Name
             | n -> failwithf "union case %s has %d positional fields; multi-field cases are not supported in v1" caseInfo.Name n
 
-        ctx.TagTransform caseInfo.Name, (caseInfo, payload))
+        {
+            Tag = ctx.TagTransform caseInfo.Name
+            Info = caseInfo
+            Payload = payload
+        })
+
+/// Decode-side view: wire tag -> case.
+and casesByTag (cases: CasePlan[]) : Map<string, CasePlan> =
+    cases
+    |> Array.map (fun c -> c.Tag, c)
     |> Map.ofArray
 
 and decodeUnionWith
     (b: IJsonBackend)
-    (cases: Map<string, UnionCaseInfo * RecordPlan option>)
+    (cases: Map<string, CasePlan>)
     (typeName: string)
     (lookup: string -> obj option)
     : Result<obj, FieldError list> =
@@ -449,12 +526,14 @@ and decodeUnionWith
                     message = sprintf "no case in %s matches discriminator value '%s'" typeName tag
                 }
             ]
-        | Some(caseInfo, None) -> Ok(FSharpValue.MakeUnion(caseInfo, [||]))
-        | Some(caseInfo, Some rp) ->
-            // The payload record shares the outer lookup — its keys sit
-            // alongside the discriminator rather than nested under it.
-            decodeRecordWith b rp lookup
-            |> Result.map (fun payload -> FSharpValue.MakeUnion(caseInfo, [| payload |]))
+        | Some c ->
+            match c.Payload with
+            | None -> Ok(FSharpValue.MakeUnion(c.Info, [||]))
+            | Some rp ->
+                // The payload record shares the outer lookup — its keys sit
+                // alongside the discriminator rather than nested under it.
+                decodeRecordWith b rp lookup
+                |> Result.map (fun payload -> FSharpValue.MakeUnion(c.Info, [| payload |]))
     | Some _ ->
         Error [
             {
@@ -463,9 +542,29 @@ and decodeUnionWith
             }
         ]
 
+/// Encode-side view: the value's runtime case tag indexes straight into the
+/// same array decode was built from.
+///
+/// `caseValues : obj[]` has a different runtime shape per backend — a
+/// process-dict ref on BEAM, a GenericArray on Python, a native array on .NET —
+/// so payload access goes through `ArrayLength` / `ArrayAt`.
+and encodeUnionWith (b: IJsonBackend) (byTag: CasePlan[]) (t: System.Type) (v: obj) : obj =
+    let caseInfo, caseValues = FSharpValue.GetUnionFields(v, t)
+    let c = byTag.[caseInfo.Tag]
+    let acc = b.Put(b.NewMap(), discriminatorKey, box c.Tag)
+
+    match c.Payload with
+    | None -> acc
+    | Some rp -> encodeRecordInto b rp acc (b.ArrayAt(box caseValues, 0))
+
 and private planUnion (ctx: BuildCtx) (t: System.Type) : Plan =
     let b = ctx.Backend
     let cases = buildCasePlans ctx t
+    let byTag = casesByTag cases
+
+    // `UnionCaseInfo.Tag` is the declaration index, so sorting by it gives an
+    // array the encode side can index directly with no lookup.
+    let byIndex = cases |> Array.sortBy (fun c -> c.Info.Tag)
     let typeName = t.Name
     let expected = sprintf "expected JSON object for %s" typeName
 
@@ -473,9 +572,10 @@ and private planUnion (ctx: BuildCtx) (t: System.Type) : Plan =
         Decode =
             fun v ->
                 if b.IsMap v then
-                    decodeUnionWith b cases typeName (mapLookup b v)
+                    decodeUnionWith b byTag typeName (mapLookup b v)
                 else
                     leafError expected
+        Encode = fun v -> encodeUnionWith b byIndex t v
     }
 
 // --- Cycle guard ------------------------------------------------------------
@@ -488,6 +588,7 @@ and private planDeferred (ctx: BuildCtx) (t: System.Type) : Plan =
 
     {
         Decode = fun v -> (forTypeIn restart t).Decode v
+        Encode = fun v -> (forTypeIn restart t).Encode v
     }
 
 // ============================================================================
@@ -537,7 +638,7 @@ let forTypeFromLookup
         let rp = buildRecordPlan ctx t
         fun lookup -> decodeRecordWith backend rp lookup
     elif FSharpType.IsUnion t then
-        let cases = buildCasePlans ctx t
+        let cases = casesByTag (buildCasePlans ctx t)
         let typeName = t.Name
         fun lookup -> decodeUnionWith backend cases typeName lookup
     else
