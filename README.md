@@ -10,16 +10,13 @@ The headline idea: **validation lives with the type**. Define a wrapper DU, ship
 ## Quick example
 
 ```fsharp
+open Fable.TypedJson             // brings the module name `Codec` into scope
 open Fable.TypedJson.Schema      // IJsonCodec, emptyRegistry, register, formatErrors
 open Fable.TypedJson.Refined     // NonEmptyString, PositiveInt, Email, Url, Uuid
 open Fable.TypedJson.Json        // CaseRules, withModel, alias
 
 // Pick the backend convenience module for your target.
 open Fable.TypedJson.Beam.Json   // or .Python.Json / .JS.Json (Fable targets) / .DotNet.Json (native CLR)
-
-// We don't `open Fable.TypedJson.Codec`: its `int`, `string`, `bool` codec values
-// would shadow F#'s primitive type conversions. Use the qualified `Codec.` prefix.
-module Codec = Fable.TypedJson.Codec
 
 // 1. Define a wrapper type. The pipeline composes validators the same way
 //    Pydantic composes  Annotated[int, Field(gt=0, le=14)].
@@ -41,7 +38,7 @@ type WeatherRequest = {
 let codecs =
     emptyRegistry
     |> register Days.JsonCodec
-    |> Refined.registerAll              // NonEmptyString, PositiveInt, Email, Url, ...
+    |> registerAll                      // NonEmptyString, PositiveInt, Email, Url, ...
 
 // 4. Auto-derive the codec and decode. Errors accumulate across all fields.
 //    The default JSON casing is camelCase (`LowerFirst`); chain
@@ -95,31 +92,20 @@ let codec =
 
 `alias` flows through decode lookup, encode output, **and** the JSON Schema's `properties` / `required` keys. Field names you pass to `alias` are normalized to PascalCase internally so the same call works on every backend (BEAM lowercases reflection names, Python preserves the F# spelling).
 
-## Schema vs TypedJson — validate dicts and maps too
+## Validating dicts and maps too
 
-Internally there are two layers, and you can stop at the bottom one:
-
-- **`Schema`** — format-agnostic. A `Schema<'T>` is just a function from a
-  `string -> obj option` lookup to `Result<'T, FieldError list>`. It
-  walks the F# record's reflection, applies the registered codecs, and
-  accumulates errors. It doesn't know anything about JSON; the lookup
-  hands back native values (Erlang binary, Python `str`, JS string, …)
-  and the schema dispatches via the backend's `IsX` / `AsX` methods.
-- **`TypedJson`** — JSON-specific shell on top: adds `CaseRules`, the
-  encode side, `alias`, `withModel`, and the `Encode.toJson` / `parseRaw`
-  plumbing.
-
-Because `Schema` only needs a key→value lookup, it validates any source
-that fits that shape. The library ships with two adapters out of the box:
+The codec is the whole API — there is no second, weaker path. Three shorthands
+cover the common sources, all going through the same walker and the same
+camelCase key derivation a default codec uses:
 
 ```fsharp
 // Map<string, string> — LLM tool-call inputs, form fields, env vars, ...
-// Every value arrives as a string; primitive codecs coerce to int / float /
-// bool / etc. via `Type coercion` below.
+// Every value arrives as a string; primitive coercion turns it into the
+// record's declared type (see `Type coercion` below).
 let toolInput : Map<string, string> =
     Map.ofList [ "location", "Oslo"; "days", "3"; "detailed", "true" ]
 
-match validateMap<WeatherRequest> toolInput with
+match validateMapWith<WeatherRequest> codecs toolInput with
 | Ok req -> handle req
 | Error errs -> printfn "%s" (formatErrors errs)
 ```
@@ -128,52 +114,102 @@ match validateMap<WeatherRequest> toolInput with
 // Backend-native JSON map (a parsed jsx map / Python dict / ...)
 let jsonMap = parseRaw """{"location":"Oslo","days":3}"""
 
-match validateJson<WeatherRequest> jsonMap with
+match validateJsonWith<WeatherRequest> codecs jsonMap with
 | Ok req -> handle req
 | Error errs -> printfn "%s" (formatErrors errs)
 ```
 
-Both go through the same `Schema.auto<'T>`. The difference is just the
-adapter that turns the source map into the lookup function. Building your
-own adapter for env-var dicts, query strings, or BEAM proplists is a few
-lines of F#. Pydantic users coming from the LLM tool-call use case will
-recognize this — it's the same role `model_validate` plays for dict
-inputs in Pydantic.
+Use the `…With` forms whenever your record has refined or custom-codec fields —
+plain `validateMap` / `validateJson` use an empty registry, so a
+`NonEmptyString` or `Days` field has no codec to dispatch through. `dump`
+is the encode-side counterpart, producing a backend-native map instead of a
+string.
+
+All of these build a plan per call. **Build a codec once and reuse it** for
+anything repeated:
+
+```fsharp
+let codec = autoWith<WeatherRequest> codecs   // module level, not per request
+```
+
+Construction resolves the entire type tree — every nested record, list element
+type and union case — so the per-call path does no reflection at any depth.
+That is the trade the design makes: construction is expensive, decoding is
+cheap.
 
 ## Approach
 
 - **Validators-as-types**: each field's type carries its rules. Reuse across records, compose across libraries.
 - **Pipeline combinators**: `Codec.gt`, `Codec.lt`, `Codec.ge`, `Codec.le`, `Codec.minLength`, `Codec.maxLength`, `Codec.nonEmpty`, `Codec.pattern`, `Codec.refine`, `Codec.map`, `Codec.describe`. Apply to any `IJsonCodec<'T>`.
 - **Reflection-driven `auto<'T>`**: walks F# record fields, recurses into nested records, handles `'T list` / `'T[]` / `'T option`, and looks up custom-typed fields via the registry. No per-record boilerplate.
-- **Bundled refined types**: `NonEmptyString`, `PositiveInt`, `NonNegativeInt`, `Email`, `Url`, `Uuid` — register them all in one call (`Refined.registerAll`) or pick à la carte.
+- **Bundled refined types**: `NonEmptyString`, `PositiveInt`, `NonNegativeInt`, `Email`, `Url`, `Uuid` — register them all in one call (`registerAll`, after `open Fable.TypedJson.Refined`) or pick à la carte.
 - **Multi-backend by design**: an `IJsonBackend` abstraction in the core, with concrete shims for BEAM (jsx), Python (`json`), JavaScript (`JSON.parse` / `JSON.stringify`), and .NET (`System.Text.Json`).
 - **Errors accumulate**: a single `Error` result lists every per-field problem with a `path`, not just the first.
 - **String-coerced primitives**: a JSON `"42"` decodes as `int 42`. Useful for LLM tool calls and shell input where everything arrives as strings.
-- **JSON Schema generation**: `jsonSchemaOf<'T>` / `jsonSchemaOfCodec codec` walks reflection + the registry to produce a JSON Schema doc, with combinator constraints (`minLength`, `pattern`, `exclusiveMinimum`, ...) folded in.
+- **JSON Schema generation**: `jsonSchemaOf<'T>` / `jsonSchemaOfCodec codec` emit a JSON Schema doc from the same walk that drives decode and encode, with combinator constraints (`minLength`, `pattern`, `exclusiveMinimum`, ...) folded in.
 - **Cross-field validators**: `withModel (fun r -> ...)` for invariants that span fields.
 - **Field aliases**: `alias "FieldName" "json_key"` overrides the JSON-key derivation per field. Reflected in decode, encode, and the generated schema.
+
+## Tagged discriminated unions
+
+An F# DU decodes and encodes as `{"type": "<case>", ...payload}` — the
+Pydantic / OpenAPI discriminated-union convention, and the shape Anthropic's
+and OpenAI's message formats use.
+
+```fsharp
+type SearchInput = { Query: string; MaxResults: int }
+
+type Tool =
+    | Search of SearchInput
+    | Ping
+
+let codec = auto<Tool> () |> withCaseRules CaseRules.SnakeCase
+
+codec.decode (parseRaw """{"type":"search","query":"hello","max_results":5}""")
+// Ok (Search { Query = "hello"; MaxResults = 5 })
+
+codec.encode Ping
+// {"type":"ping"}
+```
+
+A single record-payload case flattens its fields alongside the discriminator;
+a fieldless case is just the discriminator. The case name goes through the
+codec's `CaseRules`, so `ToolUse` becomes `"tool_use"` under `SnakeCase`.
+
+Two shapes are **not** supported in v1: a case with a non-record payload
+(`Circle of float`) and a case with multiple positional fields
+(`At of int * int`). Both are rejected when the codec is built, not when a
+document happens to select that case — a DU with a case that cannot
+round-trip is a broken codec either way, and finding out at construction beats
+finding out in production. Wrap the payload in a record, or register an
+`IJsonCodec` for the type.
+
+`jsonSchemaOf<Tool>` emits a `oneOf` branch per case, each pinning its
+discriminator with `const`.
 
 ## Case rules
 
 Field names from F# reflection are transformed into JSON keys via a `CaseRules` setting on the codec. The default is `LowerFirst` (camelCase) — the most common convention for modern JSON APIs. Use `withCaseRules` to switch.
 
 ```fsharp
-// Default (camelCase): no extra step needed
-let camel = auto<WeatherRequest> beam
-camel.encode { Location = "Oslo"; Days = 3 }
-// {"location":"Oslo","days":3}
-
-// Snake_case
-let snake = auto<WeatherRequest> beam |> withCaseRules CaseRules.SnakeCase
-snake.encode { Location = "Oslo"; Days = 3 }
-// {"location":"Oslo","days":3}      ← single-word fields look the same
-
-// Multi-word fields show the difference:
 type Reading = { AirTemperature: float; WindSpeed: float }
-(auto<Reading> beam |> withCaseRules CaseRules.SnakeCase).encode { ... }
+
+let reading = { AirTemperature = 22.5; WindSpeed = 3.0 }
+
+// Default (camelCase): no extra step needed.
+// After `open Fable.TypedJson.Beam.Json` the backend is already applied,
+// so `auto` takes `()` — you never thread `beam` yourself.
+(auto<Reading> ()).encode reading
+// {"airTemperature":22.5,"windSpeed":3.0}
+
+(auto<Reading> () |> withCaseRules CaseRules.SnakeCase).encode reading
 // {"air_temperature":22.5,"wind_speed":3.0}
 
-// One-off override (rare — same codec, multiple JSON formats):
+// Single-word fields look identical under either rule — multi-word names are
+// the only place the difference shows.
+
+// One-off override (rare — same codec, multiple JSON formats). Note this
+// rebuilds the codec, so hoist `withCaseRules` if it is on a hot path:
 codec.decodeWith CaseRules.SnakeCaseAllCaps map
 ```
 
@@ -210,7 +246,7 @@ Error [
 ]
 ```
 
-`Schema.formatErrors` turns the list into a single human-readable string — handy for surfacing back to an LLM as a tool error, or to a user as a form-validation summary.
+`formatErrors` turns the list into a single human-readable string — handy for surfacing back to an LLM as a tool error, or to a user as a form-validation summary.
 
 ## How it compares
 
@@ -226,7 +262,7 @@ Thoth is the established F#/Fable JSON library and the closest neighbor. Both le
 | Per-type customization | Pass "extra coders" alongside the decoder                              | Define a wrapper DU's static `JsonCodec` member; `register` once                           |
 | Constraint composition | Compose decoders with `andThen` / custom code                          | Pipeline combinators (`gt`, `lt`, `minLength`, ...) — direct Pydantic Annotated equivalent |
 | Error mode             | Fail-fast (first error)                                                | Accumulating (all per-field errors at once)                                                |
-| JSON Schema generation | Not built in                                                           | `jsonSchemaOf<'T>` walks reflection + registry                                             |
+| JSON Schema generation | Not built in                                                           | `jsonSchemaOf<'T>`, from the same walk as decode/encode                                    |
 | Backends               | JS, Python (Thoth.Json 10+), .NET                                      | BEAM, Python, JS, .NET                                                                     |
 | Coercion               | Strict (types must match)                                              | `"42" → int 42` etc. (a Strict mode is planned)                                            |
 | Maturity               | Years of production use, large user base                               | New                                                                                        |
@@ -251,10 +287,12 @@ If you want a low-level JSON AST to inspect or you need maximum control over dec
 
 Two design axes, each independent:
 
-1. **Schema vs TypedJson layering** (vertical) — `Schema` is format-agnostic
-   record validation; `TypedJson` is the JSON shell on top. You can stop at
-   `Schema` if you're validating a `Map<string, string>` from an LLM tool
-   call or a dict from elsewhere — see [Schema vs TypedJson](#schema-vs-typedjson--validate-dicts-and-maps-too) above.
+1. **Staged resolution** (vertical) — the library is a staged compiler. Building
+   a codec walks `typeof<'T>` once and emits a tree of closures; decoding,
+   encoding and describing then just run them. No reflection, no type-name
+   comparison and no key derivation survives into the per-call path, at any
+   depth. One walk produces all three faces, so they cannot disagree about a
+   type's wire shape.
 2. **Backend-agnostic core vs per-target shims** (horizontal) — `IJsonBackend`
    abstracts the actual JSON parser and the native map type. Concrete shims
    ship for BEAM (jsx), Python (`json`), JavaScript (`JSON.parse` /
@@ -263,28 +301,14 @@ Two design axes, each independent:
 ```text
 Fable.TypedJson (core, no backend deps)
 ├── Backend        IJsonBackend interface — map operations, IsX type tests, AsX accessors
-├── Schema         format-agnostic validation: coerce, resolveField, auto, registry, refined
+├── Casing         the canonical-PascalCase pivot every key derivation goes through
+├── Primitives     the one JSON <-> F# primitive coercion table
+├── Schema         vocabulary: JsonValue, FieldError, IJsonCodec, registry, reflection helpers
 ├── Codec          IJsonCodec primitives + pipeline combinators (gt, lt, minLength, ...)
 ├── Refined        bundled refined types (NonEmptyString, PositiveInt, Email, Url, Uuid)
-├── TypedJson      JSON layer: CaseRules, encode/decode wiring, alias, withModel
-└── JsonSchemaGen  reflection-driven JSON Schema doc generation
-
-Fable.TypedJson.Beam (BEAM shim)
-├── Backend        BeamBackend implementing IJsonBackend (jsx + Fable.Beam.Maps)
-└── Json           backend-baked `auto`, `autoWith`, `validate`, `Encode`, `parseRaw`,
-                   `jsonSchemaOf`, `jsonSchemaOfCodec`
-
-Fable.TypedJson.Python (Python shim)
-├── Backend        PythonBackend implementing IJsonBackend (json.loads / json.dumps)
-└── Json           same convenience surface as the BEAM shim, with python pre-applied
-
-Fable.TypedJson.JS (JavaScript shim)
-├── Backend        JSBackend implementing IJsonBackend (JSON.parse / JSON.stringify, native object/array)
-└── Json           same convenience surface as the BEAM shim, with js pre-applied
-
-Fable.TypedJson.DotNet (.NET shim — runs natively on the CLR, no Fable transpile)
-├── Backend        DotNetBackend implementing IJsonBackend (System.Text.Json: JsonDocument + Utf8JsonWriter)
-└── Json           same convenience surface, with dotnet pre-applied
+├── Plan           the type-walker (internal) — one walk emits decode + encode + JSON Schema
+├── TypedJson      public API: CaseRules, aliases, TypedJson<'T>, combinators
+└── JsonSchemaGen  renders a plan's schema to a JSON document
 ```
 
 `IJsonBackend` exposes three groups of operations:

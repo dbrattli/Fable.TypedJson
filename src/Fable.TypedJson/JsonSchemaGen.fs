@@ -48,12 +48,24 @@ let schemaValueToJson (backend: IJsonBackend) (v: JsonSchemaValue) : string = ba
 // Entry points
 // ---------------------------------------------------------------------------
 
+/// Non-inline core. Same one-call-inline discipline as `Json.buildCodec`: the
+/// inline entry points below exist only to capture `typeof<'T>`, so nothing
+/// they touch has to stay public for consumers to inline against.
+let schemaJsonFor
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (aliases: Map<string, string>)
+    (caseRules: Json.CaseRules)
+    (typ: System.Type)
+    : string =
+    (Plan.forType backend registry (Json.resolveKey aliases caseRules) (Json.applyCaseRule caseRules) typ).Schema
+    |> schemaValueToJson backend
+
 /// Generate a JSON Schema document for type `'T`, given a registry of custom
 /// codecs and the case rule mapping F# field names to JSON keys. For alias
 /// support prefer `jsonSchemaOfCodec`, which reads both off an existing codec.
 let inline jsonSchemaOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (caseRules: Json.CaseRules) : string =
-    (Plan.forType backend registry (Json.resolveKey Map.empty caseRules) (Json.applyCaseRule caseRules) typeof<'T>).Schema
-    |> schemaValueToJson backend
+    schemaJsonFor backend registry Map.empty caseRules typeof<'T>
 
 /// Generate a JSON Schema document from a `TypedJson<'T>` codec, so the schema
 /// matches exactly what that codec accepts and produces — same case rule, same
@@ -62,5 +74,4 @@ let inline jsonSchemaOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (c
 /// The standalone walker applied aliases to the top-level record only; sharing
 /// the codec's key transform fixes that as a side effect.
 let inline jsonSchemaOfCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (codec: Json.TypedJson<'T>) : string =
-    (Plan.forType backend registry (Json.resolveKey codec.aliases codec.caseRules) (Json.applyCaseRule codec.caseRules) typeof<'T>).Schema
-    |> schemaValueToJson backend
+    schemaJsonFor backend registry codec.aliases codec.caseRules typeof<'T>

@@ -39,10 +39,11 @@ let backend = beam
 #endif
 #endif
 
-// Note: we deliberately do NOT `open Fable.TypedJson.Codec` because its
-// `int`, `string`, `float`, `bool` codec values would shadow F# core
-// type conversion functions. Use `Codec.int` etc. throughout.
-module Codec = Fable.TypedJson.Codec
+// `open Fable.TypedJson` brings the module NAME `Codec` into scope without
+// opening it, so `Codec.int` resolves and F#'s `int` is never shadowed. No
+// module alias needed — and `[<RequireQualifiedAccess>]` on the module makes
+// the shadowing impossible even for someone who tries to open it.
+open Fable.TypedJson
 
 // ============================================================================
 // Pipeline composition (Pydantic Annotated equivalent, no new type)

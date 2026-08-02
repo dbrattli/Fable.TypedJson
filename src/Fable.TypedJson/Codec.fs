@@ -18,6 +18,7 @@ returned as `Result<'T, string>`; the caller (Schema.coerce) surfaces
 them into a `FieldError`.
 *)
 
+[<RequireQualifiedAccess>]
 module Fable.TypedJson.Codec
 
 open System.Text.RegularExpressions

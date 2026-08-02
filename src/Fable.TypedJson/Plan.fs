@@ -41,7 +41,7 @@ tradeoff: a recursive type re-walks its own subtree per nested value — correct
           stateless, and exactly what today's code does at every depth for every type
 *)
 
-module Fable.TypedJson.Plan
+module internal Fable.TypedJson.Plan
 
 open FSharp.Reflection
 open Fable.TypedJson.Backend
