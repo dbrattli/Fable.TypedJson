@@ -269,6 +269,36 @@ Thoth is the established F#/Fable JSON library and the closest neighbor. Both le
 
 If you want explicit hand-written decoders or a battle-tested option with broad third-party support, use Thoth. If your records are mostly straightforward and you want validation rules to live in the type, this library is the match.
 
+### Performance vs. Thoth
+
+From `just bench` (BenchmarkDotNet, `DefaultJob`, .NET 10). Absolute figures are machine-specific; the ratios are the portable part.
+
+Thoth's reflection-driven path on .NET is Newtonsoft-backed while this library's .NET shim is System.Text.Json-backed, so a head-to-head ratio mixes parser choice with codec design. Each is therefore also shown against **its own** parser — the only column that says anything about the decoder itself.
+
+| Flat 3-field record, decode | Mean | Allocated | Over its own parser |
+| --- | ---: | ---: | ---: |
+| System.Text.Json (raw) | 153 ns | 224 B | — |
+| Thoth.Json.STJ (hand-written decoder) | 442 ns | 976 B | 2.9× |
+| Newtonsoft (raw) | 467 ns | 3,056 B | — |
+| **Fable.TypedJson (`auto`)** | **518 ns** | **1,072 B** | **3.4×** |
+| Thoth.Json.Net (`Decode.Auto`) | 7,224 ns | 8,785 B | 15.5× |
+
+The 14× end-to-end gap on that pair decomposes exactly into **4.6× decoder × 3.1× parser**. The honest claim is the first number: a ~4.6× advantage on the automatic path. The rest is Newtonsoft.
+
+Two results worth stating plainly: `auto` allocates less per decode than *raw Newtonsoft* does, and lands within ~17% of a hand-written Thoth decoder while requiring no decoder at all.
+
+| Other fixtures | Fable.TypedJson | Thoth.Json.Net (`Auto`) | vs. System.Text.Json |
+| --- | ---: | ---: | ---: |
+| nested decode — 2 levels + record list | 2.92 µs | 34.56 µs | 2.2× |
+| flat encode | 252 ns | 8,679 ns | 2.7× |
+| nested encode | 6.67 µs | 46.58 µs | 10.1× |
+
+Only the flat-decode table is parser-decomposed; these three are end-to-end and carry the same Newtonsoft caveat. Flat encode is the one place a reflection-driven codec beats a hand-written one — Thoth's manual encoder is 592 ns — because `auto` writes straight into the backend map instead of building an intermediate tree first.
+
+Both libraries are measured amortized: Thoth's `Auto` caches its generated coders internally, and these numbers build the `TypedJson<'T>` codec once outside the measured loop, as you should.
+
+**Construction is the trade this design makes.** Resolving a type costs ~193 µs (flat) to ~1.03 ms (nested), most of it emitting delegates via `PreComputeRecordConstructor` on the CLR — which is what buys the ~12× per-decode win. Break-even is about **30 decodes of the same type**, so bind codecs at module level rather than per call.
+
 ### vs. [Fable.SimpleJson](https://github.com/Zaid-Ajaj/Fable.SimpleJson)
 
 SimpleJson sits one rung lower: it parses JSON into a recursive `Json` AST and lets you pattern-match. It's closer to "JSON.parse and inspect" than to "validate against a record schema."
