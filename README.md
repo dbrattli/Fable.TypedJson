@@ -1,5 +1,8 @@
 # Fable.TypedJson
 
+[![Build and Test](https://github.com/dbrattli/Fable.TypedJson/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/dbrattli/Fable.TypedJson/actions/workflows/build-and-test.yml)
+[![NuGet](https://img.shields.io/nuget/v/Fable.TypedJson.svg)](https://www.nuget.org/packages/Fable.TypedJson)
+
 Pydantic-flavored JSON validation and serialization for F# records, designed for Fable's multi-backend output. **BEAM (Erlang), Python, JavaScript, and .NET all work today**, sharing a single `IJsonBackend` abstraction.
 
 The headline idea: **validation lives with the type**. Define a wrapper DU, ship a `JsonCodec` static member on it, and `auto<'T>()` discovers it and dispatches through it — the F# answer to Pydantic's "custom types with embedded validators."
