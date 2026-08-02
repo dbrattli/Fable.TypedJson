@@ -26,12 +26,6 @@ let inline auto<'T> () : TypedJson<'T> = Fable.TypedJson.Json.auto<'T> dotnet
 let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
     Fable.TypedJson.Json.autoWith<'T> dotnet registry
 
-let inline validate<'T> (map: JsonMap) : Result<'T, FieldError list> =
-    Fable.TypedJson.Json.validate<'T> dotnet map
-
-let inline validateWith<'T> (registry: CodecRegistry) (map: JsonMap) : Result<'T, FieldError list> =
-    Fable.TypedJson.Json.validateWith<'T> dotnet registry map
-
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateJson<'T> dotnet map
 

@@ -124,19 +124,6 @@ type TypedJson<'T> = {
 }
 
 // ============================================================================
-// Applicative Operators
-// ============================================================================
-
-let (<!>) (f: 'a -> 'b) (r: Result<'a, FieldError list>) : Result<'b, FieldError list> = Result.map f r
-
-let (<*>) (fR: Result<('a -> 'b), FieldError list>) (xR: Result<'a, FieldError list>) : Result<'b, FieldError list> =
-    match fR, xR with
-    | Ok f, Ok x -> Ok(f x)
-    | Error e1, Error e2 -> Error(e1 @ e2)
-    | Error e, _ -> Error e
-    | _, Error e -> Error e
-
-// ============================================================================
 // Encode Module
 // ============================================================================
 
@@ -345,13 +332,6 @@ let inline validateMap<'T> (backend: IJsonBackend) (map: Map<string, string>) : 
 let inline validateMapWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
     (Plan.forTypeFromLookup backend registry camelCaseKey camelCaseTag typeof<'T>) (stringMapAdapter map)
     |> Result.map unbox<'T>
-
-/// Shorthand: create auto codec and decode in one call (uses the codec's default `LowerFirst`).
-let inline validate<'T> (backend: IJsonBackend) (map: JsonMap) : Result<'T, FieldError list> = (auto<'T> backend).decode map
-
-/// Shorthand: create autoWith codec (with custom registry) and decode in one call.
-let inline validateWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: JsonMap) : Result<'T, FieldError list> =
-    (autoWith<'T> backend registry).decode map
 
 /// Compose a cross-field model validator onto a codec. Runs after the per-field
 /// decode succeeds. If the validator returns Error, those errors replace the success.

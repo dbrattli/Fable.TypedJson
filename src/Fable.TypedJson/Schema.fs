@@ -334,9 +334,6 @@ let buildArray (elementType: System.Type) (xs: obj list) : obj =
     box arr
 #endif
 
-let getOptionInnerFullName (fi: System.Reflection.PropertyInfo) : string =
-    fi.PropertyType.GenericTypeArguments.[0].FullName
-
 let getGenericInnerType (t: System.Type) : System.Type = t.GenericTypeArguments.[0]
 
 /// Format a list of FieldErrors into a single human-readable string.
@@ -434,7 +431,7 @@ let describeValue (backend: IJsonBackend) (fv: obj) : string =
 
 /// Build a `key -> obj option` lookup over a backend-native JSON map.
 /// One implementation backing both the internal record/union resolvers and
-/// the public `jsonMapAdapter` — declared above the `let rec coerce` block
+/// the public adapters — declared ahead of the walker
 /// so the recursive group can reference it.
 let mapLookup (backend: IJsonBackend) (m: obj) (key: string) : obj option =
     if backend.ContainsKey(m, key) then
@@ -460,9 +457,3 @@ let stringMapAdapter (map: Map<string, string>) (key: string) : obj option =
     match Map.tryFind key map with
     | Some v -> Some(box v)
     | None -> None
-
-/// Adapt a backend-native JSON map (e.g., parsed via `IJsonBackend.Parse`).
-/// Returns the raw native value (Erlang binary, Python str, JS string, .NET
-/// `JsonValue` case, …); the schema layer dispatches via `IJsonBackend.IsX`
-/// / `AsX` rather than pattern-matching `JsonValue`.
-let jsonMapAdapter (backend: IJsonBackend) (map: obj) : string -> obj option = mapLookup backend map
