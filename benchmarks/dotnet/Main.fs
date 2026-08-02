@@ -66,6 +66,11 @@ type DecodeBench() =
     let stjOptions =
         JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase)
 
+    let newtonsoftSettings =
+        Newtonsoft.Json.JsonSerializerSettings(
+            ContractResolver = Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+        )
+
     [<Benchmark(Baseline = true, Description = "System.Text.Json (raw)")>]
     member _.SystemTextJson() =
         JsonSerializer.Deserialize<Person>(json, stjOptions)
@@ -77,6 +82,22 @@ type DecodeBench() =
     [<Benchmark(Description = "Thoth.Json.Net (auto, Newtonsoft)")>]
     member _.ThothAuto() =
         Thoth.Json.Net.Decode.Auto.fromString<Person>(json)
+
+    (**
+    Raw Newtonsoft, as the parser baseline for Thoth's stack.
+
+    Without it the comparison against `Thoth.Json.Net (auto)` is confounded:
+    that path is Newtonsoft-backed while this library's .NET shim is
+    System.Text.Json-backed, so a raw ratio mixes parser choice with codec
+    design. Measuring both parsers separately lets each library be judged on
+    the overhead it adds *over its own parser*, which is the only comparison
+    that says anything about the design.
+
+    adr: baseline every competitor against its own parser, not against ours
+    *)
+    [<Benchmark(Description = "Newtonsoft (raw) — Thoth's parser baseline")>]
+    member _.NewtonsoftRaw() =
+        Newtonsoft.Json.JsonConvert.DeserializeObject<Person>(json, newtonsoftSettings)
 
     [<Benchmark(Description = "Fable.TypedJson.DotNet (auto, STJ)")>]
     member _.FableTypedJson() =
