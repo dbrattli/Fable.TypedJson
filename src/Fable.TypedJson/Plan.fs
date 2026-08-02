@@ -195,9 +195,9 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
             // F# list MUST precede the union test: `FSharpList<'T>` is itself a DU,
             // so `IsUnion` returns true for it on the CLR and would mis-route.
             if isFSharpListType fullName then
-                planSeq ctx (getGenericInnerType t) extractList buildList
+                planSeq ctx (getGenericInnerType t) extractList listBuilder
             elif t.IsArray then
-                planSeq ctx (t.GetElementType()) extractArray buildArray
+                planSeq ctx (t.GetElementType()) extractArray arrayBuilder
             elif FSharpType.IsRecord t then
                 if List.contains fullName ctx.Building then
                     planDeferred ctx t
@@ -328,9 +328,12 @@ array, because the native sequence shape differs per backend.
 adr: fail-fast on the first bad element, unlike record fields which accumulate —
      an element index is rarely actionable in bulk and this keeps one traversal
 *)
-and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> obj list) (build: System.Type -> obj list -> obj) : Plan =
+and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> obj list) (builder: System.Type -> obj list -> obj) : Plan =
     let b = ctx.Backend
     let element = forTypeIn ctx elementType
+    // Resolve the constructor ONCE — `builder` does the generic instantiation
+    // when applied, not when the closure it returns is called.
+    let build = builder elementType
     let expected = sprintf "expected JSON array for %s[]" elementType.Name
 
     {
@@ -359,7 +362,7 @@ and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> 
 
                     match failure with
                     | Some errs -> Error errs
-                    | None -> Ok(build elementType (List.rev acc))
+                    | None -> Ok(build (List.rev acc))
     }
 
 // --- Records ----------------------------------------------------------------
@@ -388,13 +391,13 @@ and private buildRecordPlan (ctx: BuildCtx) (t: System.Type) : RecordPlan =
                 Optional = isOpt
                 TypeName = innerType.Name
                 Inner = forTypeIn inner innerType
-                Wrap = if isOpt then buildOption innerType else id
-                Read = fun record -> FSharpValue.GetRecordField(record, fi)
+                Wrap = if isOpt then optionBuilder innerType else id
+                Read = fieldReader fi
             })
 
     {
         Fields = fields
-        Make = fun values -> FSharpValue.MakeRecord(t, values)
+        Make = recordCtor t
         Title = t.Name
     }
 

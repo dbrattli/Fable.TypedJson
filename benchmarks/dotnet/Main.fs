@@ -127,10 +127,134 @@ type EncodeBench() =
     [<Benchmark(Description = "Fable.TypedJson.DotNet (auto, STJ)")>]
     member _.FableTypedJson() = codec.encode value
 
+(**
+## Nested and list-heavy payloads
+
+`Person` is flat and three fields wide — the one shape the old codec already
+pre-baked completely, so it cannot show what the plan changed. Everything
+below depth 0 used to re-run `GetRecordFields` and re-derive every key on
+every decode; a list of records paid that per element.
+
+These fixtures are where that shows. `Order` nests two levels and carries a
+list of records; `Catalogue` carries 100 of them, so per-element cost is 100×
+magnified.
+
+adr: measure nested separately from flat — a single flat fixture reports "no change" for a refactor that only touches depth >= 1
+*)
+type Address = { Street: string; City: string; Zip: string }
+
+type Customer = {
+    Name: string
+    Billing: Address
+    Shipping: Address
+}
+
+type LineItem = { Sku: string; Quantity: int; Price: float }
+
+type Order = {
+    Reference: string
+    Buyer: Customer
+    Items: LineItem list
+}
+
+[<MemoryDiagnoser>]
+[<Orderer(SummaryOrderPolicy.FastestToSlowest)>]
+type NestedDecodeBench() =
+    let json =
+        """{"reference":"A-1","buyer":{"name":"Maxime","billing":{"street":"S1","city":"Oslo","zip":"0150"},"shipping":{"street":"S2","city":"Bergen","zip":"5003"}},"items":[{"sku":"a","quantity":1,"price":9.5},{"sku":"b","quantity":2,"price":19.0},{"sku":"c","quantity":3,"price":4.25}]}"""
+
+    let codec = auto<Order> ()
+
+    let stjOptions =
+        JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase)
+
+    [<Benchmark(Baseline = true, Description = "System.Text.Json (raw)")>]
+    member _.SystemTextJson() =
+        JsonSerializer.Deserialize<Order>(json, stjOptions)
+
+    [<Benchmark(Description = "Thoth.Json.Net (auto, Newtonsoft)")>]
+    member _.ThothAuto() =
+        Thoth.Json.Net.Decode.Auto.fromString<Order>(json)
+
+    [<Benchmark(Description = "Fable.TypedJson.DotNet (auto, STJ)")>]
+    member _.FableTypedJson() =
+        match codec.decode (parseRaw json) with
+        | Ok r -> r
+        | Error e -> failwithf "decode failed: %A" e
+
+[<MemoryDiagnoser>]
+[<Orderer(SummaryOrderPolicy.FastestToSlowest)>]
+type NestedEncodeBench() =
+    let value = {
+        Reference = "A-1"
+        Buyer = {
+            Name = "Maxime"
+            Billing = {
+                Street = "S1"
+                City = "Oslo"
+                Zip = "0150"
+            }
+            Shipping = {
+                Street = "S2"
+                City = "Bergen"
+                Zip = "5003"
+            }
+        }
+        Items = [
+            { Sku = "a"; Quantity = 1; Price = 9.5 }
+            { Sku = "b"; Quantity = 2; Price = 19.0 }
+            { Sku = "c"; Quantity = 3; Price = 4.25 }
+        ]
+    }
+
+    let codec = auto<Order> ()
+
+    let stjOptions =
+        JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase)
+
+    [<Benchmark(Baseline = true, Description = "System.Text.Json (raw)")>]
+    member _.SystemTextJson() =
+        JsonSerializer.Serialize(value, stjOptions)
+
+    [<Benchmark(Description = "Thoth.Json.Net (auto, Newtonsoft)")>]
+    member _.ThothAuto() = Thoth.Json.Net.Encode.Auto.toString(0, value)
+
+    [<Benchmark(Description = "Fable.TypedJson.DotNet (auto, STJ)")>]
+    member _.FableTypedJson() = codec.encode value
+
+(**
+Codec construction on its own — the cost the other fixtures deliberately hoist
+out of their measured loop, and therefore the one number nothing here reported.
+
+It matters because the plan moved work *into* construction: a full recursive
+walk of every nested record, list element type and union case, plus an eagerly
+built JSON Schema tree. A consumer that calls `auto<'T> ()` per request — the
+Fable.Giraffe shape — pays this every time.
+
+adr: measure construction explicitly; "build once and reuse" is only sound advice if the cost of not doing so is known
+*)
+[<MemoryDiagnoser>]
+[<Orderer(SummaryOrderPolicy.FastestToSlowest)>]
+type ConstructionBench() =
+
+    [<Benchmark(Baseline = true, Description = "auto<Person> () — flat")>]
+    member _.Flat() = auto<Person> ()
+
+    [<Benchmark(Description = "auto<Order> () — nested + list")>]
+    member _.Nested() = auto<Order> ()
+
 [<EntryPoint>]
 let main argv =
     BenchmarkSwitcher
-        .FromTypes([| typeof<DecodeBench>; typeof<EncodeBench> |])
+        .FromTypes(
+            [|
+                typeof<DecodeBench>
+                typeof<EncodeBench>
+                typeof<NestedDecodeBench>
+                typeof<NestedEncodeBench>
+                typeof<ConstructionBench>
+            |]
+        )
         .Run(argv)
     |> ignore
 
