@@ -1,6 +1,5 @@
 ---
-force_version: 5.0.0-rc.1
-last_commit_released: 33b94f4e2dfde262fad19673e4bdcb03f3a070fd
+last_commit_released: d34e1f4c55505495b907aace4de33c34b73822a3
 name: Fable.TypedJson.Beam
 ---
 
@@ -13,6 +12,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 5.0.0-rc.1 - 2026-08-02
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/33b94f4e2dfde262fad19673e4bdcb03f3a070fd..d34e1f4c55505495b907aace4de33c34b73822a3)</small></strong>
 
 ## 0.4.1 - 2026-07-18
 
