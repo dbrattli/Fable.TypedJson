@@ -6,6 +6,7 @@
     <Author>Dag Brattli</Author>
     <Copyright>Dag Brattli</Copyright>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>fsharp;fable;json;validation;beam;erlang;jsx</PackageTags>
     <Description>BEAM (Erlang) backend shim for Fable.TypedJson. Wires `Fable.Beam.Maps` and `Fable.Beam.Jsx.Jsx` into the IJsonBackend abstraction.</Description>
   </PropertyGroup>

@@ -6,6 +6,7 @@
     <Author>Dag Brattli</Author>
     <Copyright>Dag Brattli</Copyright>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>fsharp;fable;json;validation;pydantic;schema</PackageTags>
     <Description>Pydantic-flavored JSON validation and serialization for F# records, designed for Fable's multi-backend output (BEAM, Python, JavaScript, .NET). Validators-as-types pattern with reflection-driven auto, refined types, JSON Schema generation, and accumulating errors.</Description>
   </PropertyGroup>
