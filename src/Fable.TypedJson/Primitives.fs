@@ -93,6 +93,12 @@ on an `Unspecified` DateTime applies the machine's own offset, so the same
 document would decode to different instants depending on where it was parsed.
 RFC 3339 — what `format: date-time` denotes — requires an offset anyway.
 
+Both divergences are written up upstream:
+`../Fable/BEAM-DATETIME-ZONE-OFFSET-PROMPT.md` (Beam rejects numeric offsets)
+and `../Fable/PYTHON-DATETIME-ROUNDTRIP-FORMAT-PROMPT.md` (`"O"` attaches the
+machine's local offset). If both land, `splitZoneOffset` can collapse back to a
+plain `TryParse` and `dateTimeToString` back to `"O"`.
+
 invariant: one document, one instant, on every backend and every machine
 *)
 
@@ -229,6 +235,10 @@ the drift this library exists to prevent.
 The `Z` is concatenated rather than written into the format string: `'Z'` as a
 quoted literal is a portability question across four format-string
 implementations, and this is not.
+
+`"O"` would be the natural specifier here and is deliberately avoided — on Fable
+Python it attaches the machine's local offset to an `Unspecified` value. Written
+up in `../Fable/PYTHON-DATETIME-ROUNDTRIP-FORMAT-PROMPT.md`.
 
 tradeoff: `Kind` does not survive the round trip — a decoded value is always
           `Utc`, and an `Unspecified` one is read as local time on the way out,
