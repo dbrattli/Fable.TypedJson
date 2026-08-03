@@ -76,14 +76,98 @@ strings. ISO-8601 and canonical uuid are what `format: date-time` and
 adr: parse leniently, render strictly — decode takes whatever the runtime's
      parser accepts, encode always emits the round-trippable canonical form
 *)
-let parseDateTime (s: string) : Result<System.DateTime, string> =
-    match System.DateTime.TryParse(s) with
-    // Normalised to UTC on the way in as well as out, so a decoded value has a
-    // known `Kind` regardless of what the backend's parser chose. .NET's
-    // `Parse` yields `Local` for an offset-bearing string and `Unspecified`
-    // for a bare one; Python yields aware and naive respectively.
-    | true, d -> Ok(d.ToUniversalTime())
+
+(**
+## Zone handling
+
+The offset is applied here rather than handed to the runtime's parser, because
+the runtimes disagree. Fable's BEAM parser rejects `2026-08-03T16:30:15+02:00`
+outright, and .NET's `Parse` yields `Local` for an offset-bearing string and
+`Unspecified` for a bare one — so "let the runtime sort it out" produces three
+different answers for one document. Splitting the offset off and doing the
+arithmetic makes the result identical everywhere, which is the whole point of
+this library.
+
+A timestamp with no zone at all is read as **UTC**, not local. `ToUniversalTime`
+on an `Unspecified` DateTime applies the machine's own offset, so the same
+document would decode to different instants depending on where it was parsed.
+RFC 3339 — what `format: date-time` denotes — requires an offset anyway.
+
+invariant: one document, one instant, on every backend and every machine
+*)
+
+/// Splits an ISO-8601 timestamp into its zone-less part and its offset in
+/// minutes east of UTC. `None` when there is no numeric offset (a bare
+/// timestamp, or one ending in `Z`).
+let private splitZoneOffset (s: string) : (string * int) option =
+    // Only look past the date, which carries its own `-` separators.
+    let dateLength = 10
+
+    if s.Length <= dateLength then
+        None
+    else
+        let tail = s.Substring dateLength
+        let plus = tail.IndexOf '+'
+        let minus = tail.IndexOf '-'
+
+        let signIndex =
+            if plus >= 0 && minus >= 0 then min plus minus
+            elif plus >= 0 then plus
+            else minus
+
+        if signIndex < 0 then
+            None
+        else
+            let offset = tail.Substring signIndex
+            let digits = offset.Substring(1).Replace(":", "")
+
+            if digits.Length < 2 then
+                None
+            else
+                let hours = int (digits.Substring(0, 2))
+
+                let minutes =
+                    if digits.Length >= 4 then
+                        int (digits.Substring(2, 2))
+                    else
+                        0
+
+                let sign = if offset.[0] = '-' then -1 else 1
+                Some(s.Substring(0, dateLength + signIndex), sign * ((hours * 60) + minutes))
+
+/// Parses the zone-less part of a timestamp, tagging the result UTC without
+/// consulting the machine's timezone.
+let private parseAsUtc (s: string) : Result<System.DateTime, string> =
+    match System.DateTime.TryParse s with
+    | true, d -> Ok(System.DateTime.SpecifyKind(d, System.DateTimeKind.Utc))
     | _ -> Error(sprintf "cannot parse '%s' as DateTime" s)
+
+let parseDateTime (s: string) : Result<System.DateTime, string> =
+    match splitZoneOffset s with
+    | Some(local, offsetMinutes) ->
+        parseAsUtc local
+        |> Result.map (fun d -> d.AddMinutes(float -offsetMinutes))
+    | None ->
+        // `Z` means UTC, which is what `parseAsUtc` assumes anyway; strip it so
+        // every backend's parser sees the same zone-less string.
+        let bare =
+            if s.EndsWith "Z" || s.EndsWith "z" then
+                s.Substring(0, s.Length - 1)
+            else
+                s
+
+        parseAsUtc bare
+        |> Result.mapError (fun _ -> sprintf "cannot parse '%s' as DateTime" s)
+
+/// A `DateTimeOffset` carries its own offset, so nothing has to be assumed about
+/// a bare timestamp — the reason to prefer it over `DateTime` on a wire format.
+/// Built from the UTC instant above rather than `DateTimeOffset.TryParse`, which
+/// is not implemented consistently across the Fable backends.
+let parseDateTimeOffset (s: string) : Result<System.DateTimeOffset, string> =
+    parseDateTime s
+    |> Result.map (fun utc -> System.DateTimeOffset(utc, System.TimeSpan.Zero))
+    |> Result.mapError (fun _ -> sprintf "cannot parse '%s' as DateTimeOffset" s)
+
 
 /// `Guid.Parse` guarded, not `TryParse`: the latter's `byref` overload is not
 /// uniformly available across the Fable backends, and a guarded `Parse` is.
@@ -154,6 +238,12 @@ let dateTimeToString (d: System.DateTime) : string =
     d.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffff")
     + "Z"
 
+/// Rendered in UTC with the `Z` designator, exactly like `dateTimeToString` —
+/// the offset is preserved as an instant rather than as a local wall clock.
+let dateTimeOffsetToString (d: System.DateTimeOffset) : string =
+    d.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffffff")
+    + "Z"
+
 /// Canonical 8-4-4-4-12, lower case — what `format: uuid` denotes.
 let guidToString (g: System.Guid) : string = g.ToString()
 
@@ -164,7 +254,14 @@ through the backend's number type would discard the guarantee the type was
 chosen for. Pydantic serializes `Decimal` to a string in JSON mode for the same
 reason.
 
+Note that `format: decimal` is not a registered JSON Schema format — formats are
+an extensible annotation vocabulary, so this is legal but no validator will act
+on it. It is emitted for documentation value.
+
 tradeoff: consumers see `"12.34"`, not `12.34` — the schema says so
-          (`format: decimal`), and decode still accepts a bare JSON number
+          (`format: decimal`), and decode still accepts a bare JSON number, so
+          the schema is deliberately stricter than the decoder. Describing what
+          `Encode` produces is the property the single-walker design guarantees;
+          Pydantic instead widens the schema to `anyOf: [number, string]`
 *)
 let decimalToString (d: decimal) : string = string d
