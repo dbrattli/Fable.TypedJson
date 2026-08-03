@@ -153,6 +153,11 @@ let private leafError (message: string) : Result<obj, FieldError list> =
 let private primitiveNode (typeName: string) : JsonSchemaValue =
     SVDict(Map.ofList [ "type", SVStr typeName ])
 
+/// A primitive plus the `format` keyword naming its string encoding —
+/// `date-time`, `uuid`, `decimal`.
+let private formatNode (typeName: string) (format: string) : JsonSchemaValue =
+    SVDict(Map.ofList [ "type", SVStr typeName; "format", SVStr format ])
+
 /// A leaf carries no hoisted definitions — only compound nodes do.
 let private noDefs: Map<string, JsonSchemaValue> = Map.empty
 
@@ -231,9 +236,19 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
             }
         | None ->
 
+            // Dispatched AFTER the registry, unlike the five primitives above:
+            // a date format or decimal representation is exactly the kind of
+            // thing a consumer may need to override, so a registered codec for
+            // these still wins.
+            if fullName = "System.DateTime" then
+                planDateTime b
+            elif fullName = "System.Guid" then
+                planGuid b
+            elif fullName = "System.Decimal" then
+                planDecimal b
             // F# list MUST precede the union test: `FSharpList<'T>` is itself a DU,
             // so `IsUnion` returns true for it on the CLR and would mis-route.
-            if isFSharpListType fullName then
+            elif isFSharpListType fullName then
                 planSeq ctx (getGenericInnerType t) extractList listBuilder
             elif t.IsArray then
                 planSeq ctx (t.GetElementType()) extractArray arrayBuilder
@@ -356,6 +371,61 @@ and private planBool (b: IJsonBackend) : Plan = {
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "boolean"
+    Definitions = noDefs
+}
+
+// --- String-encoded scalars -------------------------------------------------
+//
+// JSON has no date, uuid or exact-decimal type. All three cross the wire as
+// strings and carry a `format` keyword naming which one — the schema therefore
+// describes exactly what `Encode` produces, which is the property the whole
+// single-walker design exists to guarantee.
+
+and private planDateTime (b: IJsonBackend) : Plan = {
+    Decode =
+        fun v ->
+            if b.IsString v then
+                match Primitives.parseDateTime (b.AsString v) with
+                | Ok d -> Ok(box d)
+                | Error msg -> leafError msg
+            else
+                leafError (sprintf "cannot coerce %s to System.DateTime" (describeValue b v))
+    Encode = fun v -> box (Primitives.dateTimeToString (unbox<System.DateTime> v))
+    Schema = formatNode "string" "date-time"
+    Definitions = noDefs
+}
+
+and private planGuid (b: IJsonBackend) : Plan = {
+    Decode =
+        fun v ->
+            if b.IsString v then
+                match Primitives.parseGuid (b.AsString v) with
+                | Ok g -> Ok(box g)
+                | Error msg -> leafError msg
+            else
+                leafError (sprintf "cannot coerce %s to System.Guid" (describeValue b v))
+    Encode = fun v -> box (Primitives.guidToString (unbox<System.Guid> v))
+    Schema = formatNode "string" "uuid"
+    Definitions = noDefs
+}
+
+and private planDecimal (b: IJsonBackend) : Plan = {
+    // A bare JSON number is accepted on the way in — precision is only at risk
+    // on the way out, and rejecting `12.34` would be gratuitous.
+    Decode =
+        fun v ->
+            if b.IsString v then
+                match Primitives.parseDecimal (b.AsString v) with
+                | Ok d -> Ok(box d)
+                | Error msg -> leafError msg
+            elif b.IsInt v then
+                Ok(box (decimal (b.AsInt v)))
+            elif b.IsFloat v then
+                Ok(box (decimal (b.AsFloat v)))
+            else
+                leafError (sprintf "cannot coerce %s to System.Decimal" (describeValue b v))
+    Encode = fun v -> box (Primitives.decimalToString (unbox<decimal> v))
+    Schema = formatNode "string" "decimal"
     Definitions = noDefs
 }
 

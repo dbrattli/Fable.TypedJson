@@ -20,6 +20,7 @@ invariant: a new test module is added here once and picked up by all four target
     <Compile Include="TestJsonSchema.fs" />
     <Compile Include="TestAlias.fs" />
     <Compile Include="TestUnion.fs" />
+    <Compile Include="TestScalars.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
 </Project>
