@@ -396,6 +396,172 @@ let private unionSchemaTests =
         ]
     )
 
+// ============================================================================
+// $ref mode + the schema IR
+// ============================================================================
+
+(**
+Flat inlining stays the default; `$ref` mode is opt-in, for OpenAPI
+`components/schemas` where reuse is the point. These assert against the
+`JsonSchemaValue` IR directly rather than the rendered string, since that IR
+being reachable at all is half of what is under test.
+
+invariant: a type reached twice is defined once and referenced twice
+*)
+
+let private prefix = "#/components/schemas/"
+
+let private prop (v: JsonSchemaValue) (key: string) : JsonSchemaValue option =
+    match v with
+    | SVDict m -> Map.tryFind key m
+    | _ -> Option.None
+
+/// The pointer a `$ref` node carries, or `None` if the node is not a reference.
+let private refTarget (v: JsonSchemaValue) : string option =
+    match prop v "$ref" with
+    | Some(SVStr s) -> Some s
+    | _ -> Option.None
+
+let private refModeTests =
+    testList (
+        "$ref mode",
+        [
+            test (
+                "the schema IR is reachable without re-parsing JSON",
+                fun _ ->
+                    let schema = jsonSchemaValueOf<Simple> emptyRegistry CaseRules.SnakeCase
+
+                    match prop schema "title" with
+                    | Some(SVStr title) -> assertThat title (isEqualTo "Simple")
+                    | _ -> failwith "expected a title on the record schema"
+            )
+
+            test (
+                "the root becomes a reference and its body is hoisted",
+                fun _ ->
+                    let schema, defs =
+                        jsonSchemaWithDefsOf<Simple> emptyRegistry CaseRules.SnakeCase prefix
+
+                    assertThat (refTarget schema) (isEqualTo (Some(prefix + "Simple")))
+                    assertThat (defs |> Map.containsKey "Simple") isTrue
+
+                    // The hoisted body is the full object schema, not a stub.
+                    match prop defs.["Simple"] "properties" with
+                    | Some(SVDict props) -> assertThat (props |> Map.containsKey "name") isTrue
+                    | _ -> failwith "expected properties on the hoisted definition"
+            )
+
+            test (
+                "a nested record is hoisted alongside its parent and referenced",
+                fun _ ->
+                    let _, defs = jsonSchemaWithDefsOf<User> emptyRegistry CaseRules.SnakeCase prefix
+
+                    assertThat (defs |> Map.containsKey "User") isTrue
+                    assertThat (defs |> Map.containsKey "Address") isTrue
+
+                    let addressProp =
+                        prop defs.["User"] "properties"
+                        |> Option.bind (fun p -> prop p "address")
+
+                    assertThat (addressProp |> Option.bind refTarget) (isEqualTo (Some(prefix + "Address")))
+            )
+
+            test (
+                "a type reached twice is defined once",
+                fun _ ->
+                    let _, defs = jsonSchemaWithDefsOf<Diamond> emptyRegistry CaseRules.SnakeCase prefix
+
+                    assertThat (defs |> Map.containsKey "Leaf") isTrue
+
+                    let props = prop defs.["Diamond"] "properties"
+
+                    assertThat
+                        (props
+                         |> Option.bind (fun p -> prop p "left")
+                         |> Option.bind refTarget)
+                        (isEqualTo (Some(prefix + "Leaf")))
+
+                    assertThat
+                        (props
+                         |> Option.bind (fun p -> prop p "right")
+                         |> Option.bind refTarget)
+                        (isEqualTo (Some(prefix + "Leaf")))
+            )
+
+            // The headline improvement over flat mode: flat truncates a cycle to
+            // a title-only stub, losing the type past the first hop. A `$ref`
+            // back to the ancestor is lossless.
+            test (
+                "a recursive type round-trips instead of truncating",
+                fun _ ->
+                    let _, defs = jsonSchemaWithDefsOf<Tree> emptyRegistry CaseRules.SnakeCase prefix
+
+                    assertThat (defs |> Map.containsKey "Tree") isTrue
+
+                    let items =
+                        prop defs.["Tree"] "properties"
+                        |> Option.bind (fun p -> prop p "children")
+                        |> Option.bind (fun c -> prop c "items")
+
+                    assertThat (items |> Option.bind refTarget) (isEqualTo (Some(prefix + "Tree")))
+            )
+
+            test (
+                "a self-reference through an option also references back",
+                fun _ ->
+                    let _, defs = jsonSchemaWithDefsOf<Node> emptyRegistry CaseRules.SnakeCase prefix
+
+                    let next =
+                        prop defs.["Node"] "properties"
+                        |> Option.bind (fun p -> prop p "next")
+
+                    assertThat (next |> Option.bind refTarget) (isEqualTo (Some(prefix + "Node")))
+
+                    // Referencing must not promote an optional field into `required`.
+                    match prop defs.["Node"] "required" with
+                    | Some(SVList required) -> assertThat required (isEqualTo [ SVStr "name" ])
+                    | _ -> failwith "expected a required list"
+            )
+
+            test (
+                "a union is hoisted and its payload record referenced",
+                fun _ ->
+                    let schema, defs =
+                        jsonSchemaWithDefsOf<Command> emptyRegistry CaseRules.SnakeCase prefix
+
+                    assertThat (refTarget schema) (isEqualTo (Some(prefix + "Command")))
+                    assertThat (defs |> Map.containsKey "Command") isTrue
+
+                    match prop defs.["Command"] "oneOf" with
+                    | Some(SVList branches) -> assertThat (List.length branches) (isEqualTo 2)
+                    | _ -> failwith "expected oneOf branches on the hoisted union"
+            )
+
+            // Flat mode is the default and must be untouched by any of the above.
+            test (
+                "flat mode still inlines and still truncates cycles",
+                fun _ ->
+                    let schema = jsonSchemaValueOf<Tree> emptyRegistry CaseRules.SnakeCase
+
+                    assertThat (refTarget schema) (isEqualTo Option.None)
+
+                    let items =
+                        prop schema "properties"
+                        |> Option.bind (fun p -> prop p "children")
+                        |> Option.bind (fun c -> prop c "items")
+
+                    assertThat
+                        (items
+                         |> Option.bind (fun i -> prop i "properties"))
+                        (isEqualTo Option.None)
+
+                    match items |> Option.bind (fun i -> prop i "title") with
+                    | Some(SVStr title) -> assertThat title (isEqualTo "Tree")
+                    | _ -> failwith "expected the truncated stub to keep its title"
+            )
+        ]
+    )
+
 let tests =
     testList (
         "JsonSchema",
@@ -407,5 +573,6 @@ let tests =
             refinedTypesTests
             recursiveTypesTests
             unionSchemaTests
+            refModeTests
         ]
     )
