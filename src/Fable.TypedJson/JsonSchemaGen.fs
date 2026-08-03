@@ -61,6 +61,39 @@ let schemaJsonFor
     (Plan.forType backend registry (Json.resolveKey aliases caseRules) (Json.applyCaseRule caseRules) typ).Schema
     |> schemaValueToJson backend
 
+/// The schema as the `JsonSchemaValue` tree rather than rendered JSON, for
+/// consumers that need to splice it into a larger document — an OpenAPI
+/// `components/schemas` map in particular. Re-parsing `schemaJsonFor`'s string
+/// to recover this was the alternative.
+let schemaValueFor
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (aliases: Map<string, string>)
+    (caseRules: Json.CaseRules)
+    (typ: System.Type)
+    : JsonSchemaValue =
+    (Plan.forType backend registry (Json.resolveKey aliases caseRules) (Json.applyCaseRule caseRules) typ).Schema
+
+/// The schema in `$ref` mode: the root's own fragment, plus every record and
+/// union reached beneath it as a named definition. `refPrefix` is prepended to
+/// each name to form the pointer — `"#/$defs/"` for a standalone JSON Schema
+/// document, `"#/components/schemas/"` for OpenAPI.
+///
+/// Unlike flat mode, a recursive type survives: the cycle guard emits a
+/// reference back to the ancestor that registers the body.
+let schemaValueWithDefsFor
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (aliases: Map<string, string>)
+    (caseRules: Json.CaseRules)
+    (refPrefix: string)
+    (typ: System.Type)
+    : JsonSchemaValue * Map<string, JsonSchemaValue> =
+    let plan =
+        Plan.forTypeWithRefs backend registry (Json.resolveKey aliases caseRules) (Json.applyCaseRule caseRules) refPrefix typ
+
+    plan.Schema, plan.Definitions
+
 /// Generate a JSON Schema document for type `'T`, given a registry of custom
 /// codecs and the case rule mapping F# field names to JSON keys. For alias
 /// support prefer `jsonSchemaOfCodec`, which reads both off an existing codec.
@@ -75,3 +108,27 @@ let inline jsonSchemaOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (c
 /// the codec's key transform fixes that as a side effect.
 let inline jsonSchemaOfCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (codec: Json.TypedJson<'T>) : string =
     schemaJsonFor backend registry codec.aliases codec.caseRules typeof<'T>
+
+/// The `JsonSchemaValue` tree for `'T`, for splicing into a larger document.
+let inline jsonSchemaValueOf<'T> (backend: IJsonBackend) (registry: CodecRegistry) (caseRules: Json.CaseRules) : JsonSchemaValue =
+    schemaValueFor backend registry Map.empty caseRules typeof<'T>
+
+/// The `$ref`-mode schema for `'T`: its own fragment plus the named definitions
+/// of every record and union beneath it.
+let inline jsonSchemaWithDefsOf<'T>
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (caseRules: Json.CaseRules)
+    (refPrefix: string)
+    : JsonSchemaValue * Map<string, JsonSchemaValue> =
+    schemaValueWithDefsFor backend registry Map.empty caseRules refPrefix typeof<'T>
+
+/// The `$ref`-mode schema for a codec's type, sharing its case rule and aliases
+/// at every depth — the same guarantee `jsonSchemaOfCodec` gives.
+let inline jsonSchemaWithDefsOfCodec<'T>
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (codec: Json.TypedJson<'T>)
+    (refPrefix: string)
+    : JsonSchemaValue * Map<string, JsonSchemaValue> =
+    schemaValueWithDefsFor backend registry codec.aliases codec.caseRules refPrefix typeof<'T>

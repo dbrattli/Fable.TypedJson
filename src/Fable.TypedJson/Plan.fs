@@ -61,6 +61,14 @@ type Plan = {
     /// SAME walk as Decode/Encode, which is why the emitter can no longer lack
     /// a case the other two handle — `JsonSchemaGen` had no union branch.
     Schema: JsonSchemaValue
+    /// Named schemas hoisted out of this subtree. Always empty in the default
+    /// flat mode; in `$ref` mode (`BuildCtx.RefMode`) every compound node puts
+    /// its own body here and leaves a `$ref` behind in `Schema`.
+    ///
+    /// Threaded up through the return rather than accumulated in a mutable cell:
+    /// BEAM has no module-level mutable state, and a captured `ref` is the one
+    /// construct whose Fable BEAM lowering this file already avoids.
+    Definitions: Map<string, JsonSchemaValue>
 }
 
 [<NoComparison; NoEquality>]
@@ -111,6 +119,14 @@ type BuildCtx = {
     TagTransform: string -> string
     /// root-to-node path of compound `FullName`s — see the cycle guard note
     Building: string list
+    /// `Some prefix` emits every record/union as `{"$ref": prefix + Name}` and
+    /// hoists its body into `Plan.Definitions`; `None` inlines them.
+    ///
+    /// Flat stays the default: LLM tool-call validators handle flat schemas far
+    /// better, which is why the truncating cycle guard was chosen originally.
+    /// `$ref` exists for OpenAPI `components/schemas`, where reuse is the point
+    /// and a recursive type must round-trip rather than truncate.
+    RefMode: string option
 }
 
 // ============================================================================
@@ -136,6 +152,33 @@ let private leafError (message: string) : Result<obj, FieldError list> =
 
 let private primitiveNode (typeName: string) : JsonSchemaValue =
     SVDict(Map.ofList [ "type", SVStr typeName ])
+
+/// A primitive plus the `format` keyword naming its string encoding —
+/// `date-time`, `uuid`, `decimal`.
+let private formatNode (typeName: string) (format: string) : JsonSchemaValue =
+    SVDict(Map.ofList [ "type", SVStr typeName; "format", SVStr format ])
+
+/// A leaf carries no hoisted definitions — only compound nodes do.
+let private noDefs: Map<string, JsonSchemaValue> = Map.empty
+
+/// Right-biased union of definition maps gathered from sibling subtrees. Two
+/// subtrees reaching the same type produce the same body, so a collision is a
+/// re-registration rather than a conflict.
+let private mergeDefs (maps: Map<string, JsonSchemaValue> list) : Map<string, JsonSchemaValue> =
+    maps
+    |> List.fold (fun acc m -> Map.fold (fun a k v -> Map.add k v a) acc m) Map.empty
+
+/// In `$ref` mode, replace a compound node's body with a reference and hand the
+/// body back for hoisting. In flat mode it stays inline and nothing is hoisted.
+let private refOrInline
+    (ctx: BuildCtx)
+    (name: string)
+    (body: JsonSchemaValue)
+    (childDefs: Map<string, JsonSchemaValue>)
+    : JsonSchemaValue * Map<string, JsonSchemaValue> =
+    match ctx.RefMode with
+    | Some prefix -> SVDict(Map.ofList [ "$ref", SVStr(prefix + name) ]), Map.add name body childDefs
+    | None -> body, childDefs
 
 /// Discriminator key for tagged DUs. Matches the Pydantic / OpenAPI
 /// convention. v1 hardcodes it; a future combinator can override per codec.
@@ -189,12 +232,23 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
                 // The codec's own schema, captured at registration — this is
                 // how a refined type's constraints reach the emitted document.
                 Schema = SVDict entry.schema
+                Definitions = noDefs
             }
         | None ->
 
+            // Dispatched AFTER the registry, unlike the five primitives above:
+            // a date format or decimal representation is exactly the kind of
+            // thing a consumer may need to override, so a registered codec for
+            // these still wins.
+            if fullName = "System.DateTime" then
+                planDateTime b
+            elif fullName = "System.Guid" then
+                planGuid b
+            elif fullName = "System.Decimal" then
+                planDecimal b
             // F# list MUST precede the union test: `FSharpList<'T>` is itself a DU,
             // so `IsUnion` returns true for it on the CLR and would mis-route.
-            if isFSharpListType fullName then
+            elif isFSharpListType fullName then
                 planSeq ctx (getGenericInnerType t) extractList listBuilder
             elif t.IsArray then
                 planSeq ctx (t.GetElementType()) extractArray arrayBuilder
@@ -218,6 +272,7 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
                     Decode = fun _ -> leafError message
                     Encode = id
                     Schema = SVDict emptySchema
+                    Definitions = noDefs
                 }
 
 // --- Primitive nodes --------------------------------------------------------
@@ -242,6 +297,7 @@ and private planString (b: IJsonBackend) : Plan = {
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "string"
+    Definitions = noDefs
 }
 
 and private planInt (b: IJsonBackend) : Plan = {
@@ -260,6 +316,7 @@ and private planInt (b: IJsonBackend) : Plan = {
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "integer"
+    Definitions = noDefs
 }
 
 and private planInt64 (b: IJsonBackend) : Plan = {
@@ -278,6 +335,7 @@ and private planInt64 (b: IJsonBackend) : Plan = {
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "integer"
+    Definitions = noDefs
 }
 
 and private planFloat (b: IJsonBackend) : Plan = {
@@ -296,6 +354,7 @@ and private planFloat (b: IJsonBackend) : Plan = {
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "number"
+    Definitions = noDefs
 }
 
 and private planBool (b: IJsonBackend) : Plan = {
@@ -312,6 +371,62 @@ and private planBool (b: IJsonBackend) : Plan = {
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "boolean"
+    Definitions = noDefs
+}
+
+// --- String-encoded scalars -------------------------------------------------
+//
+// JSON has no date, uuid or exact-decimal type. All three cross the wire as
+// strings and carry a `format` keyword naming which one — the schema therefore
+// describes exactly what `Encode` produces, which is the property the whole
+// single-walker design exists to guarantee.
+
+and private planDateTime (b: IJsonBackend) : Plan = {
+    Decode =
+        fun v ->
+            if b.IsString v then
+                match Primitives.parseDateTime (b.AsString v) with
+                | Ok d -> Ok(box d)
+                | Error msg -> leafError msg
+            else
+                leafError (sprintf "cannot coerce %s to System.DateTime" (describeValue b v))
+    Encode = fun v -> box (Primitives.dateTimeToString (unbox<System.DateTime> v))
+    Schema = formatNode "string" "date-time"
+    Definitions = noDefs
+}
+
+and private planGuid (b: IJsonBackend) : Plan = {
+    Decode =
+        fun v ->
+            if b.IsString v then
+                match Primitives.parseGuid (b.AsString v) with
+                | Ok g -> Ok(box g)
+                | Error msg -> leafError msg
+            else
+                leafError (sprintf "cannot coerce %s to System.Guid" (describeValue b v))
+    Encode = fun v -> box (Primitives.guidToString (unbox<System.Guid> v))
+    Schema = formatNode "string" "uuid"
+    Definitions = noDefs
+}
+
+and private planDecimal (b: IJsonBackend) : Plan = {
+    // A bare JSON number is accepted on the way in — precision is only at risk
+    // on the way out, and rejecting `12.34` would be gratuitous.
+    Decode =
+        fun v ->
+            if b.IsString v then
+                match Primitives.parseDecimal (b.AsString v) with
+                | Ok d -> Ok(box d)
+                | Error msg -> leafError msg
+            elif b.IsInt v then
+                Ok(box (decimal (b.AsInt v)))
+            elif b.IsFloat v then
+                Ok(box (decimal (b.AsFloat v)))
+            else
+                leafError (sprintf "cannot coerce %s to System.Decimal" (describeValue b v))
+    Encode = fun v -> box (Primitives.decimalToString (unbox<decimal> v))
+    Schema = formatNode "string" "decimal"
+    Definitions = noDefs
 }
 
 // --- Sequences --------------------------------------------------------------
@@ -338,6 +453,7 @@ and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> 
 
     {
         Schema = SVDict(Map.ofList [ "type", SVStr "array"; "items", element.Schema ])
+        Definitions = element.Definitions
         Encode =
             fun v ->
                 extract v
@@ -498,6 +614,14 @@ and private planRecord (ctx: BuildCtx) (t: System.Type) : Plan =
     let rp = buildRecordPlan ctx t
     let expected = sprintf "expected JSON object for %s" rp.Title
 
+    let childDefs =
+        rp.Fields
+        |> Array.map (fun f -> f.Inner.Definitions)
+        |> Array.toList
+        |> mergeDefs
+
+    let schema, defs = refOrInline ctx rp.Title (SVDict(recordSchema rp)) childDefs
+
     {
         Decode =
             fun v ->
@@ -506,7 +630,8 @@ and private planRecord (ctx: BuildCtx) (t: System.Type) : Plan =
                 else
                     leafError expected
         Encode = fun v -> encodeRecordInto b rp (b.NewMap()) v
-        Schema = SVDict(recordSchema rp)
+        Schema = schema
+        Definitions = defs
     }
 
 // --- Unions -----------------------------------------------------------------
@@ -667,6 +792,29 @@ and private planUnion (ctx: BuildCtx) (t: System.Type) : Plan =
                 ]
             )
 
+    let childDefs =
+        [
+            for c in byIndex do
+                match c.Payload with
+                | Some rp ->
+                    yield!
+                        (rp.Fields
+                         |> Array.map (fun f -> f.Inner.Definitions)
+                         |> Array.toList)
+                | None -> ()
+        ]
+        |> mergeDefs
+
+    let body =
+        SVDict(
+            Map.ofList [
+                "title", SVStr typeName
+                "oneOf", SVList [ for c in byIndex -> caseSchema c ]
+            ]
+        )
+
+    let schema, defs = refOrInline ctx typeName body childDefs
+
     {
         Decode =
             fun v ->
@@ -675,13 +823,8 @@ and private planUnion (ctx: BuildCtx) (t: System.Type) : Plan =
                 else
                     leafError expected
         Encode = fun v -> encodeUnionWith b byIndex t v
-        Schema =
-            SVDict(
-                Map.ofList [
-                    "title", SVStr typeName
-                    "oneOf", SVList [ for c in byIndex -> caseSchema c ]
-                ]
-            )
+        Schema = schema
+        Definitions = defs
     }
 
 // --- Cycle guard ------------------------------------------------------------
@@ -695,11 +838,21 @@ and private planDeferred (ctx: BuildCtx) (t: System.Type) : Plan =
     {
         Decode = fun v -> (forTypeIn restart t).Decode v
         Encode = fun v -> (forTypeIn restart t).Encode v
-        // Truncate to a title-only object rather than emit `$ref` / `$defs`.
-        // LLM tool-call validators handle flat schemas far better, and the
-        // schema of a cyclic type is lossy past the first hop either way.
-        // tradeoff: a recursive type's schema is lossy past the first cycle — accepted, the alternative is a schema many consumers reject
-        Schema = SVDict(Map.ofList [ "type", SVStr "object"; "title", SVStr t.Name ])
+        Schema =
+            match ctx.RefMode with
+            // A cycle is exactly what `$ref` is for: the ancestor currently
+            // building this type registers its body on the way out, so the
+            // reference resolves and a recursive type round-trips instead of
+            // truncating.
+            | Some prefix -> SVDict(Map.ofList [ "$ref", SVStr(prefix + t.Name) ])
+            // Flat mode truncates to a title-only object. LLM tool-call
+            // validators handle flat schemas far better, and the schema of a
+            // cyclic type is lossy past the first hop either way.
+            // tradeoff: a recursive type's schema is lossy past the first cycle — accepted in flat mode, the alternative is a schema many consumers reject
+            | None -> SVDict(Map.ofList [ "type", SVStr "object"; "title", SVStr t.Name ])
+        // The ancestor on `Building` owns the definition; registering it here
+        // too would recurse forever.
+        Definitions = noDefs
     }
 
 // ============================================================================
@@ -720,6 +873,29 @@ let forType
             KeyTransform = keyTransform
             TagTransform = tagTransform
             Building = []
+            RefMode = None
+        }
+        t
+
+/// As `forType`, but emitting every record and union as `{"$ref": prefix + Name}`
+/// and hoisting the bodies into `Plan.Definitions`. Decode and encode are
+/// identical either way — this only changes how the schema face is rendered.
+let forTypeWithRefs
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (keyTransform: string -> string)
+    (tagTransform: string -> string)
+    (refPrefix: string)
+    (t: System.Type)
+    : Plan =
+    forTypeIn
+        {
+            Backend = backend
+            Registry = registry
+            KeyTransform = keyTransform
+            TagTransform = tagTransform
+            Building = []
+            RefMode = Some refPrefix
         }
         t
 
@@ -743,6 +919,8 @@ let forTypeFromLookup
         KeyTransform = keyTransform
         TagTransform = tagTransform
         Building = []
+        // Decode only — no schema is rendered from this path.
+        RefMode = None
     }
 
     if FSharpType.IsRecord t then

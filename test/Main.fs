@@ -38,4 +38,5 @@ let main _ =
         JsonSchema.tests
         Alias.tests
         Union.tests
+        Scalars.tests
     ]

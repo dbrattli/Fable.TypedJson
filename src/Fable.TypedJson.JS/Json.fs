@@ -59,6 +59,32 @@ let inline jsonSchemaOf<'T> (registry: CodecRegistry) (caseRules: CaseRules) : s
 let inline jsonSchemaOfCodec<'T> (registry: CodecRegistry) (codec: TypedJson<'T>) : string =
     Fable.TypedJson.JsonSchemaGen.jsonSchemaOfCodec<'T> js registry codec
 
+/// The schema as a `JsonSchemaValue` tree rather than rendered JSON, for
+/// splicing into a larger document — an OpenAPI `components/schemas` map in
+/// particular.
+let inline jsonSchemaValueOf<'T> (registry: CodecRegistry) (caseRules: CaseRules) : JsonSchemaValue =
+    Fable.TypedJson.JsonSchemaGen.jsonSchemaValueOf<'T> js registry caseRules
+
+/// The `$ref`-mode schema for `'T`: its own fragment, plus every record and
+/// union beneath it as a named definition. `refPrefix` forms the pointer —
+/// `"#/$defs/"` for a standalone document, `"#/components/schemas/"` for OpenAPI.
+/// Unlike flat mode, a recursive type round-trips instead of truncating.
+let inline jsonSchemaWithDefsOf<'T>
+    (registry: CodecRegistry)
+    (caseRules: CaseRules)
+    (refPrefix: string)
+    : JsonSchemaValue * Map<string, JsonSchemaValue> =
+    Fable.TypedJson.JsonSchemaGen.jsonSchemaWithDefsOf<'T> js registry caseRules refPrefix
+
+/// The `$ref`-mode schema for a codec's type, sharing its case rule and aliases
+/// at every depth.
+let inline jsonSchemaWithDefsOfCodec<'T>
+    (registry: CodecRegistry)
+    (codec: TypedJson<'T>)
+    (refPrefix: string)
+    : JsonSchemaValue * Map<string, JsonSchemaValue> =
+    Fable.TypedJson.JsonSchemaGen.jsonSchemaWithDefsOfCodec<'T> js registry codec refPrefix
+
 module Encode =
     let inline string s = Fable.TypedJson.Json.Encode.string s
     let inline int n = Fable.TypedJson.Json.Encode.int n
