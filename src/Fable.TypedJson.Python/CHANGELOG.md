@@ -1,5 +1,5 @@
 ---
-last_commit_released: d34e1f4c55505495b907aace4de33c34b73822a3
+last_commit_released: 0375e30f696c8f2b116a164a8991333e84457993
 name: Fable.TypedJson.Python
 ---
 
@@ -12,6 +12,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 5.0.0 - 2026-08-03
+
+### 🚀 Features
+
+* $ref/$defs schema mode, schema IR access, and DateTime/Guid/decimal support (#49) ([0375e30](https://github.com/dbrattli/Fable.TypedJson/commit/0375e30f696c8f2b116a164a8991333e84457993))
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/d34e1f4c55505495b907aace4de33c34b73822a3..0375e30f696c8f2b116a164a8991333e84457993)</small></strong>
 
 ## 5.0.0-rc.1 - 2026-08-02
 
