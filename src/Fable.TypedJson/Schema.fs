@@ -494,3 +494,33 @@ let stringMapAdapter (map: Map<string, string>) (key: string) : obj option =
     match Map.tryFind key map with
     | Some v -> Some(box v)
     | None -> None
+
+(**
+The two faces a keyed non-JSON source presents to `Plan.forTypeFromLookup`.
+
+`Get` is the per-key read the record and union walks do — one lookup per
+field. `AsMap` materialises the whole source as a backend-native map, which
+only a codec registered against the *top-level* type ever asks for: such a
+codec owns the shape and takes its value whole, exactly as it does on the JSON
+path, where `toJsonValue` hands it the parsed object as a `JMap`.
+
+`AsMap` is a thunk, not a value, because the structural walks — the common
+case by far — must not pay to build a map they never read.
+
+invariant: a registered codec sees the same `JMap` shape whether its value arrived as parsed JSON or as a string map
+*)
+type LookupSource = {
+    Get: string -> obj option
+    AsMap: unit -> obj
+}
+
+/// `stringMapAdapter` plus the whole-map face. Values stay raw F# strings —
+/// the same shape `Get` hands out, and what every backend's `IsString` /
+/// `AsString` pair already accepts.
+let stringMapSource (backend: IJsonBackend) (map: Map<string, string>) : LookupSource = {
+    Get = stringMapAdapter map
+    AsMap =
+        fun () ->
+            map
+            |> Map.fold (fun acc key value -> backend.Put(acc, key, box value)) (backend.NewMap())
+}

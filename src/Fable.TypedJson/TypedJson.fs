@@ -265,17 +265,18 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
         It is a second walk rather than a field on `Plan`: a lookup decoder only
         exists for a record or union top level, so carrying one through every
         primitive leaf plan would be dead weight at ~15 construction sites. The
-        two walks read the same `defaultKeyTransform`, which is what keeps the
-        JSON and string-map faces from drifting apart.
+        two walks read the same `defaultKeyTransform` and the same `registry`,
+        which is what keeps the JSON and string-map faces from drifting apart.
 
         tradeoff: every codec pays a second type walk at construction, even JSON-only ones — bought: `decodeStringMap` walks nothing per call
         invariant: `decode` and `decodeStringMap` derive every key from the same transform, so they accept the same spellings
+        invariant: a codec registered for `typ` itself drives both faces — `Plan.forTypeFromLookup` checks the registry before it walks structure
         *)
         let defaultLookupDecode =
             Plan.forTypeFromLookup backend registry defaultKeyTransform defaultTagTransform typ
 
         let decodeStringMap (map: Map<string, string>) : Result<'T, FieldError list> =
-            defaultLookupDecode (stringMapAdapter map)
+            defaultLookupDecode (stringMapSource backend map)
             |> Result.map unbox<'T>
 
         let decodeWith (rules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
@@ -383,7 +384,9 @@ primitive nodes coerce from there, which is the whole reason cross-type
 coercion exists.
 
 Reads through a lookup rather than a native map, so no intermediate JSON
-object has to be built.
+object has to be built — except for the one shape that cannot read fields
+piecemeal, a codec registered against `'T` itself, which takes the map whole
+and so materialises one on demand.
 
 This is the one input shape where the caller usually does *not* choose the key
 spelling, so the case rule is a parameter here rather than baked in as it is
@@ -409,7 +412,7 @@ let decodeStringMapAsWith<'T>
     : Result<'T, FieldError list> =
     let keyTransform = resolveKey Map.empty caseRules
 
-    (Plan.forTypeFromLookup backend registry keyTransform (applyCaseRule caseRules) typ) (stringMapAdapter map)
+    (Plan.forTypeFromLookup backend registry keyTransform (applyCaseRule caseRules) typ) (stringMapSource backend map)
     |> Result.map unbox<'T>
 
 let decodeStringMapAs<'T>
