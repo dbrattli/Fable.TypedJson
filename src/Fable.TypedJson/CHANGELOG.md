@@ -1,5 +1,5 @@
 ---
-last_commit_released: 0375e30f696c8f2b116a164a8991333e84457993
+last_commit_released: 28ba31ee40ef19a7007ad160fffee5d163d2a497
 name: Fable.TypedJson
 ---
 
@@ -12,6 +12,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 5.0.1 - 2026-08-04
+
+### 🐞 Bug Fixes
+
+* $ref definition-name collision, and backend-independent date parsing (#51) ([28ba31e](https://github.com/dbrattli/Fable.TypedJson/commit/28ba31ee40ef19a7007ad160fffee5d163d2a497))
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/0375e30f696c8f2b116a164a8991333e84457993..28ba31ee40ef19a7007ad160fffee5d163d2a497)</small></strong>
 
 ## 5.0.0 - 2026-08-03
 
