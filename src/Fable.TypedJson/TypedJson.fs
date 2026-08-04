@@ -11,7 +11,9 @@ principle: explicit casing at call site, not baked into type definitions
 principle: backend-agnostic core; per-backend shim provides Parse/Stringify
 adr: CaseRules implemented at runtime since Fable.Core.CaseRules is compile-time only
 adr: one plan per (type, case rule, aliases), built at codec construction and captured — build a codec once and reuse it
+adr: the codec owns the `Map<string, string>` path too (`decodeStringMap`), so case rules and aliases reach it exactly as they reach JSON
 invariant: `decode`, `encode` and the emitted JSON Schema all read the same plan, so they cannot disagree about a wire shape
+invariant: `validateMap` / `validateJson` / `dump` stay camelCase-only — a case rule is asked for, never inferred
 *)
 
 module Fable.TypedJson.Json
@@ -108,6 +110,18 @@ type TypedJson<'T> = {
     decodeWith: CaseRules -> JsonMap -> Result<'T, FieldError list>
     /// Encode with an explicit case rule, overriding the codec's default.
     encodeWith: CaseRules -> 'T -> string
+    /// Decode a `Map<string, string>` — LLM tool-call arguments, form fields,
+    /// environment variables — using the codec's configured `caseRules` and
+    /// `aliases`. The codec route is the only way to reach the string-map path
+    /// with anything other than camelCase; `Json.validateMap` is fixed at
+    /// camelCase and stays that way.
+    ///
+    ///   let codec = auto<SetCapabilityInput> beam |> withCaseRules CaseRules.SnakeCase
+    ///   codec.decodeStringMap (Map.ofList [ "device_id", "abc" ])
+    ///
+    /// Key matching is **strict**: under `SnakeCase` only `device_id` is read,
+    /// never `deviceId`. Same rule as the JSON path.
+    decodeStringMap: Map<string, string> -> Result<'T, FieldError list>
     /// Default case rule applied to F# field names → JSON keys. Defaults to
     /// `LowerFirst` (camelCase) — the most common convention for modern
     /// JSON APIs (JS/TS, REST, OpenAPI). Use `withCaseRules` to change it.
@@ -193,6 +207,10 @@ let resolveKey (aliases: Map<string, string>) (caseRules: CaseRules) (fieldName:
 The key and tag transforms the registry-free shortcut entry points
 (`validateMap`, `validateJson`, `dump`) use: camelCase, no aliases.
 
+`validateMapWithCaseRules` is the one shortcut that takes a rule instead of
+assuming this one — still no aliases, which stay a codec-only feature. Passing
+`CaseRules.LowerFirst` there reproduces these transforms exactly.
+
 Byte-identical to what `Schema.lowerFirstTransform` produced, and to the
 codec's own `LowerFirst` default — which is what let the shortcut flow move
 onto the codec's walker without a wire-format change.
@@ -241,6 +259,25 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
         let defaultPlan =
             Plan.forType backend registry defaultKeyTransform defaultTagTransform typ
 
+        (**
+        The string-map face of the same (type, rules, aliases) combo.
+
+        It is a second walk rather than a field on `Plan`: a lookup decoder only
+        exists for a record or union top level, so carrying one through every
+        primitive leaf plan would be dead weight at ~15 construction sites. The
+        two walks read the same `defaultKeyTransform`, which is what keeps the
+        JSON and string-map faces from drifting apart.
+
+        tradeoff: every codec pays a second type walk at construction, even JSON-only ones — bought: `decodeStringMap` walks nothing per call
+        invariant: `decode` and `decodeStringMap` derive every key from the same transform, so they accept the same spellings
+        *)
+        let defaultLookupDecode =
+            Plan.forTypeFromLookup backend registry defaultKeyTransform defaultTagTransform typ
+
+        let decodeStringMap (map: Map<string, string>) : Result<'T, FieldError list> =
+            defaultLookupDecode (stringMapAdapter map)
+            |> Result.map unbox<'T>
+
         let decodeWith (rules: CaseRules) (map: JsonMap) : Result<'T, FieldError list> =
             // Fast path: caller didn't override the case rule, reuse the plan.
             // The fall-through rebuilds for the rare case where decodeWith is
@@ -272,6 +309,7 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
             encode = encodeWith caseRules
             decodeWith = decodeWith
             encodeWith = encodeWith
+            decodeStringMap = decodeStringMap
             caseRules = caseRules
             aliases = aliases
             withCaseRules = fun newRules -> build aliases newRules
@@ -346,15 +384,41 @@ coercion exists.
 
 Reads through a lookup rather than a native map, so no intermediate JSON
 object has to be built.
+
+This is the one input shape where the caller usually does *not* choose the key
+spelling, so the case rule is a parameter here rather than baked in as it is
+for `validateJson` / `dump`. `validateMap` pins it to `LowerFirst` and keeps
+its pre-existing behaviour; `validateMapWithCaseRules` is the way to ask for
+anything else.
+
+Matching stays **strict** — `CaseRules.SnakeCase` reads `device_id` and only
+`device_id`, never the camelCase spelling as well. A caller arriving here from
+a key-mismatch bug tends to assume the lenient reading; it is not what happens,
+deliberately, because a lenient rule has no answer when both keys are present
+and would put the string-map path out of step with JSON.
+
+adr: case rule is a parameter on the string-map path, defaulted at each entry point rather than at the core
+invariant: `validateMap` resolves camelCase, unconditionally and forever — existing callers see no change
 *)
+let decodeStringMapAsWith<'T>
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (caseRules: CaseRules)
+    (typ: System.Type)
+    (map: Map<string, string>)
+    : Result<'T, FieldError list> =
+    let keyTransform = resolveKey Map.empty caseRules
+
+    (Plan.forTypeFromLookup backend registry keyTransform (applyCaseRule caseRules) typ) (stringMapAdapter map)
+    |> Result.map unbox<'T>
+
 let decodeStringMapAs<'T>
     (backend: IJsonBackend)
     (registry: CodecRegistry)
     (typ: System.Type)
     (map: Map<string, string>)
     : Result<'T, FieldError list> =
-    (Plan.forTypeFromLookup backend registry camelCaseKey camelCaseTag typ) (stringMapAdapter map)
-    |> Result.map unbox<'T>
+    decodeStringMapAsWith<'T> backend registry CaseRules.LowerFirst typ map
 
 let inline validateMap<'T> (backend: IJsonBackend) (map: Map<string, string>) : Result<'T, FieldError list> =
     decodeStringMapAs<'T> backend Fable.TypedJson.Schema.emptyRegistry typeof<'T> map
@@ -362,6 +426,26 @@ let inline validateMap<'T> (backend: IJsonBackend) (map: Map<string, string>) : 
 /// Validate a `Map<string, string>`, resolving registered codecs.
 let inline validateMapWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
     decodeStringMapAs<'T> backend registry typeof<'T> map
+
+/// Validate a `Map<string, string>` whose keys are in `caseRules` spelling —
+/// snake_case LLM tool-call arguments in particular:
+///
+///   validateMapWithCaseRules<SetCapabilityInput> beam CaseRules.SnakeCase args
+///
+/// Matching is strict: `SnakeCase` reads `device_id`, not `deviceId`.
+///
+/// Builds a plan per call, like the other shortcuts. For per-field `alias`
+/// overrides, a `CodecRegistry`, a `withModel` validator, or repeated decoding,
+/// build a codec and use `decodeStringMap`:
+///
+///   let codec = auto<'T> beam |> withCaseRules CaseRules.SnakeCase
+///   codec.decodeStringMap args
+let inline validateMapWithCaseRules<'T>
+    (backend: IJsonBackend)
+    (caseRules: CaseRules)
+    (map: Map<string, string>)
+    : Result<'T, FieldError list> =
+    decodeStringMapAsWith<'T> backend Fable.TypedJson.Schema.emptyRegistry caseRules typeof<'T> map
 
 /// Compose a cross-field model validator onto a codec. Runs after the per-field
 /// decode succeeds. If the validator returns Error, those errors replace the success.
@@ -377,6 +461,8 @@ let withModel (validator: 'T -> Result<'T, FieldError list>) (codec: TypedJson<'
     // Wrap the inner codec's decode with the model validator. Rebuild
     // recursively so subsequent `alias` / `withCaseRules` calls re-apply
     // the validator on the fresh inner codec.
+    //
+    // invariant: every decode face of the codec runs the validator — a string map is validated exactly as JSON is
     let rec wrap (inner: TypedJson<'T>) : TypedJson<'T> =
         let decodeWith (rules: CaseRules) (map: JsonMap) =
             inner.decodeWith rules map
@@ -387,6 +473,7 @@ let withModel (validator: 'T -> Result<'T, FieldError list>) (codec: TypedJson<'
             encode = inner.encode
             decodeWith = decodeWith
             encodeWith = inner.encodeWith
+            decodeStringMap = fun map -> inner.decodeStringMap map |> Result.bind validator
             caseRules = inner.caseRules
             aliases = inner.aliases
             withCaseRules = fun rules -> wrap (inner.withCaseRules rules)

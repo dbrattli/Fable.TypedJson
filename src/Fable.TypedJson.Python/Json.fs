@@ -41,6 +41,13 @@ let inline validateJsonWith<'T> (registry: CodecRegistry) (map: obj) : Result<'T
 let inline validateMapWith<'T> (registry: CodecRegistry) (map: Map<string, string>) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateMapWith<'T> python registry map
 
+/// Validate a `Map<string, string>` whose keys are in `caseRules` spelling —
+/// snake_case LLM tool-call arguments in particular. Matching is strict:
+/// `SnakeCase` reads `device_id`, not `deviceId`. For aliases or a registry,
+/// use a codec's `decodeStringMap`.
+let inline validateMapWithCaseRules<'T> (caseRules: CaseRules) (map: Map<string, string>) : Result<'T, FieldError list> =
+    Fable.TypedJson.Json.validateMapWithCaseRules<'T> python caseRules map
+
 let inline dumpWith<'T> (registry: CodecRegistry) (record: 'T) : obj =
     Fable.TypedJson.Json.dumpWith<'T> python registry record
 

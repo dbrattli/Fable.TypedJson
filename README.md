@@ -238,6 +238,20 @@ match validateJsonWith<WeatherRequest> codecs (parseRaw """{"location":"Oslo","d
 
 `dump` is the encode-side counterpart, producing a backend-native map instead of a string. All of these build a plan per call — for anything repeated, build a codec once and reuse it.
 
+Both shorthands resolve camelCase keys. The string map is the one input shape where you usually don't choose the spelling — an LLM sends back the snake_case parameter names your tool schema advertised, an HTML form sends its own field names — so it takes a case rule as well:
+
+```fsharp
+let toolArgs = Map.ofList [ "device_id", "dev-1"; "target_value", "42" ]
+
+validateMapWithCaseRules<SetCapabilityInput> CaseRules.SnakeCase toolArgs
+
+// or, for aliases / a registry / a model validator / repeated calls:
+let codec = auto<SetCapabilityInput> () |> withCaseRules CaseRules.SnakeCase
+codec.decodeStringMap toolArgs
+```
+
+Matching is strict, exactly as on the JSON path: under `SnakeCase` the decoder reads `device_id` and *only* `device_id` — a stray `deviceId` is a missing field, not a second accepted spelling.
+
 ## How it compares
 
 This isn't a "better than" claim — it's a fit-for-purpose claim. Pick what matches your needs.

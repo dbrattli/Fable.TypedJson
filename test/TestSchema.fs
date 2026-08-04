@@ -52,6 +52,14 @@ type MultiWordInput = {
     RelativeHumidity: float
 }
 
+(**
+The shape that motivated case rules on the string-map path: an LLM tool whose
+advertised parameter names are snake_case, whose arguments arrive as a
+`Map<string, string>`. Both fields are multi-word on purpose — under a
+single-word field every case rule agrees and a broken key derivation passes.
+*)
+type SetCapabilityInput = { DeviceId: string; TargetValue: int }
+
 type BoolInput = { Active: bool; Debug: bool }
 
 type OptionalInput = { Name: string; Email: string option }
@@ -572,6 +580,175 @@ let private multiWordKeyTests =
         ]
     )
 
+// ============================================================================
+// String-map case rules — the snake_case tool-call shape
+// ============================================================================
+
+(**
+Two routes to a non-camelCase string map: `validateMapWithCaseRules` for a
+one-off, `codec.decodeStringMap` for anything wanting aliases, a registry or a
+model validator. Both are checked here, along with the two things that must
+*not* change: `validateMap` still resolves camelCase, and matching stays strict
+in both directions (`SnakeCase` reads `device_id` and rejects `deviceId`).
+*)
+let private stringMapCaseRuleTests =
+    testList (
+        "String-map case rules",
+        [
+            test (
+                "snake_case keys decode under CaseRules.SnakeCase",
+                fun _ ->
+                    let input = Map.ofList [ "device_id", "dev-1"; "target_value", "42" ]
+
+                    match validateMapWithCaseRules<SetCapabilityInput> CaseRules.SnakeCase input with
+                    | Ok r ->
+                        assertThat r.DeviceId (isEqualTo "dev-1")
+                        assertThat r.TargetValue (isEqualTo 42)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "kebab-case keys decode under CaseRules.KebabCase",
+                fun _ ->
+                    let input = Map.ofList [ "device-id", "dev-1"; "target-value", "42" ]
+
+                    match validateMapWithCaseRules<SetCapabilityInput> CaseRules.KebabCase input with
+                    | Ok r -> assertThat r.DeviceId (isEqualTo "dev-1")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "LowerFirst reproduces validateMap exactly",
+                fun _ ->
+                    let input = Map.ofList [ "deviceId", "dev-1"; "targetValue", "42" ]
+
+                    match validateMapWithCaseRules<SetCapabilityInput> CaseRules.LowerFirst input with
+                    | Ok r -> assertThat r.DeviceId (isEqualTo "dev-1")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            // The default must not quietly widen: a caller who never asked for
+            // snake_case keeps getting the camelCase resolution they had.
+            test (
+                "snake_case keys still fail under the default rule",
+                fun _ ->
+                    let input = Map.ofList [ "device_id", "dev-1"; "target_value", "42" ]
+
+                    match validateMap<SetCapabilityInput> input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        assertThat errors.Length (isEqualTo 2)
+                        assertThat (errors.[0].path) (isEqualTo "deviceId")
+            )
+            test (
+                "camelCase keys unchanged under the default rule",
+                fun _ ->
+                    let input = Map.ofList [ "deviceId", "dev-1"; "targetValue", "42" ]
+
+                    match validateMap<SetCapabilityInput> input with
+                    | Ok r ->
+                        assertThat r.DeviceId (isEqualTo "dev-1")
+                        assertThat r.TargetValue (isEqualTo 42)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            // Strict, not lenient — the documented choice. If this ever starts
+            // passing, the string-map path has drifted away from the JSON path.
+            test (
+                "camelCase keys rejected under SnakeCase — matching is strict",
+                fun _ ->
+                    let input = Map.ofList [ "deviceId", "dev-1"; "targetValue", "42" ]
+
+                    match validateMapWithCaseRules<SetCapabilityInput> CaseRules.SnakeCase input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors ->
+                        assertThat errors.Length (isEqualTo 2)
+                        assertThat (errors.[0].path) (isEqualTo "device_id")
+            )
+            test (
+                "codec decodeStringMap follows withCaseRules",
+                fun _ ->
+                    let codec =
+                        auto<SetCapabilityInput> ()
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let input = Map.ofList [ "device_id", "dev-1"; "target_value", "42" ]
+
+                    match codec.decodeStringMap input with
+                    | Ok r ->
+                        assertThat r.DeviceId (isEqualTo "dev-1")
+                        assertThat r.TargetValue (isEqualTo 42)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "default codec decodeStringMap reads camelCase",
+                fun _ ->
+                    let codec = auto<SetCapabilityInput> ()
+                    let input = Map.ofList [ "deviceId", "dev-1"; "targetValue", "42" ]
+
+                    match codec.decodeStringMap input with
+                    | Ok r -> assertThat r.DeviceId (isEqualTo "dev-1")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "alias overrides the active case rule on the string-map path",
+                fun _ ->
+                    let codec =
+                        auto<SetCapabilityInput> ()
+                        |> withCaseRules CaseRules.SnakeCase
+                        |> alias "DeviceId" "id"
+
+                    // `id` for the aliased field, `target_value` for the rest.
+                    let input = Map.ofList [ "id", "dev-1"; "target_value", "42" ]
+
+                    match codec.decodeStringMap input with
+                    | Ok r ->
+                        assertThat r.DeviceId (isEqualTo "dev-1")
+                        assertThat r.TargetValue (isEqualTo 42)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "alias replaces the case-rule key rather than adding to it",
+                fun _ ->
+                    let codec =
+                        auto<SetCapabilityInput> ()
+                        |> withCaseRules CaseRules.SnakeCase
+                        |> alias "DeviceId" "id"
+
+                    let input = Map.ofList [ "device_id", "dev-1"; "target_value", "42" ]
+
+                    match codec.decodeStringMap input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat (errors.[0].path) (isEqualTo "id")
+            )
+            test (
+                "withModel validator runs on decodeStringMap",
+                fun _ ->
+                    let codec =
+                        auto<SetCapabilityInput> ()
+                        |> withModel (fun r ->
+                            if r.TargetValue >= 0 then
+                                Ok r
+                            else
+                                Error [
+                                    {
+                                        path = "targetValue"
+                                        message = "must be non-negative"
+                                    }
+                                ])
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    let ok = Map.ofList [ "device_id", "dev-1"; "target_value", "42" ]
+
+                    match codec.decodeStringMap ok with
+                    | Ok r -> assertThat r.TargetValue (isEqualTo 42)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+
+                    let bad = Map.ofList [ "device_id", "dev-1"; "target_value", "-1" ]
+
+                    match codec.decodeStringMap bad with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat (errors.[0].message) (isEqualTo "must be non-negative")
+            )
+        ]
+    )
+
 let tests =
     testList (
         "Schema",
@@ -582,5 +759,6 @@ let tests =
             formatErrorsTests
             dumpTests
             multiWordKeyTests
+            stringMapCaseRuleTests
         ]
     )
