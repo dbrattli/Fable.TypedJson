@@ -932,11 +932,27 @@ let forTypeWithRefs
         t
 
 (**
-Decode from a `key -> value` lookup rather than a native map, for sources that
-are not backend-native JSON — `Map<string, string>` tool-call input in
-particular. Records and unions read their fields through a lookup anyway, so
-this costs nothing; any other top-level type has no keys to read and is
-rejected.
+Decode from a `LookupSource` rather than a native map, for sources that are
+not backend-native JSON — `Map<string, string>` tool-call input in particular.
+Records and unions read their fields through a lookup anyway, so this costs
+nothing; any other top-level type has no keys to read and is rejected.
+
+The dispatch below mirrors `forTypeIn`'s, and has to keep mirroring it. This
+is the second decode face of the *same* codec, so the two disagreeing about
+who owns a type is exactly the drift the one-walker rule exists to prevent.
+Two orderings carry the weight:
+
+- A list or array is an `FSharpType.IsUnion` on the CLR, so it must be tested
+  first — `buildCasePlans` on `FSharpList` throws on `Cons`'s two fields.
+- A registered codec owns its type ahead of the structural walk — otherwise
+  the codec a caller registered decodes their JSON and is silently skipped
+  for their string map.
+
+Rejection is per call rather than a throw at construction because every codec
+builds this face eagerly, including the `auto<'T list>` ones that only ever
+decode JSON.
+
+invariant: `forTypeIn` and `forTypeFromLookup` route a type to the same owner — sequences before unions, registry before structure
 *)
 let forTypeFromLookup
     (backend: IJsonBackend)
@@ -944,7 +960,7 @@ let forTypeFromLookup
     (keyTransform: string -> string)
     (tagTransform: string -> string)
     (t: System.Type)
-    : (string -> obj option) -> Result<obj, FieldError list> =
+    : LookupSource -> Result<obj, FieldError list> =
     let ctx = {
         Backend = backend
         Registry = registry
@@ -955,14 +971,9 @@ let forTypeFromLookup
         RefMode = None
     }
 
-    if FSharpType.IsRecord t then
-        let rp = buildRecordPlan ctx t
-        fun lookup -> decodeRecordWith backend rp lookup
-    elif FSharpType.IsUnion t then
-        let cases = casesByTag (buildCasePlans ctx t)
-        let typeName = t.Name
-        fun lookup -> decodeUnionWith backend cases typeName lookup
-    else
+    let fullName = t.FullName
+
+    let keyless () =
         let err = [
             {
                 path = ""
@@ -970,4 +981,28 @@ let forTypeFromLookup
             }
         ]
 
-        fun _ -> Error err
+        fun (_: LookupSource) -> Error err
+
+    if isFSharpListType fullName || t.IsArray then
+        keyless ()
+    elif FSharpType.IsRecord t || FSharpType.IsUnion t then
+        match tryGetCodecEntry fullName registry with
+        // The codec owns the type on both faces, and takes the source whole as
+        // one `JMap` — the same value the JSON face passes it.
+        | Some entry ->
+            let decode = entry.decode
+
+            fun src ->
+                match decode (toJsonValue backend (src.AsMap())) with
+                | Ok x -> Ok x
+                | Error msg -> leafError msg
+        | None ->
+            if FSharpType.IsRecord t then
+                let rp = buildRecordPlan ctx t
+                fun src -> decodeRecordWith backend rp src.Get
+            else
+                let cases = casesByTag (buildCasePlans ctx t)
+                let typeName = t.Name
+                fun src -> decodeUnionWith backend cases typeName src.Get
+    else
+        keyless ()

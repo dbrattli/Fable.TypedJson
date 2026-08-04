@@ -35,6 +35,10 @@ let backend = beam
 #endif
 #endif
 
+// For `Codec.mk` — the registry fixture below builds a codec that takes its
+// value whole, which no combinator over a primitive codec can express.
+open Fable.TypedJson
+
 
 // ============================================================================
 // Test Record Types
@@ -59,6 +63,17 @@ advertised parameter names are snake_case, whose arguments arrive as a
 single-word field every case rule agrees and a broken key derivation passes.
 *)
 type SetCapabilityInput = { DeviceId: string; TargetValue: int }
+
+(**
+The same tool call as a tagged union: the discriminator shares the flat map
+with the payload's fields, so `type` plus the case's own keys is everything a
+caller sends. The case names are multi-word for the same reason the fields
+are — under `SnakeCase` the tag is `set_capability`, and only a tag transform
+that tracks the codec's rule produces that.
+*)
+type DeviceCommand =
+    | SetCapability of SetCapabilityInput
+    | PingDevice
 
 type BoolInput = { Active: bool; Debug: bool }
 
@@ -749,6 +764,160 @@ let private stringMapCaseRuleTests =
         ]
     )
 
+// ============================================================================
+// String-map dispatch — who owns the top-level type
+// ============================================================================
+
+(**
+`Plan.forTypeFromLookup` decides who decodes the top-level type, and it has to
+decide it the way `forTypeIn` does — it is the second decode face of the same
+codec. Three orderings are pinned here: a union is walked as a union (with the
+tag transform following the case rule), a sequence is *not* walked as a union
+even though `FSharpType.IsUnion` says it is, and a registered codec outranks
+the structural walk.
+
+The sequence case is the one with teeth at construction time: the string-map
+face is built eagerly for every codec, so a throw there takes down `auto<'T>`
+for callers who only ever decode JSON.
+*)
+
+(**
+A type whose registered codec owns the whole value — it reads the map itself
+instead of letting the walker read fields out of it. That is what tells the
+two apart: under the structural walk `name` is never read and `Red` / `Green`
+/ `Blue` are three missing fields.
+*)
+type Colour = { Red: int; Green: int; Blue: int }
+
+let private colourCodec: IJsonCodec<Colour> =
+    Codec.mk
+        (fun jv ->
+            match jv with
+            | JMap m when backend.ContainsKey(m, "name") ->
+                match backend.AsString(backend.Get(m, "name")) with
+                | "red" -> Ok { Red = 255; Green = 0; Blue = 0 }
+                | "lime" -> Ok { Red = 0; Green = 255; Blue = 0 }
+                | other -> Error(sprintf "unknown colour '%s'" other)
+            | _ -> Error "expected an object with a 'name' key")
+        (fun c -> JString(if c.Red = 255 then "red" else "lime"))
+        (primitiveSchema "object")
+
+let private colourRegistry: CodecRegistry = emptyRegistry |> register colourCodec
+
+let private stringMapDispatchTests =
+    testList (
+        "String-map dispatch",
+        [
+            test (
+                "a tagged union decodes from a flat string map",
+                fun _ ->
+                    let input =
+                        Map.ofList [ "type", "setCapability"; "deviceId", "dev-1"; "targetValue", "42" ]
+
+                    match validateMap<DeviceCommand> input with
+                    | Ok(SetCapability r) ->
+                        assertThat r.DeviceId (isEqualTo "dev-1")
+                        assertThat r.TargetValue (isEqualTo 42)
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "SetCapability")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            // The discriminator *value* is the case name under the active rule,
+            // exactly as on the JSON path. The discriminator *key* is always
+            // `type` — it is not a field name and no rule applies to it.
+            test (
+                "the discriminator value follows the case rule",
+                fun _ ->
+                    let input =
+                        Map.ofList [ "type", "set_capability"; "device_id", "dev-1"; "target_value", "42" ]
+
+                    match validateMapWithCaseRules<DeviceCommand> CaseRules.SnakeCase input with
+                    | Ok(SetCapability r) ->
+                        assertThat r.DeviceId (isEqualTo "dev-1")
+                        assertThat r.TargetValue (isEqualTo 42)
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "SetCapability")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "a camelCase discriminator is rejected under SnakeCase",
+                fun _ ->
+                    let input =
+                        Map.ofList [ "type", "setCapability"; "device_id", "dev-1"; "target_value", "42" ]
+
+                    match validateMapWithCaseRules<DeviceCommand> CaseRules.SnakeCase input with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat (errors.[0].path) (isEqualTo "type")
+            )
+            test (
+                "a fieldless case needs only the discriminator",
+                fun _ ->
+                    let input = Map.ofList [ "type", "ping_device" ]
+
+                    match validateMapWithCaseRules<DeviceCommand> CaseRules.SnakeCase input with
+                    | Ok PingDevice -> assertThat true (isEqualTo true)
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "PingDevice")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            // `FSharpList` is a union whose `Cons` case has two fields, which
+            // the union walk rejects — so reaching it at all throws, and the
+            // string-map face is built for every codec. Constructing these two
+            // is most of the test; the assertions just pin what a keyless top
+            // level reports when someone does call `decodeStringMap` on one.
+            test (
+                "a sequence top level is keyless, not a malformed union",
+                fun _ ->
+                    let listCodec = auto<SetCapabilityInput list> ()
+                    let arrayCodec = auto<int[]> ()
+
+                    match listCodec.decodeStringMap (Map.ofList [ "deviceId", "dev-1" ]) with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat errors.Length (isEqualTo 1)
+
+                    match arrayCodec.decodeStringMap (Map.ofList [ "value", "1" ]) with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat errors.Length (isEqualTo 1)
+
+                    // Still a working codec on the face it was built for.
+                    match listCodec.decode (parseRaw """[{"deviceId":"dev-1","targetValue":42}]""") with
+                    | Ok [ item ] -> assertThat item.TargetValue (isEqualTo 42)
+                    | Ok other -> assertThat (sprintf "%A" other) (isEqualTo "one item")
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "a codec registered for the top-level type drives the string map",
+                fun _ ->
+                    match validateMapWith<Colour> colourRegistry (Map.ofList [ "name", "red" ]) with
+                    | Ok c ->
+                        assertThat c.Red (isEqualTo 255)
+                        assertThat c.Green (isEqualTo 0)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            // The two faces of one codec must hand a registered codec the same
+            // value. If the string map ever goes back to being walked
+            // structurally, this is where it shows up.
+            test (
+                "both decode faces reach the registered codec alike",
+                fun _ ->
+                    let codec = autoWith<Colour> colourRegistry
+
+                    let fromJson = codec.decode (parseRaw """{"name":"lime"}""")
+                    let fromStringMap = codec.decodeStringMap (Map.ofList [ "name", "lime" ])
+
+                    assertThat (sprintf "%A" fromStringMap) (isEqualTo (sprintf "%A" fromJson))
+
+                    match fromStringMap with
+                    | Ok c -> assertThat c.Green (isEqualTo 255)
+                    | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
+                "an unknown value still comes back as the codec's own error",
+                fun _ ->
+                    match validateMapWith<Colour> colourRegistry (Map.ofList [ "name", "puce" ]) with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat (errors.[0].message) (isEqualTo "unknown colour 'puce'")
+            )
+        ]
+    )
+
 let tests =
     testList (
         "Schema",
@@ -760,5 +929,6 @@ let tests =
             dumpTests
             multiWordKeyTests
             stringMapCaseRuleTests
+            stringMapDispatchTests
         ]
     )
