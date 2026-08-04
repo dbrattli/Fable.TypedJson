@@ -1,5 +1,5 @@
 ---
-last_commit_released: 0375e30f696c8f2b116a164a8991333e84457993
+last_commit_released: 02b1f4805966b8314b4ef0f23a9a4ef38ef3ddaf
 name: Fable.TypedJson.Python
 ---
 
@@ -12,6 +12,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 5.1.0 - 2026-08-04
+
+### 🚀 Features
+
+* Case rules on the Map<string,string> validation path (#53) ([bc9c2b9](https://github.com/dbrattli/Fable.TypedJson/commit/bc9c2b95e7ee7a98c51ac19abe92c26cdb16a2aa))
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/0375e30f696c8f2b116a164a8991333e84457993..02b1f4805966b8314b4ef0f23a9a4ef38ef3ddaf)</small></strong>
 
 ## 5.0.0 - 2026-08-03
 
