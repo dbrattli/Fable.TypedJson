@@ -409,6 +409,17 @@ being reachable at all is half of what is under test.
 invariant: a type reached twice is defined once and referenced twice
 *)
 
+// Two distinct types sharing a simple name, in different modules. Keyed by
+// `Name`, both collapsed into one definition and every `$ref` resolved to
+// whichever merged last — a silently wrong document.
+module Alpha =
+    type Item = { Label: string }
+
+module Beta =
+    type Item = { Count: int }
+
+type TwoItems = { First: Alpha.Item; Second: Beta.Item }
+
 let private prefix = "#/components/schemas/"
 
 let private prop (v: JsonSchemaValue) (key: string) : JsonSchemaValue option =
@@ -538,6 +549,51 @@ let private refModeTests =
             )
 
             // Flat mode is the default and must be untouched by any of the above.
+            test (
+                "distinct types with the same simple name get distinct definitions",
+                fun _ ->
+                    let _, defs =
+                        jsonSchemaWithDefsOf<TwoItems> emptyRegistry CaseRules.SnakeCase prefix
+
+                    // Three types are involved, so three definitions — not two.
+                    assertThat (defs |> Map.count) (isEqualTo 3)
+
+                    let refOf field =
+                        prop defs.["TwoItems"] "properties"
+                        |> Option.bind (fun p -> prop p field)
+                        |> Option.bind refTarget
+
+                    let first = refOf "first"
+                    let second = refOf "second"
+
+                    assertThat (first = second) isFalse
+
+                    // And each pointer resolves to the right body.
+                    let propsOf (pointer: string option) =
+                        pointer
+                        |> Option.map (fun p -> p.Substring prefix.Length)
+                        |> Option.bind (fun key -> Map.tryFind key defs)
+                        |> Option.bind (fun body -> prop body "properties")
+                        |> function
+                            | Some(SVDict m) -> m |> Map.toList |> List.map fst
+                            | _ -> []
+
+                    assertThat (propsOf first) (isEqualTo [ "label" ])
+                    assertThat (propsOf second) (isEqualTo [ "count" ])
+            )
+
+            // Qualified keys are only the fallback: an unambiguous type keeps its
+            // simple name so published pointers stay readable.
+            test (
+                "an unambiguous type keeps its simple name",
+                fun _ ->
+                    let schema, defs =
+                        jsonSchemaWithDefsOf<Simple> emptyRegistry CaseRules.SnakeCase prefix
+
+                    assertThat (refTarget schema) (isEqualTo (Some(prefix + "Simple")))
+                    assertThat (defs |> Map.containsKey "Simple") isTrue
+            )
+
             test (
                 "flat mode still inlines and still truncates cycles",
                 fun _ ->

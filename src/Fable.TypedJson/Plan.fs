@@ -161,23 +161,33 @@ let private formatNode (typeName: string) (format: string) : JsonSchemaValue =
 /// A leaf carries no hoisted definitions — only compound nodes do.
 let private noDefs: Map<string, JsonSchemaValue> = Map.empty
 
-/// Right-biased union of definition maps gathered from sibling subtrees. Two
-/// subtrees reaching the same type produce the same body, so a collision is a
-/// re-registration rather than a conflict.
+/// Union of definition maps gathered from sibling subtrees. Keys are `FullName`s,
+/// so a repeated key is genuinely the same type reached twice and the bodies are
+/// equal — merging is a re-registration, never a conflict.
 let private mergeDefs (maps: Map<string, JsonSchemaValue> list) : Map<string, JsonSchemaValue> =
     maps
     |> List.fold (fun acc m -> Map.fold (fun a k v -> Map.add k v a) acc m) Map.empty
 
-/// In `$ref` mode, replace a compound node's body with a reference and hand the
-/// body back for hoisting. In flat mode it stays inline and nothing is hoisted.
+(**
+In `$ref` mode, replace a compound node's body with a reference and hand the body
+back for hoisting. In flat mode it stays inline and nothing is hoisted.
+
+Keyed by **`FullName`, not `Name`**. Two records both called `Item` in different
+modules share a simple name, so keying on it collapsed them into one definition
+and every `$ref` to either resolved to whichever merged last — a silently wrong
+document rather than a failure. `JsonSchemaGen.shortenDefinitionNames` shortens
+the unambiguous ones again on the way out, so published pointers stay readable.
+
+invariant: a definition key identifies exactly one type
+*)
 let private refOrInline
     (ctx: BuildCtx)
-    (name: string)
+    (key: string)
     (body: JsonSchemaValue)
     (childDefs: Map<string, JsonSchemaValue>)
     : JsonSchemaValue * Map<string, JsonSchemaValue> =
     match ctx.RefMode with
-    | Some prefix -> SVDict(Map.ofList [ "$ref", SVStr(prefix + name) ]), Map.add name body childDefs
+    | Some prefix -> SVDict(Map.ofList [ "$ref", SVStr(prefix + key) ]), Map.add key body childDefs
     | None -> body, childDefs
 
 /// Discriminator key for tagged DUs. Matches the Pydantic / OpenAPI
@@ -242,6 +252,8 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
             // these still wins.
             if fullName = "System.DateTime" then
                 planDateTime b
+            elif fullName = "System.DateTimeOffset" then
+                planDateTimeOffset b
             elif fullName = "System.Guid" then
                 planGuid b
             elif fullName = "System.Decimal" then
@@ -395,6 +407,20 @@ and private planDateTime (b: IJsonBackend) : Plan = {
     Definitions = noDefs
 }
 
+and private planDateTimeOffset (b: IJsonBackend) : Plan = {
+    Decode =
+        fun v ->
+            if b.IsString v then
+                match Primitives.parseDateTimeOffset (b.AsString v) with
+                | Ok d -> Ok(box d)
+                | Error msg -> leafError msg
+            else
+                leafError (sprintf "cannot coerce %s to System.DateTimeOffset" (describeValue b v))
+    Encode = fun v -> box (Primitives.dateTimeOffsetToString (unbox<System.DateTimeOffset> v))
+    Schema = formatNode "string" "date-time"
+    Definitions = noDefs
+}
+
 and private planGuid (b: IJsonBackend) : Plan = {
     Decode =
         fun v ->
@@ -410,8 +436,13 @@ and private planGuid (b: IJsonBackend) : Plan = {
 }
 
 and private planDecimal (b: IJsonBackend) : Plan = {
-    // A bare JSON number is accepted on the way in — precision is only at risk
-    // on the way out, and rejecting `12.34` would be gratuitous.
+    // A bare JSON number is accepted on the way in — rejecting `12.34` would be
+    // gratuitous, and the string form is what this node itself emits.
+    //
+    // tradeoff: the float arm goes through binary floating point, so a value with
+    //           more precision than a double holds is already lossy by the time it
+    //           reaches here. Accepted: the sender chose to write a JSON number,
+    //           and the alternative is rejecting input every other decoder takes.
     Decode =
         fun v ->
             if b.IsString v then
@@ -620,7 +651,7 @@ and private planRecord (ctx: BuildCtx) (t: System.Type) : Plan =
         |> Array.toList
         |> mergeDefs
 
-    let schema, defs = refOrInline ctx rp.Title (SVDict(recordSchema rp)) childDefs
+    let schema, defs = refOrInline ctx t.FullName (SVDict(recordSchema rp)) childDefs
 
     {
         Decode =
@@ -813,7 +844,7 @@ and private planUnion (ctx: BuildCtx) (t: System.Type) : Plan =
             ]
         )
 
-    let schema, defs = refOrInline ctx typeName body childDefs
+    let schema, defs = refOrInline ctx t.FullName body childDefs
 
     {
         Decode =
@@ -844,7 +875,8 @@ and private planDeferred (ctx: BuildCtx) (t: System.Type) : Plan =
             // building this type registers its body on the way out, so the
             // reference resolves and a recursive type round-trips instead of
             // truncating.
-            | Some prefix -> SVDict(Map.ofList [ "$ref", SVStr(prefix + t.Name) ])
+            // `FullName`, matching the key the ancestor registers under.
+            | Some prefix -> SVDict(Map.ofList [ "$ref", SVStr(prefix + t.FullName) ])
             // Flat mode truncates to a title-only object. LLM tool-call
             // validators handle flat schemas far better, and the schema of a
             // cyclic type is lossy past the first hop either way.

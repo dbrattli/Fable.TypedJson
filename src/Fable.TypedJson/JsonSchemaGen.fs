@@ -74,6 +74,94 @@ let schemaValueFor
     : JsonSchemaValue =
     (Plan.forType backend registry (Json.resolveKey aliases caseRules) (Json.applyCaseRule caseRules) typ).Schema
 
+// ---------------------------------------------------------------------------
+// Definition naming
+// ---------------------------------------------------------------------------
+
+(**
+The walk keys definitions by `FullName`, because that is the only name guaranteed
+to identify one type: two records both called `Item` in different modules share a
+simple name, and keying on it collapsed them into a single definition whose body
+described only one of them — every `$ref` to either then resolved to the wrong
+schema, silently.
+
+`FullName` is unreadable in a published document, so this pass gives every key
+whose *simple* name is unambiguous that simple name back, and rewrites the
+pointers to match. Keys that would still collide keep the qualified form: ugly,
+but a correct document beats a pretty one.
+
+invariant: distinct types never share a definition key
+*)
+
+/// `Ns.Outer+Inner` -> `Inner`, and `Foo`1` -> `Foo`.
+let private simpleName (fullName: string) : string =
+    let afterNamespace =
+        match fullName.LastIndexOf '.' with
+        | -1 -> fullName
+        | i -> fullName.Substring(i + 1)
+
+    let afterNesting =
+        match afterNamespace.LastIndexOf '+' with
+        | -1 -> afterNamespace
+        | i -> afterNamespace.Substring(i + 1)
+
+    match afterNesting.IndexOf '`' with
+    | -1 -> afterNesting
+    | i -> afterNesting.Substring(0, i)
+
+/// Rewrites every `$ref` pointer under `refPrefix` through `renames`.
+let rec private rewriteRefs (refPrefix: string) (renames: Map<string, string>) (v: JsonSchemaValue) : JsonSchemaValue =
+    match v with
+    | SVDict m ->
+        match Map.tryFind "$ref" m with
+        | Some(SVStr pointer) when pointer.StartsWith refPrefix ->
+            let key = pointer.Substring(refPrefix.Length)
+
+            match Map.tryFind key renames with
+            | Some renamed -> SVDict(Map.add "$ref" (SVStr(refPrefix + renamed)) m)
+            | None -> v
+        | _ ->
+            SVDict(
+                m
+                |> Map.map (fun _ child -> rewriteRefs refPrefix renames child)
+            )
+    | SVList xs -> SVList(xs |> List.map (rewriteRefs refPrefix renames))
+    | _ -> v
+
+/// Shorten every unambiguous definition key and rewrite the pointers to match.
+let private shortenDefinitionNames
+    (refPrefix: string)
+    (schema: JsonSchemaValue)
+    (defs: Map<string, JsonSchemaValue>)
+    : JsonSchemaValue * Map<string, JsonSchemaValue> =
+    let renames =
+        defs
+        |> Map.toList
+        |> List.map fst
+        |> List.groupBy simpleName
+        |> List.collect (fun (short, fullNames) ->
+            match fullNames with
+            // Unambiguous — hand the simple name back.
+            | [ only ] -> [ only, short ]
+            // Two or more distinct types share this simple name; all keep their
+            // qualified key so neither can shadow the other.
+            | ambiguous -> ambiguous |> List.map (fun full -> full, full))
+        |> Map.ofList
+
+    let renamedDefs =
+        defs
+        |> Map.toList
+        |> List.map (fun (key, body) ->
+            let renamed =
+                renames
+                |> Map.tryFind key
+                |> Option.defaultValue key
+
+            renamed, rewriteRefs refPrefix renames body)
+        |> Map.ofList
+
+    rewriteRefs refPrefix renames schema, renamedDefs
+
 /// The schema in `$ref` mode: the root's own fragment, plus every record and
 /// union reached beneath it as a named definition. `refPrefix` is prepended to
 /// each name to form the pointer — `"#/$defs/"` for a standalone JSON Schema
@@ -92,7 +180,7 @@ let schemaValueWithDefsFor
     let plan =
         Plan.forTypeWithRefs backend registry (Json.resolveKey aliases caseRules) (Json.applyCaseRule caseRules) refPrefix typ
 
-    plan.Schema, plan.Definitions
+    shortenDefinitionNames refPrefix plan.Schema plan.Definitions
 
 /// Generate a JSON Schema document for type `'T`, given a registry of custom
 /// codecs and the case rule mapping F# field names to JSON keys. For alias
