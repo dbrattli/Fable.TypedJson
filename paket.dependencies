@@ -13,12 +13,13 @@
 #   Test   → Fable.TypedJson.Test (net10.0)
 #
 # Each project's `paket.references` opts into its single group.
+# decision: FSharp.Core 6 is the library floor because SDK 10.0.400 emits unsupported dynamic operator calls against 5.x
 
 source https://api.nuget.org/v3/index.json
 storage: none
 framework: netstandard2.0
 
-nuget FSharp.Core >= 5.0.0 lowest_matching: true
+nuget FSharp.Core >= 6.0.0 lowest_matching: true
 nuget Fable.Core >= 5.0.0 lowest_matching: true
 
 # BEAM (Erlang) backend
@@ -27,7 +28,7 @@ group Beam
     storage: none
     framework: netstandard2.0
 
-    nuget FSharp.Core >= 5.0.0 lowest_matching: true
+    nuget FSharp.Core >= 6.0.0 lowest_matching: true
     nuget Fable.Core >= 5.0.0 lowest_matching: true
     nuget Fable.Beam >= 5.0.0-rc.34
     nuget Fable.Beam.Jsx >= 5.0.0-rc.8
@@ -38,7 +39,7 @@ group Python
     storage: none
     framework: netstandard2.0
 
-    nuget FSharp.Core >= 5.0.0 lowest_matching: true
+    nuget FSharp.Core >= 6.0.0 lowest_matching: true
     nuget Fable.Core >= 5.0.0 lowest_matching: true
     nuget Fable.Python >= 5.1.0
 
@@ -49,7 +50,7 @@ group JS
     storage: none
     framework: netstandard2.0
 
-    nuget FSharp.Core >= 5.0.0 lowest_matching: true
+    nuget FSharp.Core >= 6.0.0 lowest_matching: true
     nuget Fable.Core >= 5.0.0 lowest_matching: true
 
 # .NET backend -- pure CLR shim over System.Text.Json. Unlike the Fable
@@ -61,7 +62,7 @@ group DotNet
     storage: none
     framework: net10.0
 
-    nuget FSharp.Core >= 5.0.0 lowest_matching: true
+    nuget FSharp.Core >= 6.0.0 lowest_matching: true
     nuget Fable.Core >= 5.0.0 lowest_matching: true
     nuget System.Text.Json >= 8.0.5 lowest_matching: true
 
