@@ -4,7 +4,7 @@ NUGET
   remote: https://api.nuget.org/v3/index.json
     Fable.Core (5.0)
       FSharp.Core (>= 4.7.2)
-    FSharp.Core (5.0)
+    FSharp.Core (6.0)
 
 GROUP Beam
 STORAGE: NONE
@@ -146,7 +146,7 @@ NUGET
   remote: https://api.nuget.org/v3/index.json
     Fable.Core (5.0)
       FSharp.Core (>= 4.7.2)
-    FSharp.Core (5.0)
+    FSharp.Core (6.0)
     System.Text.Json (8.0.5)
 
 GROUP JS
@@ -156,7 +156,7 @@ NUGET
   remote: https://api.nuget.org/v3/index.json
     Fable.Core (5.0)
       FSharp.Core (>= 4.7.2)
-    FSharp.Core (5.0)
+    FSharp.Core (6.0)
 
 GROUP Python
 STORAGE: NONE
