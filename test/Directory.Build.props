@@ -2,10 +2,8 @@
 <!--
 Four test projects share this directory, one per Fable target.
 
-adr: obj/ and bin/ are scoped per project name — NuGet writes project.assets.json into
-     obj/ and the last writer would win if they shared it
-assumption: this must stay in Directory.Build.props — by the time an fsproj body is
-     evaluated, NuGet's targets have already read BaseIntermediateOutputPath
+decision: scopes obj/ and bin/ per project — the four NuGet restores would otherwise overwrite shared assets
+assumption: NuGet reads BaseIntermediateOutputPath before an fsproj body is evaluated — moving this there would share obj/
 -->
 <Project>
   <PropertyGroup>

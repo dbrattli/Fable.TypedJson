@@ -5,8 +5,8 @@ Each Fable target (BEAM, JS, Python, .NET) provides a concrete IJsonBackend
 implementation. The core Schema and TypedJson layers operate through this
 interface so the same codec works across all backends.
 
-principle: format-agnostic core, backend-specific shims
-adr: `obj` for the native map type — each backend casts internally
+decision: keeps the core format-agnostic behind backend shims — one plan runs on all supported targets
+decision: carries native JSON values as `obj` — each target has an incompatible runtime representation
 *)
 
 module Fable.TypedJson.Backend
@@ -15,11 +15,11 @@ module Fable.TypedJson.Backend
 ///   - JS: a plain object `{ ... }`
 ///   - Python: a `dict`
 ///   - BEAM: a `BeamMap<string, obj>`
-///   - .NET: a `Dictionary<string, obj>` or similar
+///   - .NET: a `Dictionary<string, JsonValue>` wrapped in `JMap`
 ///
-/// Each backend also supplies type-test methods so the schema's `coerce`
-/// can dispatch on a parsed value's runtime type without pattern-matching
-/// the erased `JsonValue` DU. This is required because the runtime
+/// Each backend also supplies type-test methods so plan nodes can dispatch on
+/// a parsed value's runtime type without first constructing a `JsonValue`.
+/// This is required because the runtime
 /// representation of "an integer" differs across targets — Python in
 /// particular wraps F# `int` in an `int32` class, so an `isinstance(x, int32)`
 /// check (the F# pattern-match shape) misses native ints from `json.loads`.
@@ -37,11 +37,9 @@ type IJsonBackend =
     /// Linear ownership: the map passed in is DEAD once this returns, and
     /// callers must use only the returned value. That licenses backends to
     /// mutate in place. Every call site is an accumulator fold that never
-    /// reuses its argument, so nothing relies on the old contract.
+    /// reuses its argument, so linear ownership holds.
     ///
-    /// adr: linear ownership, not "returns a new map" — the old wording forced JS
-    ///      into a full object spread per key, making an n-field object O(n^2),
-    ///      while Python and .NET violated it anyway and documented the violation
+    /// decision: gives `Put` linear ownership — backends may mutate and avoid per-key map copies
     /// invariant: a map handed to `Put` is never read again by the caller
     abstract member Put: map: obj * key: string * value: obj -> obj
     /// Parse a JSON string into the backend's native map representation.
@@ -56,7 +54,7 @@ type IJsonBackend =
     /// right sentinel here.
     abstract member Null: obj
 
-    // --- Type tests (used by coerce / primitive codecs) ---
+    // --- Type tests (used by primitive plan nodes and codecs) ---
     /// True if `value` is the backend's representation of a JSON string.
     abstract member IsString: value: obj -> bool
     /// True if `value` is an integer (and not a bool, where backends conflate them).
@@ -73,12 +71,9 @@ type IJsonBackend =
     abstract member IsMap: value: obj -> bool
 
     // --- Typed accessors ---
-    // Pair with the IsX type tests: schema/coerce dispatches on the backend's
-    // type tests, then pulls the typed value via these accessors. Lets the
-    // hot path skip pattern-matching a `[<Erase>]` `JsonValue` DU (which has
-    // its own runtime-distinguishability constraints) and operate directly
-    // on the backend's native shape — Erlang binary on BEAM, Python str on
-    // Python, JsonValue case payload on .NET, etc.
+    // Pair with the IsX type tests: plan nodes classify through the backend,
+    // then pull the typed value via these accessors. The hot path operates on
+    // each backend's native shape rather than constructing `JsonValue` cases.
     /// Read `value` as a string. Behaviour is undefined unless `IsString value`.
     abstract member AsString: value: obj -> string
     /// Read `value` as an int. Behaviour is undefined unless `IsInt value`.

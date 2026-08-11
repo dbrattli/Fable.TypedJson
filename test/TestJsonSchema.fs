@@ -242,7 +242,7 @@ recursed until the stack blew. On BEAM the failure was previously masked:
 for both.
 
 invariant: a record already on the path back to the root emits `{type, title}` and nothing deeper
-adr: the diamond test is what pins `visited` to the path — a global accumulator would truncate `Right`
+decision: the diamond test is what pins `visited` to the path — a global accumulator would truncate `Right`
 *)
 type Tree = { Label: string; Children: Tree list }
 

@@ -12,8 +12,8 @@ without assuming a particular wrapping. This mirrors the production
 schema layer, which switched off pattern-matching `JsonValue` for the
 same portability reason.
 
-adr: assertions come from Nib (`assertThat` + `isEqualTo`), not a local `equal` — one failure format on every target
-invariant: helpers here dispatch through `IJsonBackend.IsX` / `AsX`, never on a backend's native representation
+decision: assertions come from Nib (`assertThat` + `isEqualTo`), not a local `equal` — one failure format on every target
+invariant: helpers dispatch through `IJsonBackend.IsX` / `AsX`, never by pattern-matching a backend-native representation
 *)
 
 module Fable.TypedJson.Testing

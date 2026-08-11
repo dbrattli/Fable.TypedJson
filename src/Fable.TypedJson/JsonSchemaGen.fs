@@ -13,7 +13,7 @@ cannot drift.
 What is left here is rendering: turning the backend-agnostic `JsonSchemaValue`
 tree into a backend-native value and then a string.
 
-adr: schema is data on the plan node, not a separate walk — drift between the three was structural, not accidental
+decision: schema is data on the plan node, not a separate walk — drift between the three was structural, not accidental
 *)
 
 module Fable.TypedJson.JsonSchemaGen
@@ -90,6 +90,7 @@ whose *simple* name is unambiguous that simple name back, and rewrites the
 pointers to match. Keys that would still collide keep the qualified form: ugly,
 but a correct document beats a pretty one.
 
+decision: shortens only globally unambiguous definition names — readable refs never sacrifice identity
 invariant: distinct types never share a definition key
 *)
 

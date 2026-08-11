@@ -6,25 +6,11 @@ What every layer above needs and none of them should define twice: the
 `IJsonCodec` interface and its registry, and the per-target reflection helpers
 that paper over CLR generic invariance.
 
-No longer a walker. `Schema.coerce` and its resolver group used to decode a
-type here while `Json.transformValue` encoded it and `JsonSchemaGen` described
-it — three traversals that had to agree by convention. `Plan` now does all
-three from one walk, and this module is the vocabulary it walks with.
+`Plan` owns the single type traversal for decoding, encoding, and schema
+generation; this module provides the shared types and target-portable helpers
+that traversal consumes.
 
-principle: separate validation from serialization
-adr: `#if FABLE_COMPILER` divergence is concentrated in the variance helpers below, not spread across callers
-
-Superseded directives, recorded rather than dropped:
-- `adr: Schema<'T> is a function from lookup to Result` — the type is gone.
-  Decode is `Plan.Decode`, which reads a backend-native value directly; only
-  records and unions still take a lookup, and only because their fields are
-  keyed. See `Plan.forTypeFromLookup`.
-- `principle: coercion is explicit and type-driven via PropertyType.FullName`
-  — still true of *how a type is resolved*, but that now happens once at codec
-  construction rather than per value. The `FullName` ladder is not on the hot
-  path any more.
-- `adr: erased JsonValue DU for zero-cost type-safe values on BEAM` — the DU is
-  `[<Struct>]` now; see the note on `JsonValue` below for why.
+decision: concentrates target-specific reflection variance in helpers here — callers share one planning algorithm
 *)
 
 module Fable.TypedJson.Schema
@@ -40,23 +26,13 @@ open Fable.TypedJson.Backend
 (**
 ## JsonValue
 
-The DU `IJsonCodec.Decode` / `Encode` exchange with user codecs. The
-internal `coerce` / schema layer never constructs or pattern-matches
-this — they go through `IJsonBackend.IsX` / `AsX` directly, so on the
-hot path no `JsonValue` ever exists. `toJsonValue` lazily wraps a
-backend-native value into the DU only when crossing into a user codec.
+The DU exchanged by `IJsonCodec.Decode` and `Encode`. Internal plan nodes use
+backend-native values through `IJsonBackend.IsX` / `AsX`; `toJsonValue` wraps a
+value only when it crosses into a user codec.
 
-Was `[<Erase>]` historically — that gave Fable backends a zero-cost
-view over native values. After moving the schema dispatch to the
-backend's typed accessors, the DU is no longer on the hot path, so the
-erasure win doesn't matter and the erased form has design constraints
-(two `of obj` cases would now be rejected by Fable's stricter check
-since the case payloads can't be runtime-distinguished). `[<Struct>]`
-keeps the DU as a tagged value type on the CLR (no heap allocation per
-case construction); Fable ignores `[<Struct>]` and lowers the DU to
-its usual per-target representation, which is fine because user-codec
-calls are infrequent enough that the per-construction allocation isn't
-a hot-path concern.
+decision: uses a tagged struct DU rather than erased cases — `JArray` and `JMap` both carry `obj` and must remain distinguishable
+invariant: `JsonValue` is constructed only at the user-codec boundary, never on the built-in primitive hot path
+tradeoff: converts values at custom-codec boundaries to keep the public codec representation portable and unambiguous
 *)
 
 [<Struct>]
@@ -73,13 +49,10 @@ type JsonValue =
 // Error Types
 // ============================================================================
 
-// Struct because FieldError is allocated per failing field on the error
-// path. For success-path workloads (the common case) this is dead weight,
-// but for validation-heavy LLM-tool-input workloads it cuts a heap alloc
-// per error. The struct is two references (16 bytes on x64), small enough
-// that copy cost is below alloc cost — and the typical use site stores it
-// in a `FieldError list` cons cell which already heap-allocates, so the
-// struct just inlines into the cons cell with no extra cost.
+// A `FieldError list` already allocates its cons cells, so a two-reference
+// struct inlines the error payload instead of adding one object per failure.
+// decision: stores `FieldError` as a struct — validation-heavy failures avoid a separate allocation per field
+// tradeoff: copies two references per error value to remove the extra heap object
 [<Struct>]
 type FieldError = { path: string; message: string }
 
@@ -91,13 +64,11 @@ type FieldError = { path: string; message: string }
 ## IJsonCodec
 
 A user-defined wrapper type can implement validation by declaring a static
-`JsonCodec` member of type `IJsonCodec<'Self>`. `Schema.coerce` discovers
-these via reflection on the field's `PropertyType` and dispatches through
-them when the type isn't a known primitive.
+`JsonCodec` member of type `IJsonCodec<'Self>`. `Plan` resolves registered
+codecs from the field's `PropertyType` when it constructs the plan.
 
-principle: validation lives with the type — Pydantic validators-as-types in F#
-adr: discovered via reflection on a static `JsonCodec` member, not via
-     SRTP — F# SRTP can't traverse record fields' heterogeneous types
+decision: keeps validation with the wrapper type — one codec controls its decode, encode, and schema representation
+decision: discovers static `JsonCodec` members through reflection — SRTP cannot traverse heterogeneous record fields
 *)
 
 // ---------------------------------------------------------------------------
@@ -150,7 +121,7 @@ so a global mutable registry doesn't survive across calls. Threading is
 also more predictable and Fable-portable.
 
 invariant: register returns a NEW registry; the original is unchanged
-adr: closure-captured boxing avoids reflection on the codec object at decode
+decision: captures typed boxing closures at registration — decoding values does not reflect over codec instances
 *)
 
 type CodecEntry = {
@@ -186,31 +157,28 @@ let tryGetCodecEntry (fullName: string) (registry: CodecRegistry) : CodecEntry o
 // Schema Type
 // ============================================================================
 
-// `Schema<'T>` lookup hands back the backend-native value (`obj`) rather
-// than a `JsonValue`. Internal coerce uses `IJsonBackend.IsX` / `AsX` to
-// dispatch directly on the native shape; `JsonValue` is only constructed
-// (lazily, via `toJsonValue`) when crossing into user codecs that take it.
+/// A decoder over a keyed source of backend-native values.
+///
+/// decision: retains this public alias after the planner stopped using it — removing it would be source-breaking
 type Schema<'T> = (string -> obj option) -> Result<'T, FieldError list>
 
 // ============================================================================
-// Coercion
+// Type classification
 // ============================================================================
 
 (**
-## Coercion
+## Type classification
 
-Converts a JsonValue to the target F# type based on PropertyType.FullName.
-Handles cross-type coercion (e.g., JString "42" → int 42) which is critical
-for ToolCall inputs where the LLM always emits strings.
+The planner resolves portable type categories once at codec construction.
 
-adr: dispatch by FullName string -- preserved on BEAM by Fable codegen
+decision: classifies types by `FullName` strings — Fable preserves names where runtime type identity is not portable
 *)
 
 // ============================================================================
 // Reflection Helpers
 // ============================================================================
 
-/// True for the primitive types `coerce` resolves directly, ahead of any
+/// True for the primitive types the planner resolves directly, ahead of any
 /// registered codec. Encode-side dispatch consults this for the same reason,
 /// so a codec registered against e.g. `System.Int32` is inert in BOTH
 /// directions rather than taking effect on encode only.
@@ -238,9 +206,7 @@ generic-invariant, so the same `unbox` raises `InvalidCastException` on the
 .NET shim. These helpers go through `FSharpValue.GetUnionFields`, which is
 provided uniformly by both Fable's reflection and the CLR.
 
-assumption: `Option<'T>` Tag 1 = `Some`, Tag 0 = `None`; `List<'T>` Tag 1
-            = `Cons`, Tag 0 = `Empty`. Both are stable parts of the F#
-            runtime contract.
+assumption: F# runtime tags use 1 for `Some`/`Cons` and 0 for `None`/`Empty`
 *)
 
 #if FABLE_COMPILER
@@ -311,7 +277,7 @@ reflection-driven library it is meant to beat.
 is CLR-only — Fable does not implement it, which is why the Fable branch above
 returns the direct form.
 
-adr: factories return closures so generic resolution is paid per codec, not per value
+decision: factories return closures so generic resolution is paid per codec, not per value
 invariant: nothing below this line runs reflection inside the returned closure
 *)
 /// Read a `'T[]` as an `obj list`. Goes through the non-generic `System.Array`
@@ -382,15 +348,12 @@ let formatErrors (errors: FieldError list) : string =
     |> String.concat ", "
 
 /// Identity key transform — passes the F# field name through unchanged.
-/// Useful when callers control both the lookup keys and the F# field names
-/// (rare). Most call sites should use `lowerFirstTransform`, which emits the
-/// same JSON key from the same F# field name on every backend.
+/// Useful when callers control both the lookup keys and the F# field names.
 let identityTransform (s: string) : string = s
 
 (**
-Default key transform — `LowerFirst` (camelCase), used by `dump`,
-`validateJson` and `validateMap`, which key off the field name directly
-instead of going through `CaseRules`.
+Public `LowerFirst` (camelCase) compatibility transform. The shortcut APIs now
+build plans through `Json.resolveKey`, which uses the same `Casing` functions.
 
 It normalizes through `Casing.toCanonicalPascal` first, so a backend that hands
 back a snake_case name yields the same key as one that hands back the F# name:
@@ -399,18 +362,13 @@ that pivot the key tracked whichever spelling the compiler produced — BEAM
 emitted `air_temperature` before Fable 5.8.1 and Python before 5.14.0, while JS
 and .NET emitted `airTemperature`.
 
-invariant: `dump` and `validateJson` share this transform — a dumped map must validate back
-invariant: the emitted key is a function of the F# field name only, identical on all four targets
+invariant: this helper and `Json.applyCaseRule LowerFirst` derive the same key on every target
 *)
 let lowerFirstTransform (s: string) : string =
     Casing.lowerFirst (Casing.toCanonicalPascal s)
 
-/// Lazily wrap a backend-native value as a `JsonValue` for hand-off to
-/// user codecs (`IJsonCodec.Decode`). Internal `coerce` never calls this
-/// — it routes through `IJsonBackend.IsX` / `AsX` directly. On Fable
-/// backends each `JString s` etc. is identity (no allocation thanks to
-/// `[<Erase>]` legacy / Fable's representation of struct DUs); on the
-/// .NET shim each call allocates a small DU instance.
+/// Wrap a backend-native value as a `JsonValue` for hand-off to a user codec.
+/// Built-in plan nodes stay on `IJsonBackend.IsX` / `AsX` and do not call this.
 let toJsonValue (backend: IJsonBackend) (fv: obj) : JsonValue =
     if backend.IsString fv then
         JString(backend.AsString fv)
@@ -446,8 +404,7 @@ let fromJsonValue (backend: IJsonBackend) (jv: JsonValue) : obj =
     | JMap m -> m
 
 /// Render a backend-native value as a short human-readable string for
-/// error messages — replaces the JsonValue pattern match the old
-/// coerce-error path used.
+/// error messages without first constructing a `JsonValue`.
 let describeValue (backend: IJsonBackend) (fv: obj) : string =
     if backend.IsString fv then
         sprintf "string '%s'" (backend.AsString fv)
@@ -487,9 +444,8 @@ Convert various source formats to the `string -> obj option` lookup.
 *)
 
 /// Adapt a Map<string, string> (e.g., ToolCall.input from LLM). Each value
-/// is the raw F# string — `coerce` recognises it via `backend.IsString`
-/// and dispatches into the string-target arm of the giant primitive
-/// pattern (which can also coerce to int / float / bool).
+/// is the raw F# string; primitive plan nodes classify it through
+/// `backend.IsString` and can coerce it to int, float, or bool.
 let stringMapAdapter (map: Map<string, string>) (key: string) : obj option =
     match Map.tryFind key map with
     | Some v -> Some(box v)

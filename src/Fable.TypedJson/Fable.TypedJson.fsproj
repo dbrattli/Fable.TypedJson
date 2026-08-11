@@ -13,8 +13,7 @@
   <ItemGroup>
     <Compile Include="Backend.fs" />
     <Compile Include="Casing.fs" />
-    <!-- Ahead of both Schema.fs and Codec.fs: they are the two callers whose
-         copies of the primitive coercion rules used to drift apart. -->
+    <!-- Ahead of both Codec.fs and Plan.fs, the two primitive-coercion callers. -->
     <Compile Include="Primitives.fs" />
     <Compile Include="Schema.fs" />
     <Compile Include="Codec.fs" />

@@ -6,12 +6,12 @@
 of walking a type belongs to `Plan`; this module decides what the keys are and
 hands the walker a transform.
 
-principle: TypedJson is a thin layer — walking a type lives in Plan, the vocabulary in Schema
-principle: explicit casing at call site, not baked into type definitions
-principle: backend-agnostic core; per-backend shim provides Parse/Stringify
-adr: CaseRules implemented at runtime since Fable.Core.CaseRules is compile-time only
-adr: one plan per (type, case rule, aliases), built at codec construction and captured — build a codec once and reuse it
-adr: the codec owns the `Map<string, string>` path too (`decodeStringMap`), so case rules and aliases reach it exactly as they reach JSON
+decision: keeps the public codec layer thin — `Plan` owns type walking and `Schema` owns shared vocabulary
+decision: configures casing per codec rather than per type — one F# model can serve multiple wire conventions
+decision: accepts a backend through the core API — target shims only pre-apply parsing and stringifying
+decision: CaseRules implemented at runtime since Fable.Core.CaseRules is compile-time only
+decision: one plan per (type, case rule, aliases), built at codec construction and captured — build a codec once and reuse it
+decision: keeps `decodeStringMap` on the codec — case rules and aliases apply to JSON and string maps alike
 invariant: `decode`, `encode` and the emitted JSON Schema all read the same plan, so they cannot disagree about a wire shape
 invariant: `validateMap` / `validateJson` / `dump` stay camelCase-only — a case rule is asked for, never inferred
 *)
@@ -63,8 +63,7 @@ let private toSnakeCase (name: string) : string = separateUpper "_" name
 let private dashify (separator: string) (name: string) : string = separateUpper separator name
 
 /// Convert a snake_case name back to PascalCase.
-/// Re-exported from `Casing` so `Schema` can share the pivot — `Schema`
-/// compiles first, and this name is public API.
+/// Re-exported from `Casing` to preserve the public API.
 let fromSnakeCase (name: string) : string = Casing.fromSnakeCase name
 
 /// Apply a case rule to a field name.
@@ -78,8 +77,8 @@ let applyCaseRule (caseRule: CaseRules) (name: string) : string =
     match caseRule with
     | CaseRules.None -> name
     | _ ->
-        // Pascal is our canonical pivot — see `Casing`. Shared with
-        // `Schema.lowerFirstTransform` so both key paths agree.
+        // Pascal is the canonical pivot shared with Schema's compatibility
+        // transform; see `Casing`.
         let pascal = Casing.toCanonicalPascal name
 
         match caseRule with
@@ -183,12 +182,12 @@ module Encode =
 (**
 ## auto
 
-Creates a TypedJson codec by wrapping Schema.auto with:
+Creates a `TypedJson` codec around a precomputed `Plan` with:
 - CaseRules key transformation on decode (JSON key → schema field name)
 - CaseRules key transformation on encode (field name → JSON key)
 - backend-provided Stringify on encode
 
-adr: inline required for typeof<'T> resolution on Fable backends
+decision: keeps the public entry point inline — Fable must resolve `typeof<'T>` at the consumer call site
 *)
 
 /// Resolve the JSON key for a given F# field name: alias if present,
@@ -211,9 +210,8 @@ The key and tag transforms the registry-free shortcut entry points
 assuming this one — still no aliases, which stay a codec-only feature. Passing
 `CaseRules.LowerFirst` there reproduces these transforms exactly.
 
-Byte-identical to what `Schema.lowerFirstTransform` produced, and to the
-codec's own `LowerFirst` default — which is what let the shortcut flow move
-onto the codec's walker without a wire-format change.
+Equivalent to `Schema.lowerFirstTransform` and to the codec's own `LowerFirst`
+default, so shortcuts and reusable codecs keep one wire format.
 
 invariant: the shortcut entry points and a default-configured codec derive the same key from the same field
 *)
@@ -252,10 +250,8 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
         // Encode side mirrors via `applyCaseRule rules caseInfo.Name`.
         let defaultTagTransform = applyCaseRule caseRules
 
-        // Resolve the whole type tree once, here. `Schema.auto` pre-baked only
-        // the top-level record and left nested records to re-reflect on every
-        // decode; the plan walks to the leaves, so a nested record now costs
-        // the same per decode as a top-level one.
+        // Resolve the whole type tree once. The plan walks to the leaves, so
+        // nested records perform no additional reflection per decode.
         let defaultPlan =
             Plan.forType backend registry defaultKeyTransform defaultTagTransform typ
 
@@ -268,9 +264,9 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
         two walks read the same `defaultKeyTransform` and the same `registry`,
         which is what keeps the JSON and string-map faces from drifting apart.
 
-        tradeoff: every codec pays a second type walk at construction, even JSON-only ones — bought: `decodeStringMap` walks nothing per call
+        tradeoff: performs a second construction-time walk for every codec so `decodeStringMap` performs none per call
         invariant: `decode` and `decodeStringMap` derive every key from the same transform, so they accept the same spellings
-        invariant: a codec registered for `typ` itself drives both faces — `Plan.forTypeFromLookup` checks the registry before it walks structure
+        invariant: a codec registered for `typ` drives both JSON and string-map decoding before structural dispatch
         *)
         let defaultLookupDecode =
             Plan.forTypeFromLookup backend registry defaultKeyTransform defaultTagTransform typ
@@ -332,9 +328,8 @@ Dump a record to a backend-native JSON map (e.g. for inter-process messaging).
 Routed through the same plan the codec's encode path uses, rather than a
 separate top-level-only fold. Two things follow: nested records, lists and
 options are transformed instead of being written verbatim, and the key
-derivation is shared instead of duplicated — `resolveKey Map.empty
-CaseRules.LowerFirst` produces exactly the camelCase key
-`Schema.lowerFirstTransform` does, which is what `validateJson` reads back.
+derivation is shared instead of duplicated — both this path and
+`validateJson` use `camelCaseKey`.
 
 The non-recursive version emitted a nested record in whatever spelling the
 backend's own reflection used, so `validateJson` could not find its keys and
@@ -400,8 +395,8 @@ a key-mismatch bug tends to assume the lenient reading; it is not what happens,
 deliberately, because a lenient rule has no answer when both keys are present
 and would put the string-map path out of step with JSON.
 
-adr: case rule is a parameter on the string-map path, defaulted at each entry point rather than at the core
-invariant: `validateMap` resolves camelCase, unconditionally and forever — existing callers see no change
+decision: case rule is a parameter on the string-map path, defaulted at each entry point rather than at the core
+invariant: `validateMap` resolves `LowerFirst` keys unless the caller selects the case-rule-specific entry point
 *)
 let decodeStringMapAsWith<'T>
     (backend: IJsonBackend)

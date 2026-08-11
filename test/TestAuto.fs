@@ -50,7 +50,7 @@ type RecordWithOption = { Name: string; Email: string option }
 type RecordWithBool = { Active: bool; Count: int }
 
 (**
-adr: lowercase-first fields kept as their own types — every other test record is PascalCase, which cannot catch BEAM reflection drift
+decision: lowercase-first fields kept as their own types — every other test record is PascalCase, which cannot catch BEAM reflection drift
 assumption: Fable BEAM keys a record map with `sanitizeFieldName` and reflection's `erl_name` derives from the same function
 *)
 type LowerFirst = { alpha: string; beta: int }
@@ -284,8 +284,8 @@ reflection metadata derived `erl_name` with `sanitizeErlangName` (no underscore)
 crashed with `{badkey,alpha}`; decode built a map the compiled accessor could not read.
 
 invariant: `auto<'T>` handles lowercase-first record fields identically on all four targets
-adr: decode asserts through the compiled accessor (`decoded.alpha`), not reflection — that is the direction MakeRecord corrupts silently
-adr: JSON keys stay derived from `PropertyInfo.Name`, so the BEAM disambiguating `_` never reaches the wire
+decision: asserts decode through `decoded.alpha` — reflection would miss corruption in the compiled accessor
+decision: JSON keys stay derived from `PropertyInfo.Name`, so the BEAM disambiguating `_` never reaches the wire
 *)
 let private lowercaseFirstTests =
     testList (

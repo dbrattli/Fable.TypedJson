@@ -15,7 +15,8 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.x
+          # decision: pins the SDK because 10.0.400 regresses the generic numeric conversion used by refined codecs
+          dotnet-version: 10.0.302
           cache: true
           cache-dependency-path: 'paket.lock'
 
@@ -49,7 +50,8 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.x
+          # decision: pins the SDK because 10.0.400 regresses the generic numeric conversion used by refined codecs
+          dotnet-version: 10.0.302
           cache: true
           cache-dependency-path: 'paket.lock'
 

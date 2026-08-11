@@ -31,11 +31,8 @@ let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
 let inline validateMap<'T> (map: Map<string, string>) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateMap<'T> beam map
 
-// The `…With` variants take a registry, so a record with refined or
-// custom-codec fields can be validated without building a codec. Their
-// absence here was a real gap: the README documented `validateMap` for exactly
-// such a record, and it could not have worked — `validateMap` uses an empty
-// registry, so a `NonEmptyString` field had no codec to dispatch through.
+// Registry-aware shortcuts support refined and custom-codec fields without
+// requiring callers to build a reusable `TypedJson` value first.
 let inline validateJsonWith<'T> (registry: CodecRegistry) (map: obj) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateJsonWith<'T> beam registry map
 

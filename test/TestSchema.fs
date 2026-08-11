@@ -1,8 +1,8 @@
 (**
 # TestSchema — Tests for Schema module
 
-Tests for format-agnostic validation: coercion, validateMap (string maps),
-validateJson (BEAM maps), JsonValue erased DU, and error handling.
+Tests format-agnostic validation, string-map coercion, backend-native JSON
+maps, and error handling.
 *)
 
 module Fable.TypedJson.Tests.Schema
@@ -49,7 +49,7 @@ type SimpleInput = { Name: string; Age: int }
 type FloatInput = { Temperature: float; Humidity: float }
 
 (**
-adr: multi-word fields kept as their own type — every other record here is single-word, where `lowerFirstTransform` is a no-op and cannot catch key drift
+decision: keeps multi-word fields in a dedicated fixture — single-word fields cannot expose `LowerFirst` key drift
 *)
 type MultiWordInput = {
     AirTemperature: float
@@ -526,12 +526,9 @@ let private dumpTests =
 // ============================================================================
 
 (**
-`dump` / `validateJson` / `validateString` bypass `CaseRules` and key off
-`lowerFirstTransform` directly. Every other record in this file is single-word,
-where that transform is a no-op — so nothing here pinned the multi-word key, the
-one place the backends could disagree. BEAM emitted `air_temperature` while
-Python, JS and .NET emitted `airTemperature` until `PropertyInfo.Name` started
-reporting the F# field name on BEAM (fable-compiler/Fable#4766, Fable 5.8.1).
+`dump` / `validateJson` / `validateMap` pin `LowerFirst`. Every other record in
+this file is single-word, where that transform is a no-op, so this fixture pins
+the multi-word key where backend reflection spellings can disagree.
 
 invariant: `dump` and `validateJson` agree on the key, so a dumped map round-trips back through validate
 invariant: the key is camelCase (`airTemperature`) on all four targets — never snake_case, never PascalCase

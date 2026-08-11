@@ -6,39 +6,29 @@ codec-construction time and emits a tree of `Plan` nodes; stage 2 runs the
 closures those nodes hold. No `System.Type`, no `FullName` comparison and no
 `FSharpType` call survives into stage 2, **at any depth**.
 
-That last clause is the whole point. `Schema.buildRecordSchemaUntyped` already
-pre-bakes the top-level record, but a nested record falls through to
-`Schema.resolveRecord`, which calls `FSharpType.GetRecordFields` and re-derives
-every key on *every* decode. Two implementations of one algorithm, with
-divergent error strings, and reflection on the hot path for anything below
-depth 0.
+The same walk emits decode, encode, and JSON Schema data. Keeping all three
+faces on one node prevents wire-shape drift while keeping reflection out of
+per-value work at every depth.
 
-principle: reflection happens once per codec, never per value
-adr: a tree of closures over an interpretable DU — one indirect call per node beats a tag dispatch plus a call
+decision: resolves reflection once per codec — repeated decode and encode calls stay on precomputed closures
+decision: emits a tree of closures rather than an interpreted plan DU — avoids a tag dispatch before each node call
 invariant: a node's `Decode` is total for its declared type — unsupported shapes are rejected at construction
 
 ## Errors
 
-`Decode` returns `Result<obj, FieldError list>`, not `Result<obj, string>`.
-The old split — `coerce` returning a string, `resolveRecord` returning a
-`FieldError list`, and `coerceUnion` collapsing one into the other via
-`formatErrors` — is why a nested failure surfaced as the flattened blob
-`"address: city: missing field"` under path `address`. Container nodes now
-prefix their children's paths, so the same failure reports path `address.city`.
+`Decode` returns `Result<obj, FieldError list>`. Container nodes prefix their
+children's paths, so a nested failure retains the actionable path
+`address.city` instead of flattening context into an error message.
 
 ## Cycle guard
 
-`type Tree = { Children: Tree list }` has no base case, so an eagerly built
-plan tree would not terminate — `auto<Tree> ()` would hang at construction,
-which is worse than today's behaviour, where `coerce` recurses lazily and runs
-out of document. `Building` carries the root-to-node path of record/union
-`FullName`s; re-entering a type already on it defers the sub-walk to call time.
+`type Tree = { Children: Tree list }` has no type-level base case, so an eagerly
+built plan tree would not terminate. `Building` carries the root-to-node path
+of record/union `FullName`s; re-entering a type already on it defers the
+sub-walk to call time, where the document supplies the finite base case.
 
-adr: defer the sub-walk rather than tie a knot through a mutable ref cell — a
-     captured `ref` is the one construct whose Fable BEAM lowering is unverified,
-     and fable-library-beam's ref representation has already changed once (d9bf688)
-tradeoff: a recursive type re-walks its own subtree per nested value — correct and
-          stateless, and exactly what today's code does at every depth for every type
+decision: defers recursive sub-walks instead of tying mutable-ref knots — captured-ref lowering is unverified on BEAM
+tradeoff: re-walks a recursive subtree per nested value to keep recursive planning stateless and portable
 *)
 
 module internal Fable.TypedJson.Plan
@@ -126,6 +116,8 @@ type BuildCtx = {
     /// better, which is why the truncating cycle guard was chosen originally.
     /// `$ref` exists for OpenAPI `components/schemas`, where reuse is the point
     /// and a recursive type must round-trip rather than truncate.
+    ///
+    /// decision: defaults to flat schemas — LLM tool validators handle inline shapes more reliably than `$ref`
     RefMode: string option
 }
 
@@ -195,6 +187,8 @@ let private refOrInline
 ///
 /// Lives here rather than in `Schema` because all three faces that read it —
 /// decode, encode and schema emission — are now built in this module.
+///
+/// decision: fixes the discriminator key to `type` — matches Pydantic/OpenAPI and keeps all plan faces aligned
 let discriminatorKey = "type"
 
 // ============================================================================
@@ -202,17 +196,16 @@ let discriminatorKey = "type"
 // ============================================================================
 
 (**
-Module-scope mutual recursion with explicit parameters. Never nested inside an
-`inline` function — that is the Fable BEAM codegen bug where captured values
-lower to `undefined`. `Schema.coerce` and `Json.transformValue` already use
-this shape on all four targets, so it is proven rather than assumed.
+Module-scope mutual recursion with explicit parameters.
+
+decision: keeps recursive planning outside inline functions — captured values in nested inline recursion lower to `undefined` on BEAM
 *)
 let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
     let fullName = t.FullName
     let b = ctx.Backend
 
-    // Primitives first, matching `Schema.coerce`'s dispatch order — a codec
-    // registered against `System.Int32` stays inert in both directions.
+    // Primitives precede registry lookup, so a codec registered against
+    // `System.Int32` stays inert in both directions.
     if fullName = "System.String" then
         planString b
     elif fullName = "System.Int32" then
@@ -275,9 +268,7 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
                 else
                     planUnion ctx t
             else
-                // Unknown types pass through on encode, matching the old
-                // `transformValue`'s `else v`, and fail on decode where there
-                // is nothing to construct.
+                // decision: passes unknown types through encode but rejects decode — preserves manual output only
                 let message = sprintf "cannot decode %s" fullName
 
                 {
@@ -289,9 +280,8 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
 
 // --- Primitive nodes --------------------------------------------------------
 //
-// Each closure knows its target type, so the `FullName` ladder `coerce` walks
-// per value per decode is gone. Conversions come from `Primitives`, shared with
-// `Schema.coerce`.
+// Each closure already knows its target type, so per-value calls perform no
+// `FullName` dispatch. Conversions come from `Primitives`, shared with `Codec`.
 
 and private planString (b: IJsonBackend) : Plan = {
     Decode =
@@ -439,10 +429,7 @@ and private planDecimal (b: IJsonBackend) : Plan = {
     // A bare JSON number is accepted on the way in — rejecting `12.34` would be
     // gratuitous, and the string form is what this node itself emits.
     //
-    // tradeoff: the float arm goes through binary floating point, so a value with
-    //           more precision than a double holds is already lossy by the time it
-    //           reaches here. Accepted: the sender chose to write a JSON number,
-    //           and the alternative is rejecting input every other decoder takes.
+    // tradeoff: accepts lossy bare-number decimals to interoperate with ordinary JSON number producers
     Decode =
         fun v ->
             if b.IsString v then
@@ -471,8 +458,8 @@ CLR generics and arrays are invariant: an `obj list` cannot be assigned to an
 Iteration goes through `ArrayLength` / `ArrayAt` rather than an F# list or
 array, because the native sequence shape differs per backend.
 
-adr: fail-fast on the first bad element, unlike record fields which accumulate —
-     an element index is rarely actionable in bulk and this keeps one traversal
+decision: stops at the first invalid sequence element — avoids decoding an unused tail after the result is already an error
+tradeoff: reports one invalid element per sequence decode in exchange for bounded failure work
 *)
 and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> obj list) (builder: System.Type -> obj list -> obj) : Plan =
     let b = ctx.Backend
@@ -594,7 +581,7 @@ and decodeRecordWith (b: IJsonBackend) (rp: RecordPlan) (lookup: string -> obj o
 /// Stage 2, encode side. Mirror of `decodeRecordWith`: same field array, same
 /// keys, so the two cannot disagree about what a record looks like on the wire.
 ///
-/// adr: an absent optional field emits no key at all, rather than an explicit null
+/// decision: omits absent optional fields — matches their non-required schema and avoids emitting nullable values
 and encodeRecordInto (b: IJsonBackend) (rp: RecordPlan) (acc0: obj) (record: obj) : obj =
     let mutable acc = acc0
 
@@ -880,7 +867,7 @@ and private planDeferred (ctx: BuildCtx) (t: System.Type) : Plan =
             // Flat mode truncates to a title-only object. LLM tool-call
             // validators handle flat schemas far better, and the schema of a
             // cyclic type is lossy past the first hop either way.
-            // tradeoff: a recursive type's schema is lossy past the first cycle — accepted in flat mode, the alternative is a schema many consumers reject
+            // tradeoff: truncates recursive flat schemas after one cycle because many tool-schema consumers reject `$ref`
             | None -> SVDict(Map.ofList [ "type", SVStr "object"; "title", SVStr t.Name ])
         // The ancestor on `Building` owns the definition; registering it here
         // too would recurse forever.
