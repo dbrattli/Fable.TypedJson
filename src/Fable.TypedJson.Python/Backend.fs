@@ -5,16 +5,9 @@ Wraps `Fable.Python.Json` (Python's `json` module) and uses Python's
 native `dict` / `list` / `int` / `float` / `bool` / `str` / `None` for the
 map abstraction.
 
-adr: a Python dict is the native parsed-JSON map; `json.loads` returns
-     nested dicts/lists/primitives, which is exactly what `JsonValue`
-     erases to.
-adr: `Put` mutates the dict in place (Pythonic) and returns the same
-     reference; functional callers build fresh dicts via `NewMap` first.
-adr: where possible we delegate to `Fable.Core.PyInterop` and
-     `Fable.Python.Builtins` instead of raw `[<Emit>]` strings. The
-     remaining emits (the type-reference values like `int`/`float`/...,
-     the `None` singleton, and the `in` containment operator) aren't
-     exposed by Fable.Python today — see issue tracking the gap.
+decision: uses native Python dicts, lists, and primitives — `json.loads` output needs no representation conversion
+decision: mutates `Put` under linear ownership — avoids copying while a fresh `NewMap` prevents caller aliasing
+decision: prefers Fable interop bindings over raw emits — target-language strings remain limited to missing APIs
 *)
 
 module Fable.TypedJson.Python.Backend

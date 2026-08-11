@@ -2,7 +2,7 @@
 <!--
 The test sources are one shared set; only the project files differ per backend.
 
-adr: compile order lives here, not in each fsproj — four copies would drift silently
+decision: compile order lives here, not in each fsproj — four copies would drift silently
 invariant: a new test module is added here once and picked up by all four targets
 -->
 <Project>

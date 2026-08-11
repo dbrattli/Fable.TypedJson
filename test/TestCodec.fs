@@ -120,20 +120,19 @@ let private pipelineCompositionTests =
     )
 
 // ============================================================================
-// Primitive codecs agree with Schema.coerce
+// Primitive codecs agree with automatic decoding
 // ============================================================================
 
 (**
-`Codec.int` / `int64` / `float` / `string` / `bool` and the primitive arms of
-`Schema.coerce` used to implement the same coercion rules independently, and
-drifted apart. Both now call `Primitives`, so these pin the shared behaviour
-against a future re-fork.
+`Codec.int` / `int64` / `float` / `string` / `bool` and `Plan`'s primitive
+nodes reach the same rules through `Primitives`. These tests pin the public
+codec path against a future divergence from automatic decoding.
 
-invariant: a primitive codec and the matching `coerce` arm produce the same value for the same input
+invariant: a primitive codec and automatic decoding produce the same value for the same input
 *)
 let private primitiveAgreementTests =
     testList (
-        "Primitive codecs agree with Schema.coerce",
+        "Primitive codecs agree with automatic decoding",
         [
             test (
                 "float codec parses a decimal string",

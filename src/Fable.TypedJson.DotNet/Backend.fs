@@ -5,25 +5,9 @@ Wraps `System.Text.Json` (`JsonDocument` for parse, `Utf8JsonWriter` for
 stringify) and uses `Dictionary<string, JsonValue>` + `JsonValue[]` for the
 map / array abstraction.
 
-adr: Unlike the Fable targets (BEAM/JS/Python), this backend runs natively
-     on the CLR, so `[<Erase>]` does NOT erase `JsonValue`. The DU is real
-     at runtime, and the core's `unbox<JsonValue> (backend.Get …)` requires
-     an actual `JsonValue` instance. Internal storage therefore holds
-     `JsonValue` cases directly (one DU-case allocation per primitive at
-     parse-time / encode-time), and the boundary methods wrap raw boxed
-     primitives from `Encode.string`/`int`/… into the matching case.
-
-adr: `Put` mutates the underlying `Dictionary` and returns the same boxed
-     `JMap`. The `IJsonBackend` contract documents Put as "return a new
-     map", which Fable backends honor (BEAM is immutable; JS uses spread).
-     The core only uses `Put` inside `fold` patterns where the prior
-     accumulator is never reused, so mutation-and-return is observationally
-     equivalent here and avoids per-key dict copies.
-
-adr: `ParseRaw` returns a boxed `JMap` (or other `JsonValue` case for
-     non-object roots) so every downstream `ContainsKey`/`Get`/`IsMap`
-     call sees a uniform "boxed JsonValue" shape, matching the recursive
-     case where the core re-boxes a `JsonValue` field.
+decision: stores actual `JsonValue` cases — native CLR execution retains the tagged DU instead of target-native JSON terms
+decision: mutates `Put` under linear ownership — avoids dictionary copies without exposing the prior accumulator
+decision: boxes every parsed root as `JsonValue` — map operations and recursive fields then share one runtime shape
 *)
 
 module Fable.TypedJson.DotNet.Backend
@@ -261,8 +245,8 @@ type private DotNetBackendImpl() =
 
         // ArrayLength/ArrayAt accept both a `JArray`-wrapped `JsonValue[]`
         // (the decode path, post-parse) and a raw .NET `obj[]` (the encode
-        // path, where TypedJson.transformValue calls these on the boxed
-        // `caseValues` from `FSharpValue.GetUnionFields`). The Fable
+        // path, where the union plan calls these on boxed `caseValues` from
+        // `FSharpValue.GetUnionFields`). The Fable
         // targets see both as the "native list" thanks to erasure; the
         // .NET shim has to handle them as distinct CLR types.
         member _.ArrayLength(arr) =

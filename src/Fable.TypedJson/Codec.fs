@@ -14,8 +14,7 @@ Codec.int |> Codec.gt 0 |> Codec.le 14
 Each combinator takes an `IJsonCodec<'T>` and returns an `IJsonCodec<'T>`
 with one extra validation step layered on the `Decode` path AND the
 matching JSON Schema constraint key threaded into `Schema`. Errors are
-returned as `Result<'T, string>`; the caller (Schema.coerce) surfaces
-them into a `FieldError`.
+returned as `Result<'T, string>`; `Plan` surfaces them as a `FieldError`.
 *)
 
 [<RequireQualifiedAccess>]
@@ -36,6 +35,9 @@ let mk (decode: JsonValue -> Result<'T, string>) (encode: 'T -> JsonValue) (sche
         member _.Schema = schema
     }
 
+/// Add decode-side validation while preserving the established wire encoder.
+///
+/// decision: validates only decode — encoding treats caller-held typed values as trusted
 let chain (validate: 'T -> Result<'T, string>) (inner: IJsonCodec<'T>) : IJsonCodec<'T> =
     mk (inner.Decode >> Result.bind validate) inner.Encode inner.Schema
 
@@ -47,9 +49,9 @@ let withSchemaKey (key: string) (value: JsonSchemaValue) (codec: IJsonCodec<'T>)
 // Primitive codecs
 // ============================================================================
 
-// Conversions come from `Primitives`, shared with `Schema.coerce`. Only the
-// classification differs: a codec matches a `JsonValue`, `coerce` asks the
-// backend. Keeping the rules in one place is what stopped the two diverging.
+// Conversions come from `Primitives`, shared with `Plan`'s primitive nodes.
+// Only classification differs: a codec matches a `JsonValue`; a plan asks
+// its backend. Keeping the conversions in one place prevents drift.
 let int: IJsonCodec<int> =
     mk
         (fun jv ->
@@ -197,7 +199,8 @@ let nonEmpty (codec: IJsonCodec<string>) : IJsonCodec<string> =
     chain (fun (s: string) -> if s.Length > 0 then Ok s else Error "must be non-empty") codec
     |> withSchemaKey "minLength" (SVInt 1)
 
-/// Regex pattern constraint (anchored full-match). JSON Schema: `pattern`.
+/// Regex pattern constraint. Add `^` / `$` when full-string matching is required.
+/// JSON Schema: `pattern`.
 let pattern (regex: string) (codec: IJsonCodec<string>) : IJsonCodec<string> =
     let re = Regex regex
 

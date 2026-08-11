@@ -4,21 +4,10 @@
 Wraps `JSON.parse` / `JSON.stringify` and uses JavaScript's native object,
 array, number, string, boolean, and null for the map abstraction.
 
-adr: a plain JS object (`{}`) is the native parsed-JSON map; `JSON.parse`
-     returns nested objects/arrays/primitives, which is exactly what
-     `JsonValue` erases to.
-adr: `Put` mutates in place, per `IJsonBackend.Put`'s linear-ownership
-     contract -- the map handed in is dead after the call. Supersedes the
-     original "non-mutating via spread" decision, which cost a full object
-     copy per key and made an n-field object O(n^2); every call site is an
-     accumulator fold that never reuses its argument, so nothing aliased.
-adr: numbers in JS are all double -- `IsInt` uses `Number.isInteger` to
-     distinguish whole-valued numbers from fractional ones, matching the
-     coercion expectations of the core (`JString "42"` -> `int 42`).
-adr: prefer `Fable.Core.JS` and `Fable.Core.JsInterop` over raw `[<Emit>]`
-     where possible. Only the assign-and-return (`Put`) and the `null`
-     sentinel still need raw emit -- everything else routes through
-     blessed bindings.
+decision: uses native JS objects, arrays, and primitives — `JSON.parse` output needs no representation conversion
+decision: mutates `Put` under linear ownership — avoiding a full object spread per key keeps object building O(n)
+decision: classifies whole-valued doubles with `Number.isInteger` — JavaScript has no distinct integer number type
+decision: prefers Fable interop bindings over raw emits — target-language strings remain limited to missing APIs
 *)
 
 module Fable.TypedJson.JS.Backend
@@ -27,14 +16,8 @@ open Fable.Core
 open Fable.Core.JsInterop
 open Fable.TypedJson.Backend
 
-// Assign-and-return isn't expressible in Fable.Core.JsInterop, so this stays
-// as raw emit.
-//
-// Was `({...$0, [$1]: $2})` — a full object copy per key, so building an
-// n-field object was O(n^2). `IJsonBackend.Put` now specifies linear
-// ownership (the argument is dead after the call), which makes in-place
-// mutation legal here and brings JS in line with what Python and .NET
-// already did.
+// Assign-and-return is not expressible in Fable.Core.JsInterop. Linear
+// ownership permits this emit to mutate without exposing aliases.
 [<Emit("($0[$1] = $2, $0)")>]
 let private jsPut (map: obj) (key: string) (value: obj) : obj = nativeOnly
 

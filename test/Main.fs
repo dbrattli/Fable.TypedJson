@@ -13,10 +13,10 @@ four backends:
              resolved promise and the value returned here is ignored.
   * .NET   — plain CLR execution, no Fable transpile.
 
-adr: Scriptorium (Quill + Nib) replaces the four per-target runners — it compiles to every target we ship
-adr: one [<EntryPoint>] for all targets; Fable's BEAM `main.erl` shim keeps it findable across compiler versions
+decision: Scriptorium (Quill + Nib) replaces the four per-target runners — it compiles to every target we ship
+decision: one [<EntryPoint>] for all targets; Fable's BEAM `main.erl` shim keeps it findable across compiler versions
 invariant: every test module's `tests` value appears in this list — an unlisted module is silently not run
-tradeoff: lost the BEAM runner's "discovered zero modules is a failure" guard; gained one runner and real skips
+tradeoff: relies on `check-test-registry` for omission detection to share one runner with real skips across targets
 *)
 
 module Fable.TypedJson.Tests.Main

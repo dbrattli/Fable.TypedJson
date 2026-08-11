@@ -297,7 +297,7 @@ A wrapper type that wants real encoding should register an `IJsonCodec`, which
 takes precedence over union dispatch on both paths.
 
 invariant: an unsupported union shape fails at codec construction, never silently at run time
-adr: reject at construction rather than per value — the failure is a property of the type, not the document
+decision: reject at construction rather than per value — the failure is a property of the type, not the document
 *)
 type Shape =
     | Circle of float

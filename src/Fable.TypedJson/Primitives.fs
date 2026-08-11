@@ -1,22 +1,20 @@
 (**
 # Primitives — the one JSON ↔ F# primitive coercion table
 
-`Schema.coerce` and the `Codec.int` / `int64` / `float` / `string` / `bool`
-values implement the same coercion rules for the same five types, but reach
-them from different directions: `coerce` dispatches on a backend-native value
-via `IJsonBackend.IsX` / `AsX`, while a codec pattern-matches a `JsonValue`.
-Written twice, they drifted — `Codec.float` lost the InvariantCulture pin,
-`Codec.int64` wrapped past Int32 range, and the two rendered floats to strings
-differently.
+`Plan`'s primitive nodes and the `Codec.int` / `int64` / `float` / `string` /
+`bool` values implement the same coercion rules for the same five types, but
+reach them from different directions: a plan node dispatches on a
+backend-native value via `IJsonBackend.IsX` / `AsX`, while a codec
+pattern-matches a `JsonValue`.
 
 What actually differs between the two callers is only *how the source value is
 classified*. The conversion itself is a pure function on primitives, with no
 backend and no `JsonValue` in sight. That is what lives here, so both callers
 share one definition instead of agreeing by convention.
 
-principle: conversion rules are pure functions on primitives — classification belongs to the caller
-adr: one module ahead of both `Schema` and `Codec` in compile order, so neither can fork the rules
-invariant: `Schema.coerce` and the matching `Codec` primitive produce the same result for the same input
+decision: conversion rules are pure functions on primitives — classification belongs to the caller
+decision: keeps conversions in a module compiled before `Codec` and `Plan` — neither caller can own a divergent copy
+invariant: a `Plan` primitive node and the matching `Codec` produce the same result for the same input
 *)
 
 module Fable.TypedJson.Primitives
@@ -48,7 +46,7 @@ Fable backends transpile to locale-immune native parsers (Erlang
 3-argument overload — it returns `0.0` on BEAM — so the short form is the
 correct one there, not merely the convenient one.
 
-adr: the culture pin lives here alone; both callers used to carry their own copy and one of them lost it
+decision: pins CLR float parsing here — both primitive entry paths inherit locale-independent JSON semantics
 *)
 let parseFloat (s: string) : Result<float, string> =
 #if FABLE_COMPILER
@@ -73,8 +71,7 @@ JSON has no date, uuid or exact-decimal type, so all three cross the wire as
 strings. ISO-8601 and canonical uuid are what `format: date-time` and
 `format: uuid` name, and are what every consumer expects.
 
-adr: parse leniently, render strictly — decode takes whatever the runtime's
-     parser accepts, encode always emits the round-trippable canonical form
+decision: parses accepted runtime forms but renders one canonical form — encoded values round-trip across targets
 *)
 
 (**
@@ -212,8 +209,8 @@ the thread culture and emit `"3,14"` under de-DE. Verified against a de-DE
 `CurrentCulture` in `TestCodec`, which fails on an unpinned *parse* and passes
 on this render.
 
-Not `sprintf "%f"`, which pads to a fixed six decimals — that is what made
-this disagree with `Schema.coerce`'s string arm before the two were merged.
+Not `sprintf "%f"`, which pads to a fixed six decimals and would change the
+wire representation.
 
 invariant: `parseFloat (floatToString f) = Ok f` regardless of ambient culture
 *)
@@ -240,9 +237,7 @@ implementations, and this is not.
 Python it attaches the machine's local offset to an `Unspecified` value. Written
 up in `../Fable/PYTHON-DATETIME-ROUNDTRIP-FORMAT-PROMPT.md`.
 
-tradeoff: `Kind` does not survive the round trip — a decoded value is always
-          `Utc`, and an `Unspecified` one is read as local time on the way out,
-          per .NET's own `ToUniversalTime` semantics
+tradeoff: normalizes `DateTime.Kind` to UTC so one wire value represents the same instant on every target
 *)
 let dateTimeToString (d: System.DateTime) : string =
     d.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffff")
@@ -268,10 +263,6 @@ Note that `format: decimal` is not a registered JSON Schema format — formats a
 an extensible annotation vocabulary, so this is legal but no validator will act
 on it. It is emitted for documentation value.
 
-tradeoff: consumers see `"12.34"`, not `12.34` — the schema says so
-          (`format: decimal`), and decode still accepts a bare JSON number, so
-          the schema is deliberately stricter than the decoder. Describing what
-          `Encode` produces is the property the single-walker design guarantees;
-          Pydantic instead widens the schema to `anyOf: [number, string]`
+tradeoff: emits decimals as strings to preserve precision while still accepting bare JSON numbers on decode
 *)
 let decimalToString (d: decimal) : string = string d

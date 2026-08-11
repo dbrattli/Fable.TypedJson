@@ -4,8 +4,7 @@
 Wraps `Fable.Beam.Maps` (BEAM `maps` module) and `Fable.Beam.Jsx.Jsx`
 (jsx JSON library) to implement `Fable.TypedJson.Backend.IJsonBackend`.
 
-adr: BeamMap<string, obj> is the native parsed-JSON representation; jsx
-     decodes JSON to nested BeamMaps when given the `returnMaps` option.
+decision: requests jsx `returnMaps` output — nested JSON objects stay native `BeamMap<string, obj>` values
 *)
 
 module Fable.TypedJson.Beam.Backend
@@ -37,11 +36,10 @@ let private isErlList (v: obj) : bool = nativeOnly
 [<Emit("is_map($0)")>]
 let private isErlMap (v: obj) : bool = nativeOnly
 
-// assumption: the sequence reaching these is either a plain Erlang list (what
-// `BuildArray` emits) or a process-dict array ref (what `FSharpValue.GetUnionFields`
-// returns for its `obj[]` case values — fable-library-beam 5.11 started
-// ref-wrapping that array, where 5.5 returned a bare list). `fable_utils:to_list`
-// normalizes both, so these stay correct across that representation change.
+// `BuildArray` emits a plain Erlang list; Fable 5.11's
+// `FSharpValue.GetUnionFields` returns process-dict array refs for `obj[]` case
+// values. `fable_utils:to_list` normalizes both representations.
+// assumption: sequence inputs are plain Erlang lists or Fable process-dict array refs
 [<Emit("length(fable_utils:to_list($0))")>]
 let private erlListLength (l: obj) : int = nativeOnly
 
@@ -89,10 +87,8 @@ type private BeamBackendImpl() =
         member _.IsArray(value) = isErlList value
         member _.IsMap(value) = isErlMap value
 
-        // Typed accessors — `[<Erase>]` semantics make these effectively
-        // identity unboxes on BEAM, since `JString s` IS the binary at
-        // runtime, `JInt n` IS the integer, etc. The unbox is just an F#
-        // type-check that Fable erases to the underlying term.
+        // Parsed values are already native Erlang terms. Fable erases these
+        // typed unboxes, so the accessors are runtime identities on BEAM.
         member _.AsString(value) = unbox<string> value
         member _.AsInt(value) = unbox<int> value
         member _.AsFloat(value) = unbox<float> value

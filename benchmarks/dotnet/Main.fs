@@ -93,7 +93,7 @@ type DecodeBench() =
     the overhead it adds *over its own parser*, which is the only comparison
     that says anything about the design.
 
-    adr: baseline every competitor against its own parser, not against ours
+    decision: baseline every competitor against its own parser, not against ours
     *)
     [<Benchmark(Description = "Newtonsoft (raw) — Thoth's parser baseline")>]
     member _.NewtonsoftRaw() =
@@ -160,7 +160,7 @@ These fixtures are where that shows. `Order` nests two levels and carries a
 list of records; `Catalogue` carries 100 of them, so per-element cost is 100×
 magnified.
 
-adr: measure nested separately from flat — a single flat fixture reports "no change" for a refactor that only touches depth >= 1
+decision: measure nested separately from flat — a single flat fixture reports "no change" for a refactor that only touches depth >= 1
 *)
 type Address = { Street: string; City: string; Zip: string }
 
@@ -252,7 +252,7 @@ walk of every nested record, list element type and union case, plus an eagerly
 built JSON Schema tree. A consumer that calls `auto<'T> ()` per request — the
 Fable.Giraffe shape — pays this every time.
 
-adr: measure construction explicitly; "build once and reuse" is only sound advice if the cost of not doing so is known
+decision: measure construction explicitly; "build once and reuse" is only sound advice if the cost of not doing so is known
 *)
 [<MemoryDiagnoser>]
 [<Orderer(SummaryOrderPolicy.FastestToSlowest)>]

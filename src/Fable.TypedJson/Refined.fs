@@ -97,8 +97,9 @@ module NonNegativeInt =
 // Email — strings matching a pragmatic email pattern
 // ============================================================================
 
-// Pragmatic pattern: not RFC 5322 strict, but catches typos.
-// Anchored full-match by Codec.pattern (we add explicit anchors).
+// Pragmatic pattern: not RFC 5322 strict, but catches typos. Explicit anchors
+// make `Codec.pattern` match the full string.
+// tradeoff: uses pragmatic email syntax instead of full RFC 5322 to keep validation portable and predictable
 [<Literal>]
 let private emailPattern = "^[^\s@]+@[^\s@]+\.[^\s@]+$"
 
@@ -117,6 +118,7 @@ module Email =
 // Url — strings starting with http:// or https://
 // ============================================================================
 
+// tradeoff: validates an http(s) prefix and non-empty suffix instead of imposing one runtime's URI parser semantics
 [<Literal>]
 let private urlPattern = "^https?://.+"
 
@@ -132,9 +134,10 @@ module Url =
     let value (Url s) = s
 
 // ============================================================================
-// Uuid — UUID v4-style pattern (8-4-4-4-12 hex digits)
+// Uuid — canonical UUID shape (8-4-4-4-12 hex digits, any version)
 // ============================================================================
 
+// decision: validates canonical UUID shape without version bits — the type promises UUID text, not a specific version
 [<Literal>]
 let private uuidPattern =
     "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"

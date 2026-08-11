@@ -1,11 +1,9 @@
 (**
 # Casing — the canonical-PascalCase pivot, shared by Schema and Json
 
-Two layers need to turn a reflection-supplied field name into a JSON key, and
-they must agree: `Schema.lowerFirstTransform` (backing `dump` / `validateJson` /
-`validateMap`) and `Json.applyCaseRule` (backing the `CaseRules` codec API).
-`Json` compiles after `Schema`, so the pivot they share lives here, ahead of
-both.
+The public `Schema.lowerFirstTransform` compatibility helper and
+`Json.applyCaseRule` both turn reflection-supplied field names into JSON keys.
+Their canonical pivot lives here, compiled before both modules.
 
 The pivot exists because `PropertyInfo.Name` has not always reported the F#
 spelling. BEAM reported snake_case before Fable 5.8.1
@@ -15,10 +13,10 @@ Normalizing to PascalCase first means a JSON key is derived from the F# field
 name, not from whichever spelling the compiler happened to hand us — so the same
 record produces the same wire format on every target and across that upgrade.
 
-principle: a JSON key is a function of the F# field name alone — never of the backend or the Fable version
+decision: a JSON key is a function of the F# field name alone — never of the backend or the Fable version
 invariant: `toCanonicalPascal` is idempotent — applying it to its own output is a no-op
-adr: uppercase-presence is the snake_case test — reflection never returns a mixed form, so there is no third case to distinguish
-assumption: a name with no uppercase letter is snake_case (or a genuinely lowercase F# field, which round-trips unchanged)
+decision: treats any uppercase letter as an original F#-style name — only all-lower names need snake_case recovery
+assumption: reflection supplies either the original F# spelling or a snake_case normalization, with no third form
 *)
 
 module Fable.TypedJson.Casing

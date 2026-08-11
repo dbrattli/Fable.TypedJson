@@ -3,8 +3,7 @@
 .NET test project — runs natively on the CLR with no Fable transpile step, so it drops
 FABLE_COMPILER.
 
-adr: System.Text.Json is not referenced here — with no Fable source-walking involved it
-     flows transitively through the ProjectReference to the .NET shim
+decision: relies on the .NET shim's transitive System.Text.Json reference — native tests do not source-walk dependencies
 -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>

@@ -3,10 +3,7 @@
 BEAM test project. Its reference set is exactly what a Fable.TypedJson.Beam consumer
 gets — see Fable.TypedJson.Test.Beam.fsproj.paket.references.
 
-adr: one project per target rather than one project with FableTarget conditions — Fable
-     merges referenced projects' sources into the root compilation and resolves their
-     packages from the root reference set, so a four-target project referenced all four
-     backends' bindings and emitted e.g. Fable.Python's sources into the Erlang build
+decision: uses one test project per target — Fable merges referenced sources and resolves packages from the root project
 -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
