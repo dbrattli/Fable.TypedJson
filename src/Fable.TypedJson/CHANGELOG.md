@@ -1,13 +1,16 @@
 ---
-last_commit_released: 02b1f4805966b8314b4ef0f23a9a4ef38ef3ddaf
+last_commit_released: c7f374b29578ce922d275fccc6c1d95ff3285635
 name: Fable.TypedJson
+include:
+  - ../../**
+force_version: 5.3.0
 ---
 
 # Changelog
 
 All notable changes to this project will be documented in this file.
 
-This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All packages in this repository share this version and follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
