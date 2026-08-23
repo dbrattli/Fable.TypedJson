@@ -102,26 +102,30 @@ all: check build
 
 # --- Release ---
 
-# Build NuGet packages with versions extracted from each package's CHANGELOG.md
+# Build the package family at the single version in its shared changelog.
+#
+# decision: Fable.TypedJson and its adapters release as one versioned unit because
+# an adapter package contains a compiler-visible reference to the core package.
 pack:
     #!/usr/bin/env bash
     set -euo pipefail
-    get_version() { grep -m1 '^## ' "$1" | sed 's/^## \([^ ]*\).*/\1/'; }
-    CORE_VERSION=$(get_version src/Fable.TypedJson/CHANGELOG.md)
-    BEAM_VERSION=$(get_version src/Fable.TypedJson.Beam/CHANGELOG.md)
-    PYTHON_VERSION=$(get_version src/Fable.TypedJson.Python/CHANGELOG.md)
-    JS_VERSION=$(get_version src/Fable.TypedJson.JS/CHANGELOG.md)
-    DOTNET_VERSION=$(get_version src/Fable.TypedJson.DotNet/CHANGELOG.md)
+    VERSION=$(grep -m1 '^## ' src/Fable.TypedJson/CHANGELOG.md | sed 's/^## \([^ ]*\).*/\1/')
     rm -rf ./nupkgs
-    dotnet pack src/Fable.TypedJson        -c Release -o ./nupkgs -p:PackageVersion=$CORE_VERSION   -p:InformationalVersion=$CORE_VERSION
-    dotnet pack src/Fable.TypedJson.Beam   -c Release -o ./nupkgs -p:PackageVersion=$BEAM_VERSION   -p:InformationalVersion=$BEAM_VERSION
-    dotnet pack src/Fable.TypedJson.Python -c Release -o ./nupkgs -p:PackageVersion=$PYTHON_VERSION -p:InformationalVersion=$PYTHON_VERSION
-    dotnet pack src/Fable.TypedJson.JS     -c Release -o ./nupkgs -p:PackageVersion=$JS_VERSION     -p:InformationalVersion=$JS_VERSION
-    dotnet pack src/Fable.TypedJson.DotNet -c Release -o ./nupkgs -p:PackageVersion=$DOTNET_VERSION -p:InformationalVersion=$DOTNET_VERSION
+    dotnet pack src/Fable.TypedJson        -c Release -o ./nupkgs -p:PackageVersion=$VERSION -p:InformationalVersion=$VERSION
+    dotnet pack src/Fable.TypedJson.Beam   -c Release -o ./nupkgs -p:PackageVersion=$VERSION -p:InformationalVersion=$VERSION
+    dotnet pack src/Fable.TypedJson.Python -c Release -o ./nupkgs -p:PackageVersion=$VERSION -p:InformationalVersion=$VERSION
+    dotnet pack src/Fable.TypedJson.JS     -c Release -o ./nupkgs -p:PackageVersion=$VERSION -p:InformationalVersion=$VERSION
+    dotnet pack src/Fable.TypedJson.DotNet -c Release -o ./nupkgs -p:PackageVersion=$VERSION -p:InformationalVersion=$VERSION
 
-# Pack and push every package to NuGet (CI-only — needs $NUGET_KEY)
+# Pack and push the core before its adapters (CI-only — needs $NUGET_KEY).
 release: pack
-    dotnet nuget push './nupkgs/*.nupkg' -s https://api.nuget.org/v3/index.json -k $NUGET_KEY --skip-duplicate
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERSION=$(grep -m1 '^## ' src/Fable.TypedJson/CHANGELOG.md | sed 's/^## \([^ ]*\).*/\1/')
+    dotnet nuget push "./nupkgs/Fable.TypedJson.$VERSION.nupkg" -s https://api.nuget.org/v3/index.json -k $NUGET_KEY --skip-duplicate
+    for package in Fable.TypedJson.Beam Fable.TypedJson.Python Fable.TypedJson.JS Fable.TypedJson.DotNet; do
+        dotnet nuget push "./nupkgs/$package.$VERSION.nupkg" -s https://api.nuget.org/v3/index.json -k $NUGET_KEY --skip-duplicate
+    done
 
 # Run EasyBuild.ShipIt for release management. Pass extra flags after `--`.
 shipit *args:
