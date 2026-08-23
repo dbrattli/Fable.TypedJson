@@ -10,9 +10,10 @@ decision: requests jsx `returnMaps` output — nested JSON objects stay native `
 module Fable.TypedJson.Beam.Backend
 
 open Fable.Core
-open Fable.Beam.Maps
-open Fable.Beam.Jsx.Jsx
 open Fable.TypedJson.Backend
+
+module BeamMaps = Fable.Beam.Maps
+module BeamJsx = Fable.Beam.Jsx.Jsx
 
 // Erlang type-guard primitives — used for the IJsonBackend type-test methods.
 [<Emit("is_binary($0)")>]
@@ -60,19 +61,20 @@ let private erlNull: obj = nativeOnly
 
 type private BeamBackendImpl() =
     interface IJsonBackend with
-        member _.NewMap() = box (maps.new_ ())
+        member _.NewMap() = box (BeamMaps.empty ())
 
-        member _.ContainsKey(map, key) = maps.is_key (key, unbox map)
+        member _.ContainsKey(map, key) = BeamMaps.containsKey key (unbox map)
 
         member _.Get(map, key) =
-            maps.get (key, unbox<BeamMap<string, obj>> map)
+            BeamMaps.get key (unbox<BeamMaps.BeamMap<string, obj>> map)
 
         member _.Put(map, key, value) =
-            box (maps.put (key, value, unbox<BeamMap<string, obj>> map))
+            box (BeamMaps.put key value (unbox<BeamMaps.BeamMap<string, obj>> map))
 
-        member _.ParseRaw(json) = box (jsx.decode (json, [ returnMaps ]))
+        member _.ParseRaw(json) =
+            box (BeamJsx.decodeWith json [ BeamJsx.returnMaps ])
 
-        member _.Stringify(value) = jsx.encode (unbox value)
+        member _.Stringify(value) = BeamJsx.encode (unbox value)
 
         // BEAM type tests — Erlang is_* type guards. Note: is_boolean must be checked
         // before is_atom-style checks since booleans are atoms (`true`, `false`).
