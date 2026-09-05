@@ -1,5 +1,6 @@
 ---
 last_commit_released: 7c75608ced76f1f0a4714a879e70d3dbd8fbd5ce
+force_version: 5.4.0
 name: Fable.TypedJson
 include:
   - ../../**
