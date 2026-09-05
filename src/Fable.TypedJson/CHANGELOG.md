@@ -1,6 +1,5 @@
 ---
-last_commit_released: 7c75608ced76f1f0a4714a879e70d3dbd8fbd5ce
-force_version: 5.4.0
+last_commit_released: 9a4c8ef28ffb77ddbe2201c59eace6d7da154a5a
 name: Fable.TypedJson
 include:
   - ../../**
@@ -15,6 +14,10 @@ All packages in this repository share this version and follow [Semantic Versioni
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 5.4.0 - 2026-09-05
+
+<strong><small>[View changes on Github](https://github.com/dbrattli/Fable.TypedJson/compare/7c75608ced76f1f0a4714a879e70d3dbd8fbd5ce..9a4c8ef28ffb77ddbe2201c59eace6d7da154a5a)</small></strong>
 
 ## 5.3.0 - 2026-08-23
 
