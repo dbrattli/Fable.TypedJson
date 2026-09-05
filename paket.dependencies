@@ -30,8 +30,8 @@ group Beam
 
     nuget FSharp.Core >= 6.0.0 lowest_matching: true
     nuget Fable.Core >= 5.0.0 lowest_matching: true
-    nuget Fable.Beam >= 5.0.0-rc.37
-    nuget Fable.Beam.Jsx >= 5.0.0-rc.9
+    nuget Fable.Beam >= 5.0.0
+    nuget Fable.Beam.Jsx >= 5.0.0
 
 # Python backend
 group Python
@@ -83,8 +83,8 @@ group Test
 
     nuget FSharp.Core
     nuget Fable.Core
-    nuget Fable.Beam >= 5.0.0-rc.37
-    nuget Fable.Beam.Jsx >= 5.0.0-rc.9
+    nuget Fable.Beam >= 5.0.0
+    nuget Fable.Beam.Jsx >= 5.0.0
     nuget Fable.Python 5.5.0
     nuget Scriptorium.Quill >= 0.5.1
     nuget Scriptorium.Nib >= 0.4.1
