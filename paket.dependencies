@@ -41,7 +41,7 @@ group Python
 
     nuget FSharp.Core >= 6.0.0 lowest_matching: true
     nuget Fable.Core >= 5.0.0 lowest_matching: true
-    nuget Fable.Python >= 5.1.0
+    nuget Fable.Python 5.5.0
 
 # JavaScript backend -- only Fable.Core is needed; the shim uses raw
 # [<Emit>] for JSON.parse / JSON.stringify and JS native type tests.
@@ -85,7 +85,7 @@ group Test
     nuget Fable.Core
     nuget Fable.Beam >= 5.0.0-rc.37
     nuget Fable.Beam.Jsx >= 5.0.0-rc.9
-    nuget Fable.Python >= 5.1.0
+    nuget Fable.Python 5.5.0
     nuget Scriptorium.Quill >= 0.5.1
     nuget Scriptorium.Nib >= 0.4.1
 

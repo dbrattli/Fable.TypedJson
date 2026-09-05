@@ -46,20 +46,6 @@ let private pyDict: obj = nativeOnly
 [<Global; Emit("None")>]
 let private pyNone: obj = nativeOnly
 
-// Fable's `Int32` and `Float64` Python classes — F# `int` / `float`
-// values arrive boxed as instances of these, NOT as native Python `int`
-// / `float`. (Despite the `.pyi` declaring `Int32(int)`, at runtime
-// Fable's Int32 does NOT inherit from Python's int — confirmed via
-// `isinstance(int32(42), int) is False`.) The schema-side `IsInt` /
-// `IsFloat` therefore have to test against both shapes: the native
-// type (for `json.loads` outputs and `stringMapAdapter` boxes) and
-// Fable's wrapper (for F# `int`/`float` values handed in directly).
-[<Emit("__import__(\"fable_library.core\", fromlist=[\"int32\"]).int32")>]
-let private pyInt32: obj = nativeOnly
-
-[<Emit("__import__(\"fable_library.core\", fromlist=[\"float64\"]).float64")>]
-let private pyFloat64: obj = nativeOnly
-
 // `dict()` and `list(...)` constructors aren't on Fable.Python.Builtins'
 // `IExports` interface even though the type references above are. File an
 // upstream addition — until then, emit directly.
@@ -72,28 +58,14 @@ let private pyListOf (xs: obj) : obj = nativeOnly
 // `key in dict` — Python's `in` is a syntactic operator with no Fable wrapper.
 let private contains (map: obj) (key: string) : bool = emitPyExpr (key, map) "$0 in $1"
 
-// Native int / float wrapping at the F# boundary.
-// `int v` / `float v` in F# compile to `int32(v)` / `float64(v)` on the
-// Fable Python target, which is what F# code expects when typed as `int`
-// / `float`. Native Python ints from `json.loads` aren't `int32`, so we
-// wrap when handing values back to the F# layer (in `AsInt` / `AsFloat`
-// and when constructing user-facing `JsonValue` cases).
-let private wrapAsInt32 (v: obj) : obj = box (int (unbox<int> v))
-let private wrapAsFloat64 (v: obj) : obj = box (float (unbox<float> v))
-
 type private PythonBackendImpl() =
     interface IJsonBackend with
         member _.NewMap() = pyEmptyDict ()
 
         member _.ContainsKey(map, key) = contains map key
 
-        // Get returns the raw native value. The schema layer dispatches
-        // via `backend.IsX` / `AsX`, which know to handle native Python
-        // primitives; the previous Get-time wrap to `int32` / `float64`
-        // existed only so the (now-removed) `JInt n` / `JFloat f` pattern
-        // matches in the core hot path would compile to `isinstance(_,
-        // int32)` checks. With pattern-matching out of the hot path, we
-        // wrap on the way out (AsInt / AsFloat) instead.
+        // Get returns raw native values; the schema layer dispatches through
+        // `backend.IsX` / `AsX`, so no representation conversion is needed.
         member _.Get(map, key) = map?(key)
 
         member _.Put(map, key, value) =
@@ -104,39 +76,29 @@ type private PythonBackendImpl() =
 
         member _.Stringify(value) = Json.dumps value
 
-        // Type tests recognise BOTH native Python primitives (from
-        // `json.loads`, `stringMapAdapter`) AND Fable's `Int32` / `Float64`
-        // wrappers (F# `int` / `float` literals constructed in F# code).
-        // Bool subclasses Python int, so the int test excludes bools
-        // explicitly. Fable's `Int32` does NOT subclass Python int, hence
-        // the explicit second branch.
+        // Fable 5.16 represents F# int and float as native Python primitives.
+        // Bool subclasses Python int, so the int test excludes bools explicitly.
+        // decision: tests runtime types rather than Fable coercion helpers so parsed JSON and F# values share one path
         member _.IsString(value) = pyInstanceof value pyStr
 
         member _.IsInt(value) =
             not (pyInstanceof value pyBool)
-            && (pyInstanceof value pyInt
-                || pyInstanceof value pyInt32)
+            && pyInstanceof value pyInt
 
-        member _.IsFloat(value) =
-            pyInstanceof value pyFloat
-            || pyInstanceof value pyFloat64
+        member _.IsFloat(value) = pyInstanceof value pyFloat
 
         member _.IsBool(value) = pyInstanceof value pyBool
         member _.IsNull(value) = emitPyExpr value "$0 is None"
         member _.IsArray(value) = pyInstanceof value pyList
         member _.IsMap(value) = pyInstanceof value pyDict
 
-        // Typed accessors. Native Python `str` / `bool` map straight through;
-        // for `int` and `float` we go through the same int32/float64 wrapping
-        // that `Get` does so the F# side sees the wrapped types its codecs
-        // dispatch against (`isinstance(_, int32)` etc.).
+        // Typed accessors map native Python primitives straight through.
         member _.AsString(value) = unbox<string> value
-        member _.AsInt(value) = unbox<int> (wrapAsInt32 value)
-        member _.AsFloat(value) = unbox<float> (wrapAsFloat64 value)
+        member _.AsInt(value) = unbox<int> value
+        member _.AsFloat(value) = unbox<float> value
         member _.AsBool(value) = unbox<bool> value
         member _.ArrayLength(arr) = builtins.len arr
-        // ArrayAt is symmetric to Get — return the raw native value, the
-        // caller dispatches via IsX / AsX.
+        // ArrayAt is symmetric to Get — return the raw native value.
         member _.ArrayAt(arr, i) = arr?(i)
         // F# `obj list` is FSharpList on Python (cons cells with __slots__).
         // `json.dumps` would render that as a record-like dict, not a JSON
