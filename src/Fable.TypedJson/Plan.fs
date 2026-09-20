@@ -195,6 +195,36 @@ let discriminatorKey = "type"
 // The walker
 // ============================================================================
 
+/// Classifies a reflected type's full name into the node that serves it. A
+/// private DU rather than string comparisons, so dispatch is exhaustively
+/// checked: every literal lives in exactly one place (`classify`), and adding
+/// a new primitive extends this type — the `match`es below then fail to compile
+/// until they handle it, catching typos a bare string comparison would not.
+type NodeKind =
+    | StringNode
+    | IntNode
+    | Int64Node
+    | FloatNode
+    | BoolNode
+    | DateTimeNode
+    | DateTimeOffsetNode
+    | GuidNode
+    | DecimalNode
+    | Unknown
+
+let private classify (fullName: string) : NodeKind =
+    match fullName with
+    | "System.String" -> StringNode
+    | "System.Int32" -> IntNode
+    | "System.Int64" -> Int64Node
+    | "System.Double" -> FloatNode
+    | "System.Boolean" -> BoolNode
+    | "System.DateTime" -> DateTimeNode
+    | "System.DateTimeOffset" -> DateTimeOffsetNode
+    | "System.Guid" -> GuidNode
+    | "System.Decimal" -> DecimalNode
+    | _ -> Unknown
+
 (**
 Module-scope mutual recursion with explicit parameters.
 
@@ -202,71 +232,89 @@ decision: keeps recursive planning outside inline functions — captured values 
 *)
 let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
     let fullName = t.FullName
-    let b = ctx.Backend
 
     // Primitives precede registry lookup, so a codec registered against
-    // `System.Int32` stays inert in both directions.
-    if fullName = "System.String" then
-        planString b
-    elif fullName = "System.Int32" then
-        planInt b
-    elif fullName = "System.Int64" then
-        planInt64 b
-    elif fullName = "System.Double" then
-        planFloat b
-    elif fullName = "System.Boolean" then
-        planBool b
+    // `System.Int32` stays inert in both directions. Everything else routes
+    // through `structuralPlan`, which preserves the SAME order for every face of
+    // the walker — that shared, ordered fall-through is the one-walker rule this
+    // module exists to enforce.
+    match primitivePlan fullName ctx.Backend with
+    | Some p -> p
+    | None -> structuralPlan ctx fullName t
+
+/// The five JSON-native primitives, already in their backend's native form.
+/// Returns `None` for anything else so the registry-and-structural dispatch in
+/// `structuralPlan` stays a single ordered fall-through rather than two.
+and private primitivePlan (fullName: string) (b: IJsonBackend) : Plan option =
+    match classify fullName with
+    | StringNode -> Some(planString b)
+    | IntNode -> Some(planInt b)
+    | Int64Node -> Some(planInt64 b)
+    | FloatNode -> Some(planFloat b)
+    | BoolNode -> Some(planBool b)
+    | _ -> None
+
+/// String-encoded scalars: date, offset, guid and decimal all cross the wire
+/// as a string. Dispatched AFTER the registry so a registered codec for any of
+/// these still wins — exactly the override a consumer expects here.
+and private scalarPlan (fullName: string) (b: IJsonBackend) : Plan option =
+    match classify fullName with
+    | DateTimeNode -> Some(planDateTime b)
+    | DateTimeOffsetNode -> Some(planDateTimeOffset b)
+    | GuidNode -> Some(planGuid b)
+    | DecimalNode -> Some(planDecimal b)
+    | _ -> None
+
+/// A record or union that may recurse: defer when this type is already on the
+/// `Building` path (the document supplies the finite base case at call time),
+/// otherwise build it inline. Extracted as a thunk so the two call sites stay
+/// byte-identical and neither nests a second level deep.
+and private recursivePlan (ctx: BuildCtx) (fullName: string) (t: System.Type) (build: unit -> Plan) : Plan =
+    if List.contains fullName ctx.Building then
+        planDeferred ctx t
     else
-        match tryGetCodecEntry fullName ctx.Registry with
-        // A user codec drives BOTH directions. `toJsonValue` / `fromJsonValue`
-        // are the only places a `JsonValue` is built or unwrapped — they exist
-        // solely to cross this boundary.
-        | Some entry ->
-            let decode = entry.decode
-            let encode = entry.encode
+        build ()
 
-            {
-                Decode =
-                    fun v ->
-                        match decode (toJsonValue b v) with
-                        | Ok x -> Ok x
-                        | Error msg -> leafError msg
-                Encode = fun v -> fromJsonValue b (encode v)
-                // The codec's own schema, captured at registration — this is
-                // how a refined type's constraints reach the emitted document.
-                Schema = SVDict entry.schema
-                Definitions = noDefs
-            }
+/// Registry lookup, then string scalars, then sequence/record/union. The
+/// registry precedes structure everywhere — a caller-registered codec owns its
+/// type ahead of the structural walk in every face.
+and private structuralPlan (ctx: BuildCtx) (fullName: string) (t: System.Type) : Plan =
+    let b = ctx.Backend
+
+    match tryGetCodecEntry fullName ctx.Registry with
+    // A user codec drives BOTH directions. `toJsonValue` / `fromJsonValue`
+    // are the only places a `JsonValue` is built or unwrapped — they exist
+    // solely to cross this boundary.
+    | Some entry ->
+        let decode = entry.decode
+        let encode = entry.encode
+
+        {
+            Decode =
+                fun v ->
+                    match decode (toJsonValue b v) with
+                    | Ok x -> Ok x
+                    | Error msg -> leafError msg
+            Encode = fun v -> fromJsonValue b (encode v)
+            // The codec's own schema, captured at registration — this is
+            // how a refined type's constraints reach the emitted document.
+            Schema = SVDict entry.schema
+            Definitions = noDefs
+        }
+    | None ->
+        match scalarPlan fullName b with
+        | Some p -> p
         | None ->
-
-            // Dispatched AFTER the registry, unlike the five primitives above:
-            // a date format or decimal representation is exactly the kind of
-            // thing a consumer may need to override, so a registered codec for
-            // these still wins.
-            if fullName = "System.DateTime" then
-                planDateTime b
-            elif fullName = "System.DateTimeOffset" then
-                planDateTimeOffset b
-            elif fullName = "System.Guid" then
-                planGuid b
-            elif fullName = "System.Decimal" then
-                planDecimal b
             // F# list MUST precede the union test: `FSharpList<'T>` is itself a DU,
             // so `IsUnion` returns true for it on the CLR and would mis-route.
-            elif isFSharpListType fullName then
+            if isFSharpListType fullName then
                 planSeq ctx (getGenericInnerType t) extractList listBuilder
             elif t.IsArray then
                 planSeq ctx (t.GetElementType()) extractArray arrayBuilder
             elif FSharpType.IsRecord t then
-                if List.contains fullName ctx.Building then
-                    planDeferred ctx t
-                else
-                    planRecord ctx t
+                recursivePlan ctx fullName t (fun () -> planRecord ctx t)
             elif FSharpType.IsUnion t then
-                if List.contains fullName ctx.Building then
-                    planDeferred ctx t
-                else
-                    planUnion ctx t
+                recursivePlan ctx fullName t (fun () -> planUnion ctx t)
             else
                 // decision: passes unknown types through encode but rejects decode — preserves manual output only
                 let message = sprintf "cannot decode %s" fullName
