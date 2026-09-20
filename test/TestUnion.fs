@@ -61,7 +61,7 @@ let private topLevelUnionTests =
             test (
                 "decode tagged union top-level — search case",
                 fun _ ->
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
                     let map = parseRaw """{"type":"search","query":"hello","maxResults":5}"""
 
                     match codec.decode map with
@@ -74,7 +74,7 @@ let private topLevelUnionTests =
             test (
                 "decode tagged union top-level — calculate case",
                 fun _ ->
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
                     let map = parseRaw """{"type":"calculate","expression":"1+1"}"""
 
                     match codec.decode map with
@@ -85,7 +85,7 @@ let private topLevelUnionTests =
             test (
                 "decode tagged union — fieldless case",
                 fun _ ->
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
                     let map = parseRaw """{"type":"ping"}"""
 
                     match codec.decode map with
@@ -96,7 +96,7 @@ let private topLevelUnionTests =
             test (
                 "decode tagged union — unknown discriminator value",
                 fun _ ->
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
                     let map = parseRaw """{"type":"bogus","query":"x"}"""
 
                     match codec.decode map with
@@ -108,7 +108,7 @@ let private topLevelUnionTests =
             test (
                 "decode tagged union — missing discriminator",
                 fun _ ->
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
                     let map = parseRaw """{"query":"x"}"""
 
                     match codec.decode map with
@@ -120,7 +120,7 @@ let private topLevelUnionTests =
             test (
                 "encode tagged union — search case",
                 fun _ ->
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
                     let value = Search { Query = "hello"; MaxResults = 5 }
                     let json = codec.encode value
                     let parsed = parseRaw json
@@ -132,7 +132,7 @@ let private topLevelUnionTests =
             test (
                 "encode tagged union — fieldless case",
                 fun _ ->
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
                     let json = codec.encode Ping
                     let parsed = parseRaw json
 
@@ -141,7 +141,7 @@ let private topLevelUnionTests =
             test (
                 "round-trip tagged union — every case",
                 fun _ ->
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
 
                     let cases = [
                         Search { Query = "q"; MaxResults = 3 }
@@ -172,7 +172,7 @@ let private unionAsRecordFieldTests =
             test (
                 "tagged union as record field — round-trip",
                 fun _ ->
-                    let codec = auto<Envelope> ()
+                    let codec = auto<Envelope>()
 
                     let original = {
                         Id = 42
@@ -213,7 +213,7 @@ let private snakeCaseDiscriminatorTests =
                 "snake_case union tag — encode multi-word case",
                 fun _ ->
                     let codec =
-                        auto<ContentBlock> ()
+                        auto<ContentBlock>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let value = ToolUse { Id = "abc"; Name = "search" }
@@ -229,7 +229,7 @@ let private snakeCaseDiscriminatorTests =
                 "snake_case union tag — decode multi-word case",
                 fun _ ->
                     let codec =
-                        auto<ContentBlock> ()
+                        auto<ContentBlock>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"type":"tool_use","id":"xyz","name":"calc"}"""
@@ -245,7 +245,7 @@ let private snakeCaseDiscriminatorTests =
                 "snake_case union tag — fieldless multi-word case",
                 fun _ ->
                     let codec =
-                        auto<ContentBlock> ()
+                        auto<ContentBlock>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let json = codec.encode ToolResult
@@ -262,7 +262,7 @@ let private snakeCaseDiscriminatorTests =
                 "snake_case union tag — round-trip every case",
                 fun _ ->
                     let codec =
-                        auto<ContentBlock> ()
+                        auto<ContentBlock>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let cases = [ Text { Text = "hello" }; ToolUse { Id = "id-1"; Name = "tool" }; ToolResult ]
@@ -311,11 +311,11 @@ let private unsupportedUnionShapeTests =
         [
             test (
                 "non-record single-field case is rejected when the codec is built",
-                fun _ -> assertThat (fun () -> auto<Shape> () |> ignore) throws
+                fun _ -> assertThat (fun () -> auto<Shape>() |> ignore) throws
             )
             test (
                 "multi-positional-field case is rejected when the codec is built",
-                fun _ -> assertThat (fun () -> auto<Segment> () |> ignore) throws
+                fun _ -> assertThat (fun () -> auto<Segment>() |> ignore) throws
             )
             test (
                 "a union of supported shapes still builds",
@@ -324,7 +324,7 @@ let private unsupportedUnionShapeTests =
                     // single-record-payload cases must stay buildable.
                     // Asserted on the parsed value, not the JSON text — the
                     // backends differ in separator spacing.
-                    let codec = auto<Tool> ()
+                    let codec = auto<Tool>()
                     let parsed = parseRaw (codec.encode Ping)
                     assertThat (getString backend parsed "type") (isEqualTo "ping")
             )

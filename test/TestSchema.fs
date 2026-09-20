@@ -341,77 +341,77 @@ let private coercionTests =
             test (
                 "coercion string to int",
                 fun _ ->
-                    match validateMap<IntBox> (Map.ofList [ "value", "42" ]) with
+                    match validateMap<IntBox>(Map.ofList [ "value", "42" ]) with
                     | Ok r -> assertThat r.Value (isEqualTo 42)
                     | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion string to float",
                 fun _ ->
-                    match validateMap<FloatBox> (Map.ofList [ "value", "3.14" ]) with
+                    match validateMap<FloatBox>(Map.ofList [ "value", "3.14" ]) with
                     | Ok r -> assertThat r.Value (isEqualTo 3.14)
                     | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion string to bool true",
                 fun _ ->
-                    match validateMap<BoolBox> (Map.ofList [ "value", "true" ]) with
+                    match validateMap<BoolBox>(Map.ofList [ "value", "true" ]) with
                     | Ok r -> assertThat r.Value isTrue
                     | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion string to bool false",
                 fun _ ->
-                    match validateMap<BoolBox> (Map.ofList [ "value", "false" ]) with
+                    match validateMap<BoolBox>(Map.ofList [ "value", "false" ]) with
                     | Ok r -> assertThat r.Value isFalse
                     | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion int to float",
                 fun _ ->
-                    match validateJson<FloatBox> (parseRaw """{"value":42}""") with
+                    match validateJson<FloatBox>(parseRaw """{"value":42}""") with
                     | Ok r -> assertThat r.Value (isEqualTo 42.0)
                     | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion float to int",
                 fun _ ->
-                    match validateJson<IntBox> (parseRaw """{"value":42.9}""") with
+                    match validateJson<IntBox>(parseRaw """{"value":42.9}""") with
                     | Ok r -> assertThat r.Value (isEqualTo 42)
                     | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion int to string",
                 fun _ ->
-                    match validateJson<StringBox> (parseRaw """{"value":42}""") with
+                    match validateJson<StringBox>(parseRaw """{"value":42}""") with
                     | Ok r -> assertThat r.Value (isEqualTo "42")
                     | Error e -> assertThat (formatErrors e) (isEqualTo "Ok")
             )
             test (
                 "coercion invalid string to int",
                 fun _ ->
-                    match validateMap<IntBox> (Map.ofList [ "value", "not_a_number" ]) with
+                    match validateMap<IntBox>(Map.ofList [ "value", "not_a_number" ]) with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
                     | Error errors -> assertThat ((formatErrors errors).Contains "cannot parse") isTrue
             )
             test (
                 "coercion invalid string to float",
                 fun _ ->
-                    match validateMap<FloatBox> (Map.ofList [ "value", "not_a_number" ]) with
+                    match validateMap<FloatBox>(Map.ofList [ "value", "not_a_number" ]) with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
                     | Error errors -> assertThat ((formatErrors errors).Contains "cannot parse") isTrue
             )
             test (
                 "coercion invalid string to bool",
                 fun _ ->
-                    match validateMap<BoolBox> (Map.ofList [ "value", "maybe" ]) with
+                    match validateMap<BoolBox>(Map.ofList [ "value", "maybe" ]) with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
                     | Error errors -> assertThat ((formatErrors errors).Contains "cannot parse") isTrue
             )
             test (
                 "a non-coercible value reports the target type",
                 fun _ ->
-                    match validateJson<IntBox> (parseRaw """{"value":{"nested":1}}""") with
+                    match validateJson<IntBox>(parseRaw """{"value":{"nested":1}}""") with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")
                     | Error errors -> assertThat ((formatErrors errors).Contains "System.Int32") isTrue
             )
@@ -511,7 +511,7 @@ let private dumpTests =
                         }
                     }
 
-                    match validateJson<Outer> (dump original) with
+                    match validateJson<Outer>(dump original) with
                     | Ok decoded ->
                         assertThat decoded.Label (isEqualTo "outer")
                         assertThat decoded.Inner.Street (isEqualTo "Main 1")
@@ -583,7 +583,7 @@ let private multiWordKeyTests =
                         RelativeHumidity = 91.0
                     }
 
-                    match validateJson<MultiWordInput> (dump original) with
+                    match validateJson<MultiWordInput>(dump original) with
                     | Ok decoded ->
                         assertThat decoded.AirTemperature (isEqualTo original.AirTemperature)
                         assertThat decoded.RelativeHumidity (isEqualTo original.RelativeHumidity)
@@ -677,7 +677,7 @@ let private stringMapCaseRuleTests =
                 "codec decodeStringMap follows withCaseRules",
                 fun _ ->
                     let codec =
-                        auto<SetCapabilityInput> ()
+                        auto<SetCapabilityInput>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let input = Map.ofList [ "device_id", "dev-1"; "target_value", "42" ]
@@ -691,7 +691,7 @@ let private stringMapCaseRuleTests =
             test (
                 "default codec decodeStringMap reads camelCase",
                 fun _ ->
-                    let codec = auto<SetCapabilityInput> ()
+                    let codec = auto<SetCapabilityInput>()
                     let input = Map.ofList [ "deviceId", "dev-1"; "targetValue", "42" ]
 
                     match codec.decodeStringMap input with
@@ -702,7 +702,7 @@ let private stringMapCaseRuleTests =
                 "alias overrides the active case rule on the string-map path",
                 fun _ ->
                     let codec =
-                        auto<SetCapabilityInput> ()
+                        auto<SetCapabilityInput>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> alias "DeviceId" "id"
 
@@ -719,7 +719,7 @@ let private stringMapCaseRuleTests =
                 "alias replaces the case-rule key rather than adding to it",
                 fun _ ->
                     let codec =
-                        auto<SetCapabilityInput> ()
+                        auto<SetCapabilityInput>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> alias "DeviceId" "id"
 
@@ -733,7 +733,7 @@ let private stringMapCaseRuleTests =
                 "withModel validator runs on decodeStringMap",
                 fun _ ->
                     let codec =
-                        auto<SetCapabilityInput> ()
+                        auto<SetCapabilityInput>()
                         |> withModel (fun r ->
                             if r.TargetValue >= 0 then
                                 Ok r
@@ -862,8 +862,8 @@ let private stringMapDispatchTests =
             test (
                 "a sequence top level is keyless, not a malformed union",
                 fun _ ->
-                    let listCodec = auto<SetCapabilityInput list> ()
-                    let arrayCodec = auto<int[]> ()
+                    let listCodec = auto<SetCapabilityInput list>()
+                    let arrayCodec = auto<int[]>()
 
                     match listCodec.decodeStringMap (Map.ofList [ "deviceId", "dev-1" ]) with
                     | Ok _ -> assertThat "Ok" (isEqualTo "Error")

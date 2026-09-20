@@ -91,7 +91,7 @@ let private autoCodecCaseRulesTests =
             test (
                 "auto decode with snake_case keys",
                 fun _ ->
-                    let codec = auto<Weather> ()
+                    let codec = auto<Weather>()
                     let map = parseRaw """{"air_temperature":22.5,"wind_speed":3.0}"""
 
                     match codec.decodeWith CaseRules.SnakeCase map with
@@ -103,7 +103,7 @@ let private autoCodecCaseRulesTests =
             test (
                 "auto decode with camelCase keys",
                 fun _ ->
-                    let codec = auto<Weather> ()
+                    let codec = auto<Weather>()
                     let map = parseRaw """{"airTemperature":22.5,"windSpeed":3.0}"""
 
                     match codec.decodeWith CaseRules.LowerFirst map with
@@ -115,7 +115,7 @@ let private autoCodecCaseRulesTests =
             test (
                 "auto decode with PascalCase keys",
                 fun _ ->
-                    let codec = auto<Weather> ()
+                    let codec = auto<Weather>()
                     let map = parseRaw """{"AirTemperature":22.5,"WindSpeed":3.0}"""
 
                     match codec.decodeWith CaseRules.PascalCase map with
@@ -127,7 +127,7 @@ let private autoCodecCaseRulesTests =
             test (
                 "auto encode with snake_case",
                 fun _ ->
-                    let codec = auto<Weather> ()
+                    let codec = auto<Weather>()
 
                     let record = {
                         AirTemperature = 22.5
@@ -142,7 +142,7 @@ let private autoCodecCaseRulesTests =
             test (
                 "auto encode with camelCase",
                 fun _ ->
-                    let codec = auto<Weather> ()
+                    let codec = auto<Weather>()
 
                     let record = {
                         AirTemperature = 22.5
@@ -157,7 +157,7 @@ let private autoCodecCaseRulesTests =
             test (
                 "same codec different casing",
                 fun _ ->
-                    let codec = auto<Weather> ()
+                    let codec = auto<Weather>()
 
                     let record = {
                         AirTemperature = 22.5
@@ -190,13 +190,13 @@ let private defaultAndWithCaseRulesTests =
             test (
                 "default case rule is LowerFirst",
                 fun _ ->
-                    let codec = auto<Weather> ()
+                    let codec = auto<Weather>()
                     assertThat codec.caseRules (isEqualTo CaseRules.LowerFirst)
             )
             test (
                 "default codec encodes and decodes camelCase",
                 fun _ ->
-                    let codec = auto<Weather> ()
+                    let codec = auto<Weather>()
 
                     let record = {
                         AirTemperature = 22.5
@@ -220,7 +220,7 @@ let private defaultAndWithCaseRulesTests =
                 "withCaseRules switches default for round-trip",
                 fun _ ->
                     let codec =
-                        auto<Weather> ()
+                        auto<Weather>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let record = {
@@ -241,7 +241,7 @@ let private defaultAndWithCaseRulesTests =
                 "withCaseRules survives withModel composition",
                 fun _ ->
                     let codec =
-                        auto<Weather> ()
+                        auto<Weather>()
                         |> withModel (fun w -> if w.WindSpeed >= 0.0 then Ok w else Error [])
                         |> withCaseRules CaseRules.SnakeCase
 

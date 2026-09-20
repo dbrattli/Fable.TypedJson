@@ -342,7 +342,7 @@ let private withModelTests =
                 "withModel accepts valid cross-field invariant",
                 fun _ ->
                     let codec =
-                        auto<Range> ()
+                        auto<Range>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> withModel (fun r ->
                             if r.Start <= r.Until then
@@ -367,7 +367,7 @@ let private withModelTests =
                 "withModel rejects invalid cross-field invariant",
                 fun _ ->
                     let codec =
-                        auto<Range> ()
+                        auto<Range>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> withModel (fun r ->
                             if r.Start <= r.Until then

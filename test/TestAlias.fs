@@ -47,7 +47,7 @@ let tests =
                 "alias redirects decode lookup",
                 fun _ ->
                     let codec =
-                        auto<WeatherRequest> ()
+                        auto<WeatherRequest>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> alias "Location" "loc"
                         |> alias "Days" "n"
@@ -65,7 +65,7 @@ let tests =
                 "alias affects error path on missing key",
                 fun _ ->
                     let codec =
-                        auto<WeatherRequest> ()
+                        auto<WeatherRequest>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> alias "Location" "loc"
                     // JSON is missing the aliased key.
@@ -84,7 +84,7 @@ let tests =
                 "alias redirects encode output",
                 fun _ ->
                     let codec =
-                        auto<WeatherRequest> ()
+                        auto<WeatherRequest>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> alias "Location" "loc"
 
@@ -101,7 +101,7 @@ let tests =
                 "alias falls through to case rule for unaliased fields",
                 fun _ ->
                     let codec =
-                        auto<WeatherRequest> ()
+                        auto<WeatherRequest>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> alias "Location" "loc"
 
@@ -117,7 +117,7 @@ let tests =
                 "alias propagates to JSON schema property keys",
                 fun _ ->
                     let codec =
-                        auto<WeatherRequest> ()
+                        auto<WeatherRequest>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> alias "Location" "loc"
                         |> alias "Days" "n"
@@ -149,7 +149,7 @@ let tests =
                 fun _ ->
                     // Combinator order matters — verify alias works after withModel.
                     let codec =
-                        auto<WeatherRequest> ()
+                        auto<WeatherRequest>()
                         |> withCaseRules CaseRules.SnakeCase
                         |> withModel (fun r ->
                             if r.Days > 0 then

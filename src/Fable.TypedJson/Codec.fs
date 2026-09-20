@@ -28,12 +28,12 @@ open Fable.TypedJson.Schema
 // Constructor helpers
 // ============================================================================
 
-let mk (decode: JsonValue -> Result<'T, string>) (encode: 'T -> JsonValue) (schema: JsonSchema) : IJsonCodec<'T> =
-    { new IJsonCodec<'T> with
+let mk (decode: JsonValue -> Result<'T, string>) (encode: 'T -> JsonValue) (schema: JsonSchema) : IJsonCodec<'T> = {
+    new IJsonCodec<'T> with
         member _.Decode jv = decode jv
         member _.Encode v = encode v
         member _.Schema = schema
-    }
+}
 
 /// Add decode-side validation while preserving the established wire encoder.
 ///
