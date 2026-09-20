@@ -72,7 +72,7 @@ let private decodeTests =
                 "auto decode simple record",
                 fun _ ->
                     let codec =
-                        auto<SimpleRecord> ()
+                        auto<SimpleRecord>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"name":"Alice","age":30}"""
@@ -87,7 +87,7 @@ let private decodeTests =
                 "auto decode float record",
                 fun _ ->
                     let codec =
-                        auto<RecordWithFloat> ()
+                        auto<RecordWithFloat>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"air_temperature":22.5,"relative_humidity":65.0}"""
@@ -102,7 +102,7 @@ let private decodeTests =
                 "auto decode with option some",
                 fun _ ->
                     let codec =
-                        auto<RecordWithOption> ()
+                        auto<RecordWithOption>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"name":"Alice","email":"a@b.com"}"""
@@ -117,7 +117,7 @@ let private decodeTests =
                 "auto decode with option none",
                 fun _ ->
                     let codec =
-                        auto<RecordWithOption> ()
+                        auto<RecordWithOption>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"name":"Alice"}"""
@@ -132,7 +132,7 @@ let private decodeTests =
                 "auto decode missing required field",
                 fun _ ->
                     let codec =
-                        auto<SimpleRecord> ()
+                        auto<SimpleRecord>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"name":"Alice"}"""
@@ -147,7 +147,7 @@ let private decodeTests =
                 "auto decode accumulates all errors",
                 fun _ ->
                     let codec =
-                        auto<SimpleRecord> ()
+                        auto<SimpleRecord>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{}"""
@@ -171,7 +171,7 @@ let private encodeTests =
                 "auto encode simple record",
                 fun _ ->
                     let codec =
-                        auto<SimpleRecord> ()
+                        auto<SimpleRecord>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let record = { Name = "Bob"; Age = 25 }
@@ -186,7 +186,7 @@ let private encodeTests =
                 "auto encode float record",
                 fun _ ->
                     let codec =
-                        auto<RecordWithFloat> ()
+                        auto<RecordWithFloat>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let record = {
@@ -205,7 +205,7 @@ let private encodeTests =
                 "auto encode with option some",
                 fun _ ->
                     let codec =
-                        auto<RecordWithOption> ()
+                        auto<RecordWithOption>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let record = {
@@ -235,7 +235,7 @@ let private roundTripTests =
                 "auto round-trip simple record",
                 fun _ ->
                     let codec =
-                        auto<SimpleRecord> ()
+                        auto<SimpleRecord>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let original = { Name = "Charlie"; Age = 40 }
@@ -252,7 +252,7 @@ let private roundTripTests =
                 "auto round-trip float record",
                 fun _ ->
                     let codec =
-                        auto<RecordWithFloat> ()
+                        auto<RecordWithFloat>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let original = {
@@ -295,7 +295,7 @@ let private lowercaseFirstTests =
                 "auto decode lowercase-first record",
                 fun _ ->
                     let codec =
-                        auto<LowerFirst> ()
+                        auto<LowerFirst>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"alpha":"a","beta":1}"""
@@ -310,7 +310,7 @@ let private lowercaseFirstTests =
                 "auto encode lowercase-first record",
                 fun _ ->
                     let codec =
-                        auto<LowerFirst> ()
+                        auto<LowerFirst>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let json = codec.encode { alpha = "a"; beta = 1 }
@@ -322,7 +322,7 @@ let private lowercaseFirstTests =
                 "auto round-trip camelCase multi-word record",
                 fun _ ->
                     let codec =
-                        auto<LowerFirstMultiWord> ()
+                        auto<LowerFirstMultiWord>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let original = {

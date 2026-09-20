@@ -51,7 +51,7 @@ let private nestedRecordTests =
             test (
                 "nested record decodes valid input",
                 fun _ ->
-                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<User>() |> withCaseRules CaseRules.SnakeCase
 
                     let map =
                         parseRaw """{"name":"Alice","address":{"street":"Main 1","city":"Oslo"}}"""
@@ -66,7 +66,7 @@ let private nestedRecordTests =
             test (
                 "nested record reports inner missing field",
                 fun _ ->
-                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<User>() |> withCaseRules CaseRules.SnakeCase
                     let map = parseRaw """{"name":"Alice","address":{"street":"Main 1"}}"""
 
                     match codec.decode map with
@@ -94,7 +94,7 @@ let private listOfPrimitivesTests =
                 "list of strings decodes",
                 fun _ ->
                     let codec =
-                        auto<Tagged> ()
+                        auto<Tagged>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"title":"hello","tags":["a","b","c"]}"""
@@ -109,7 +109,7 @@ let private listOfPrimitivesTests =
                 "list of strings empty decodes",
                 fun _ ->
                     let codec =
-                        auto<Tagged> ()
+                        auto<Tagged>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"title":"empty","tags":[]}"""
@@ -136,7 +136,7 @@ let private listOfRecordsTests =
             test (
                 "list of records decodes",
                 fun _ ->
-                    let codec = auto<Team> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<Team>() |> withCaseRules CaseRules.SnakeCase
 
                     let map =
                         parseRaw
@@ -156,7 +156,7 @@ let private listOfRecordsTests =
             test (
                 "list of records reports element index in error",
                 fun _ ->
-                    let codec = auto<Team> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<Team>() |> withCaseRules CaseRules.SnakeCase
 
                     let map =
                         parseRaw
@@ -202,7 +202,7 @@ let private caseRulesRecursiveTests =
                 "encode applies case rule to nested record keys",
                 fun _ ->
                     let codec =
-                        auto<Customer> ()
+                        auto<Customer>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let json =
@@ -230,9 +230,7 @@ let private caseRulesRecursiveTests =
             test (
                 "encode applies case rule to record-list element keys",
                 fun _ ->
-                    let codec =
-                        auto<Route> ()
-                        |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<Route>() |> withCaseRules CaseRules.SnakeCase
 
                     let json =
                         codec.encode {
@@ -259,7 +257,7 @@ let private caseRulesRecursiveTests =
                 "encode round-trips nested record under snake_case",
                 fun _ ->
                     let codec =
-                        auto<Customer> ()
+                        auto<Customer>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let original = {
@@ -314,7 +312,7 @@ let private recursiveTypeTests =
             test (
                 "self-referential record decodes nested children",
                 fun _ ->
-                    let codec = auto<Tree> ()
+                    let codec = auto<Tree>()
 
                     let map =
                         parseRaw
@@ -332,7 +330,7 @@ let private recursiveTypeTests =
             test (
                 "self-referential record round-trips through encode",
                 fun _ ->
-                    let codec = auto<Tree> ()
+                    let codec = auto<Tree>()
 
                     let original = {
                         Label = "root"
@@ -354,7 +352,7 @@ let private recursiveTypeTests =
             test (
                 "option-recursive record decodes a chain",
                 fun _ ->
-                    let codec = auto<Node> ()
+                    let codec = auto<Node>()
                     let map = parseRaw """{"name":"a","next":{"name":"b","next":{"name":"c"}}}"""
 
                     match codec.decode map with
@@ -374,7 +372,7 @@ let private recursiveTypeTests =
             test (
                 "option-recursive record terminates on a missing tail",
                 fun _ ->
-                    let codec = auto<Node> ()
+                    let codec = auto<Node>()
 
                     match codec.decode (parseRaw """{"name":"only"}""") with
                     | Ok r ->
@@ -385,7 +383,7 @@ let private recursiveTypeTests =
             test (
                 "mutually recursive records round-trip",
                 fun _ ->
-                    let codec = auto<Branch> ()
+                    let codec = auto<Branch>()
                     let map = parseRaw """{"tag":"b","leaf":{"kind":"k"}}"""
 
                     match codec.decode map with
@@ -427,7 +425,7 @@ let private arrayFieldTests =
             test (
                 "decodes a value-type array field",
                 fun _ ->
-                    let codec = auto<Scores> ()
+                    let codec = auto<Scores>()
 
                     match codec.decode (parseRaw """{"player":"Alice","points":[1,2,3]}""") with
                     | Ok r ->
@@ -440,7 +438,7 @@ let private arrayFieldTests =
             test (
                 "encodes a value-type array field as a JSON array",
                 fun _ ->
-                    let codec = auto<Scores> ()
+                    let codec = auto<Scores>()
 
                     let parsed =
                         parseRaw (
@@ -457,7 +455,7 @@ let private arrayFieldTests =
             test (
                 "round-trips a reference-type array field",
                 fun _ ->
-                    let codec = auto<Labels> ()
+                    let codec = auto<Labels>()
 
                     let original = {
                         Owner = "Acme"
@@ -474,7 +472,7 @@ let private arrayFieldTests =
             test (
                 "decodes an empty array field",
                 fun _ ->
-                    let codec = auto<Scores> ()
+                    let codec = auto<Scores>()
 
                     match codec.decode (parseRaw """{"player":"Bob","points":[]}""") with
                     | Ok r -> assertThat r.Points.Length (isEqualTo 0)

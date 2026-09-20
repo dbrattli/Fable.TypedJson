@@ -56,7 +56,7 @@ let private missingFieldErrorsTests =
             test (
                 "error on single missing field has correct path",
                 fun _ ->
-                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<User>() |> withCaseRules CaseRules.SnakeCase
                     let map = parseRaw """{"name":"Alice","age":30}"""
 
                     match codec.decode map with
@@ -68,7 +68,7 @@ let private missingFieldErrorsTests =
             test (
                 "error on single missing field has descriptive message",
                 fun _ ->
-                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<User>() |> withCaseRules CaseRules.SnakeCase
                     let map = parseRaw """{"name":"Alice","age":30}"""
 
                     match codec.decode map with
@@ -81,7 +81,7 @@ let private missingFieldErrorsTests =
             test (
                 "all missing fields are reported",
                 fun _ ->
-                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<User>() |> withCaseRules CaseRules.SnakeCase
                     let map = parseRaw """{}"""
 
                     match codec.decode map with
@@ -95,7 +95,7 @@ let private missingFieldErrorsTests =
                 "all missing config fields are reported",
                 fun _ ->
                     let codec =
-                        auto<Config> ()
+                        auto<Config>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{}"""
@@ -111,7 +111,7 @@ let private missingFieldErrorsTests =
                 "partial fields reports only missing ones",
                 fun _ ->
                     let codec =
-                        auto<Config> ()
+                        auto<Config>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"host":"localhost","port":8080}"""
@@ -137,7 +137,7 @@ let private optionalVsRequiredTests =
                 "missing optional field is not an error",
                 fun _ ->
                     let codec =
-                        auto<WithOptional> ()
+                        auto<WithOptional>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"required":"hello"}"""
@@ -152,7 +152,7 @@ let private optionalVsRequiredTests =
                 "missing required field with optional present",
                 fun _ ->
                     let codec =
-                        auto<WithOptional> ()
+                        auto<WithOptional>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{"optional":42}"""
@@ -167,7 +167,7 @@ let private optionalVsRequiredTests =
                 "both required and optional missing reports only required",
                 fun _ ->
                     let codec =
-                        auto<WithOptional> ()
+                        auto<WithOptional>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{}"""
@@ -193,7 +193,7 @@ let private wrongCaseRuleTests =
             test (
                 "wrong case rule causes missing field errors",
                 fun _ ->
-                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<User>() |> withCaseRules CaseRules.SnakeCase
                     // JSON has camelCase keys but we decode with SnakeCase
                     let map = parseRaw """{"name":"Alice","age":30,"email":"a@b.com"}"""
 
@@ -206,7 +206,7 @@ let private wrongCaseRuleTests =
                 "camelCase json with snake_case rule fails for multi-word fields",
                 fun _ ->
                     let codec =
-                        auto<Config> ()
+                        auto<Config>()
                         |> withCaseRules CaseRules.SnakeCase
                     // JSON uses camelCase but we decode expecting snake_case
                     let map = parseRaw """{"host":"localhost","port":8080,"debug":true}"""
@@ -233,7 +233,7 @@ let private emptyAndNullTests =
             test (
                 "decode empty object reports all required fields",
                 fun _ ->
-                    let codec = auto<User> () |> withCaseRules CaseRules.SnakeCase
+                    let codec = auto<User>() |> withCaseRules CaseRules.SnakeCase
                     let map = parseRaw """{}"""
 
                     match codec.decode map with
@@ -245,7 +245,7 @@ let private emptyAndNullTests =
                 fun _ ->
                     // When using camelCase, errors should show the camelCase key
                     let codec =
-                        auto<Nested> ()
+                        auto<Nested>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map = parseRaw """{}"""
@@ -261,7 +261,7 @@ let private emptyAndNullTests =
                 "extra fields in json are ignored",
                 fun _ ->
                     let codec =
-                        auto<Nested> ()
+                        auto<Nested>()
                         |> withCaseRules CaseRules.SnakeCase
 
                     let map =

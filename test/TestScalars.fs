@@ -85,7 +85,7 @@ let private dateTimeTests =
             test (
                 "round-trips a UTC instant exactly",
                 fun _ ->
-                    let codec = auto<Event> ()
+                    let codec = auto<Event>()
 
                     let original = {
                         Name = "launch"
@@ -102,7 +102,7 @@ let private dateTimeTests =
             test (
                 "encodes with the Z designator, as format: date-time denotes",
                 fun _ ->
-                    let codec = auto<Event> ()
+                    let codec = auto<Event>()
 
                     let encoded =
                         codec.encode {
@@ -117,7 +117,7 @@ let private dateTimeTests =
             test (
                 "decodes an offset-bearing string to the same instant",
                 fun _ ->
-                    let codec = auto<Event> ()
+                    let codec = auto<Event>()
 
                     match codec.decode (parseRaw """{"name":"launch","at":"2026-08-03T14:30:15Z"}""") with
                     | Ok decoded -> assertThat decoded.At (isEqualTo (DateTime(2026, 8, 3, 14, 30, 15, DateTimeKind.Utc)))
@@ -131,7 +131,7 @@ let private dateTimeTests =
             test (
                 "a timestamp with no zone is read as UTC, not local",
                 fun _ ->
-                    let codec = auto<Event> ()
+                    let codec = auto<Event>()
 
                     match codec.decode (parseRaw """{"name":"launch","at":"2026-08-03T14:30:15"}""") with
                     | Ok decoded ->
@@ -144,7 +144,7 @@ let private dateTimeTests =
             test (
                 "an offset-bearing timestamp is converted, not relabelled",
                 fun _ ->
-                    let codec = auto<Event> ()
+                    let codec = auto<Event>()
 
                     match codec.decode (parseRaw """{"name":"launch","at":"2026-08-03T16:30:15+02:00"}""") with
                     | Ok decoded -> assertThat decoded.At (isEqualTo (DateTime(2026, 8, 3, 14, 30, 15, DateTimeKind.Utc)))
@@ -154,7 +154,7 @@ let private dateTimeTests =
             test (
                 "rejects a value that is not a date",
                 fun _ ->
-                    let codec = auto<Event> ()
+                    let codec = auto<Event>()
 
                     match codec.decode (parseRaw """{"name":"launch","at":"not a date"}""") with
                     | Ok _ -> failwith "expected a decode failure"
@@ -181,7 +181,7 @@ let private guidTests =
             test (
                 "round-trips through its canonical form",
                 fun _ ->
-                    let codec = auto<Entity> ()
+                    let codec = auto<Entity>()
 
                     let original = {
                         Id = Guid.Parse "6f9619ff-8b86-d011-b42d-00c04fc964ff"
@@ -196,7 +196,7 @@ let private guidTests =
             test (
                 "rejects a malformed uuid",
                 fun _ ->
-                    let codec = auto<Entity> ()
+                    let codec = auto<Entity>()
 
                     match codec.decode (parseRaw """{"id":"not-a-uuid","label":"x"}""") with
                     | Ok _ -> failwith "expected a decode failure"
@@ -223,7 +223,7 @@ let private decimalTests =
             test (
                 "round-trips without going through a float",
                 fun _ ->
-                    let codec = auto<Invoice> ()
+                    let codec = auto<Invoice>()
                     let original = { Total = 12.34m; Currency = "NOK" }
 
                     match codec.decode (parseRaw (codec.encode original)) with
@@ -236,7 +236,7 @@ let private decimalTests =
             test (
                 "preserves precision a float would lose",
                 fun _ ->
-                    let codec = auto<Invoice> ()
+                    let codec = auto<Invoice>()
 
                     let original = {
                         Total = 0.1m + 0.2m
@@ -251,7 +251,7 @@ let private decimalTests =
             test (
                 "accepts a bare JSON number on the way in",
                 fun _ ->
-                    let codec = auto<Invoice> ()
+                    let codec = auto<Invoice>()
 
                     match codec.decode (parseRaw """{"total":42,"currency":"NOK"}""") with
                     | Ok decoded -> assertThat decoded.Total (isEqualTo 42m)
@@ -280,7 +280,7 @@ let private dateTimeOffsetTests =
             test (
                 "round-trips an offset as the same instant",
                 fun _ ->
-                    let codec = auto<Meeting> ()
+                    let codec = auto<Meeting>()
 
                     let original = {
                         Title = "standup"
