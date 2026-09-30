@@ -10,7 +10,7 @@ as CLI commands and reports walltime under separate names for each runtime.
 just restore
 just build-bench-cli
 just bench-cli-smoke
-just bench-cli dotnet strict-int 1000000
+just bench-cli dotnet decode-record 1000000
 ```
 
 Individual builds are available as `just build-bench-cli-dotnet`,
@@ -33,27 +33,28 @@ parses inside the repeated loop; `encode-record` produces JSON text.
 Every operation checks its result and contributes to a checked checksum.
 The encode fixture also round-trips before its loop. Counts are fixed rather
 than adjusted dynamically: a slower version must execute the same amount of
-work. Initial counts were chosen to give roughly one to four seconds per command
-on the development machine; CI hardware and runtime versions will differ.
-CodSpeed performs a command warmup followed by five measurement rounds.
+work. Counts were reduced tenfold after Graviton measurements exceeded the
+30-minute job limit. CodSpeed performs a command warmup followed by three
+measurement rounds. These counts start a new baseline and cannot be compared
+with results from the previous larger batches.
 
 | Workload | What it exercises | .NET operations | JS operations | Python operations | BEAM operations |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `decode-record` | Cached codec, pre-parsed three-field record | 6,000,000 | 10,000,000 | 500,000 | 1,000,000 |
-| `parse-decode-record` | JSON parsing plus record decoding | 2,000,000 | 5,000,000 | 300,000 | 500,000 |
-| `encode-record` | Record serialization to JSON text | 5,000,000 | 10,000,000 | 500,000 | 1,000,000 |
-| `strict-int` | Valid Int32 value, 42 | 20,000,000 | 20,000,000 | 500,000 | 2,000,000 |
-| `strict-int64-small` | Int64 value within Int32 bounds, 42 | 20,000,000 | 20,000,000 | 500,000 | 2,000,000 |
-| `strict-int64-wide` | Int64 value outside Int32 bounds, 2147483648 | 20,000,000 | 8,000,000 | 500,000 | 2,000,000 |
-| `strict-int-reject` | Out-of-range Int32 rejection with field path | 5,000,000 | 2,000,000 | 100,000 | 500,000 |
+| `decode-record` | Cached codec, pre-parsed three-field record | 600,000 | 1,000,000 | 50,000 | 100,000 |
+| `parse-decode-record` | JSON parsing plus record decoding | 200,000 | 500,000 | 30,000 | 50,000 |
+| `encode-record` | Record serialization to JSON text | 500,000 | 1,000,000 | 50,000 | 100,000 |
+| `strict-int` | Valid Int32 value, 42 | 2,000,000 | 2,000,000 | 50,000 | 200,000 |
+| `strict-int64-small` | Int64 value within Int32 bounds, 42 | 2,000,000 | 2,000,000 | 50,000 | 200,000 |
+| `strict-int64-wide` | Int64 value outside Int32 bounds, 2147483648 | 2,000,000 | 800,000 | 50,000 | 200,000 |
+| `strict-int-reject` | Out-of-range Int32 rejection with field path | 500,000 | 200,000 | 10,000 | 50,000 |
 
 Compare a workload against its own history. These are not isolated nanoseconds
 per decode, and the different batch sizes prevent comparing raw times across
 runtimes. The wide Int64 JSON value follows the backend's native numeric
 representation, which differs across targets. Keep iteration counts, runtime
-versions, and the CI runner label stable when assessing a code change. Counts
-are included in benchmark names so changing the amount of work starts a new
-history.
+versions, and the CI runner label
+stable when assessing a code change. Counts are included in benchmark names
+so changing the amount of work starts a new history.
 
 The .NET runner disables tiered compilation, and BEAM uses one scheduler.
 Those settings are fixed in [run.sh](run.sh). CLI timing tracks elapsed time;
@@ -65,11 +66,16 @@ use `just bench` for BenchmarkDotNet's .NET allocation diagnostics.
 pull requests labeled `perf`, and manual dispatch. Adding `perf` starts a run;
 subsequent commits rerun benchmarks while the label remains. Unlabeled PRs,
 including Dependabot PRs, skip the benchmark job without allocating a runner.
-Runs on `main` always execute to maintain the comparison baseline.
+Pushes to `main` maintain the comparison baseline, except changes limited to
+Markdown files or `docs/`. PR runs still require `perf`, including documentation
+PRs explicitly selected for measurement.
 
-It uses CodSpeed's ARM64 Graviton macro runner
-for walltime measurements and installs .NET 10, Node.js 20, Python 3.12,
-and Erlang/OTP 27. All four targets report through the same workflow.
+Compilation and the first smoke check run on GitHub's `ubuntu-22.04-arm` runner.
+A tar artifact preserves the generated files and BEAM symbolic links. The
+Graviton macro job downloads those prebuilt programs, installs .NET 10,
+Node.js 20, Python 3.12 with its locked dependencies, and Erlang/OTP 27, then
+checks and measures the programs. It does not restore .NET dependencies,
+transpile F#, or compile Erlang. All four targets report through the same workflow.
 
 Authentication uses [OIDC](https://codspeed.io/docs/integrations/ci/github-actions/configuration#authentication),
 with `contents: read` and `id-token: write` scoped to the benchmark job.
