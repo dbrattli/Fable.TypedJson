@@ -40,15 +40,15 @@ dotnet add package Fable.TypedJson.Beam     # pick one shim
 
 Core and the Fable shims target **netstandard2.0**; `Fable.TypedJson.DotNet` targets **net10.0**. Opening the backend's `Json` module pre-applies the backend, so `auto` takes `()` and you never thread a backend value yourself.
 
-**Build a codec once and reuse it.** Construction resolves the entire type tree — every nested record, list element and union case — so decoding does no reflection at any depth. Bind codecs at module level, not per request.
+**Build a codec once and reuse it.** Construction resolves the entire type tree — every nested record, list element and union case — so decoding does no reflection at any depth. On JavaScript, Python, and .NET, a module-level binding is a natural owner. On BEAM, retain the codec in an application, supervisor, actor, or another long-lived owner and pass the codec or a handler closure where needed; compiled module-level accessors can rebuild their value on each call.
 
 ```fsharp
-let codec = autoWith<WeatherRequest> codecs   // module level
+let codec = autoWith<WeatherRequest> codecs
 ```
 
 ## Validation lives with the type
 
-The headline idea: define a wrapper DU, give it a `JsonCodec` static member, and `auto<'T>()` discovers it and dispatches through it — the F# answer to Pydantic's "custom types with embedded validators."
+The headline idea: define a wrapper DU, keep its codec in a `JsonCodec` static member, and register that codec explicitly before deriving a record codec — the F# answer to Pydantic's "custom types with embedded validators." Registration, rather than reflection-based static-member discovery, is the portable mechanism on all four targets.
 
 ```fsharp
 open Fable.TypedJson             // brings the module name `Codec` into scope
@@ -169,6 +169,17 @@ Built-in primitive codecs accept several source types — useful when JSON comes
 | `int64`     | int, float, string (parseable)      |
 | `float`     | float, int, string (parseable)      |
 | `bool`      | bool, string (`"true"` / `"false"`) |
+
+For APIs that require JSON types to match the F# model, use `autoStrict<'T>()` or `autoStrictWith<'T> registry`. Strict JSON decoding rejects strings for numeric/boolean fields, rejects numbers and booleans for strings, and rejects fractional numbers for integer fields. Integral JSON numbers remain valid for `float` fields.
+
+```fsharp
+let codec = autoStrict<Reading> ()
+
+codec.decode (parseRaw """{"location":42,"airTemperature":"22.5"}""")
+// Error [{ path = "location"; ... }; { path = "airTemperature"; ... }]
+```
+
+Strictness applies recursively through records, lists, unions, and registered/refined codecs. It does not change `decodeStringMap` or the `validateMap*` helpers: those sources contain strings by definition and remain coercing. Plain `auto` also remains coercing for compatibility.
 
 ## Tagged discriminated unions
 
@@ -315,7 +326,9 @@ Only the flat-decode table is parser-decomposed; these three are end-to-end and 
 
 Both libraries are measured amortized: Thoth's `Auto` caches its generated coders internally, and these numbers build the `TypedJson<'T>` codec once outside the measured loop, as you should.
 
-**Construction is the trade this design makes.** Resolving a type costs ~193 µs (flat) to ~1.03 ms (nested), most of it emitting delegates via `PreComputeRecordConstructor` on the CLR — which is what buys the ~12× per-decode win. Break-even is about **30 decodes of the same type**, so bind codecs at module level rather than per call.
+**Construction is the trade this design makes.** Resolving a type costs ~193 µs (flat) to ~1.03 ms (nested), most of it emitting delegates via `PreComputeRecordConstructor` on the CLR — which is what buys the ~12× per-decode win. Break-even is about **30 decodes of the same type**, so retain codecs in a long-lived owner rather than rebuilding them per call. A module-level binding works for JavaScript, Python, and .NET; on BEAM, construct the codec during application or actor startup and retain it there.
+
+There is intentionally no implicit global BEAM cache. A safe cache identity would need to include the type, codec registry, case rules, aliases, model validators, and code-upgrade lifecycle.
 
 ## Architecture
 

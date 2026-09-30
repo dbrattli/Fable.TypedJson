@@ -21,8 +21,14 @@ let parseRaw (json: string) : JsonMap = python.ParseRaw json
 
 let inline auto<'T> () : TypedJson<'T> = Fable.TypedJson.Json.auto<'T> python
 
+let inline autoStrict<'T> () : TypedJson<'T> =
+    Fable.TypedJson.Json.autoStrict<'T> python
+
 let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
     Fable.TypedJson.Json.autoWith<'T> python registry
+
+let inline autoStrictWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
+    Fable.TypedJson.Json.autoStrictWith<'T> python registry
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateJson<'T> python map

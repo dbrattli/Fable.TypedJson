@@ -22,8 +22,14 @@ let parseRaw (json: string) : JsonMap = beam.ParseRaw json
 
 let inline auto<'T> () : TypedJson<'T> = Fable.TypedJson.Json.auto<'T> beam
 
+let inline autoStrict<'T> () : TypedJson<'T> =
+    Fable.TypedJson.Json.autoStrict<'T> beam
+
 let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
     Fable.TypedJson.Json.autoWith<'T> beam registry
+
+let inline autoStrictWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
+    Fable.TypedJson.Json.autoStrictWith<'T> beam registry
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateJson<'T> beam map

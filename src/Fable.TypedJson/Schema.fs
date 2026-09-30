@@ -63,12 +63,13 @@ type FieldError = { path: string; message: string }
 (**
 ## IJsonCodec
 
-A user-defined wrapper type can implement validation by declaring a static
-`JsonCodec` member of type `IJsonCodec<'Self>`. `Plan` resolves registered
-codecs from the field's `PropertyType` when it constructs the plan.
+A user-defined wrapper type can keep an `IJsonCodec<'Self>` in a static
+`JsonCodec` member, but the codec must be added explicitly to a
+`CodecRegistry`. `Plan` resolves registered codecs from the field's
+`PropertyType` when it constructs the plan.
 
 decision: keeps validation with the wrapper type — one codec controls its decode, encode, and schema representation
-decision: discovers static `JsonCodec` members through reflection — SRTP cannot traverse heterogeneous record fields
+decision: requires explicit codec registration — portable static-member discovery is not available on all four targets
 *)
 
 // ---------------------------------------------------------------------------

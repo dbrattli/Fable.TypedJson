@@ -39,4 +39,5 @@ let main _ =
         Alias.tests
         Union.tests
         Scalars.tests
+        Strict.tests
     ]

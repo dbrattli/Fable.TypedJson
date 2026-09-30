@@ -23,8 +23,14 @@ let parseRaw (json: string) : JsonMap = dotnet.ParseRaw json
 
 let inline auto<'T> () : TypedJson<'T> = Fable.TypedJson.Json.auto<'T> dotnet
 
+let inline autoStrict<'T> () : TypedJson<'T> =
+    Fable.TypedJson.Json.autoStrict<'T> dotnet
+
 let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
     Fable.TypedJson.Json.autoWith<'T> dotnet registry
+
+let inline autoStrictWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
+    Fable.TypedJson.Json.autoStrictWith<'T> dotnet registry
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateJson<'T> dotnet map

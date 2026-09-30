@@ -107,6 +107,9 @@ type BuildCtx = {
     Registry: CodecRegistry
     KeyTransform: string -> string
     TagTransform: string -> string
+    /// Strict JSON checks are selected while the plan is built, so repeated
+    /// decoding adds no type/schema traversal.
+    StrictJson: bool
     /// root-to-node path of compound `FullName`s — see the cycle guard note
     Building: string list
     /// `Some prefix` emits every record/union as `{"$ref": prefix + Name}` and
@@ -152,6 +155,42 @@ let private formatNode (typeName: string) (format: string) : JsonSchemaValue =
 
 /// A leaf carries no hoisted definitions — only compound nodes do.
 let private noDefs: Map<string, JsonSchemaValue> = Map.empty
+
+let private isIntegralFloat (value: float) : bool = value = System.Math.Truncate value
+
+let private strictInteger (b: IJsonBackend) (v: obj) : bool =
+    b.IsInt v
+    || (b.IsFloat v && isIntegralFloat (b.AsFloat v))
+
+/// Resolve a registered codec's top-level JSON type once, from the schema it
+/// publishes. Schemas without a simple `type` keep ownership of their input.
+///
+/// decision: strict registered-codec checks follow the codec's declared schema — registration is the only portable type metadata boundary
+let private strictCodecGuard (b: IJsonBackend) (schema: JsonSchema) : obj -> Result<unit, string> =
+    let expected =
+        match Map.tryFind "type" schema with
+        | Some(SVStr typeName) -> Some typeName
+        | _ -> None
+
+    match expected with
+    | Some "string" -> fun v -> if b.IsString v then Ok() else Error "expected JSON string"
+    | Some "integer" ->
+        fun v ->
+            if strictInteger b v then
+                Ok()
+            else
+                Error "expected integral JSON number"
+    | Some "number" ->
+        fun v ->
+            if b.IsInt v || b.IsFloat v then
+                Ok()
+            else
+                Error "expected JSON number"
+    | Some "boolean" -> fun v -> if b.IsBool v then Ok() else Error "expected JSON boolean"
+    | Some "object" -> fun v -> if b.IsMap v then Ok() else Error "expected JSON object"
+    | Some "array" -> fun v -> if b.IsArray v then Ok() else Error "expected JSON array"
+    | Some "null" -> fun v -> if b.IsNull v then Ok() else Error "expected JSON null"
+    | _ -> fun _ -> Ok()
 
 /// Union of definition maps gathered from sibling subtrees. Keys are `FullName`s,
 /// so a repeated key is genuinely the same type reached twice and the bodies are
@@ -207,15 +246,15 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
     // Primitives precede registry lookup, so a codec registered against
     // `System.Int32` stays inert in both directions.
     if fullName = "System.String" then
-        planString b
+        planString b ctx.StrictJson
     elif fullName = "System.Int32" then
-        planInt b
+        planInt b ctx.StrictJson
     elif fullName = "System.Int64" then
-        planInt64 b
+        planInt64 b ctx.StrictJson
     elif fullName = "System.Double" then
-        planFloat b
+        planFloat b ctx.StrictJson
     elif fullName = "System.Boolean" then
-        planBool b
+        planBool b ctx.StrictJson
     else
         match tryGetCodecEntry fullName ctx.Registry with
         // A user codec drives BOTH directions. `toJsonValue` / `fromJsonValue`
@@ -224,13 +263,25 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
         | Some entry ->
             let decode = entry.decode
             let encode = entry.encode
+            let strictGuard = strictCodecGuard b entry.schema
 
-            {
-                Decode =
+            let decodeValue =
+                if ctx.StrictJson then
+                    fun v ->
+                        match strictGuard v with
+                        | Error msg -> leafError msg
+                        | Ok() ->
+                            match decode (toJsonValue b v) with
+                            | Ok x -> Ok x
+                            | Error msg -> leafError msg
+                else
                     fun v ->
                         match decode (toJsonValue b v) with
                         | Ok x -> Ok x
                         | Error msg -> leafError msg
+
+            {
+                Decode = decodeValue
                 Encode = fun v -> fromJsonValue b (encode v)
                 // The codec's own schema, captured at registration — this is
                 // how a refined type's constraints reach the emitted document.
@@ -283,93 +334,134 @@ let rec forTypeIn (ctx: BuildCtx) (t: System.Type) : Plan =
 // Each closure already knows its target type, so per-value calls perform no
 // `FullName` dispatch. Conversions come from `Primitives`, shared with `Codec`.
 
-and private planString (b: IJsonBackend) : Plan = {
+and private planString (b: IJsonBackend) (strict: bool) : Plan = {
     Decode =
-        fun v ->
-            if b.IsString v then
-                Ok(box (b.AsString v))
-            elif b.IsInt v then
-                Ok(box (Primitives.intToString (b.AsInt v)))
-            elif b.IsFloat v then
-                Ok(box (Primitives.floatToString (b.AsFloat v)))
-            elif b.IsBool v then
-                Ok(box (Primitives.boolToString (b.AsBool v)))
-            else
-                leafError (sprintf "cannot coerce %s to System.String" (describeValue b v))
+        if strict then
+            fun v ->
+                if b.IsString v then
+                    Ok(box (b.AsString v))
+                else
+                    leafError (sprintf "cannot coerce %s to System.String" (describeValue b v))
+        else
+            fun v ->
+                if b.IsString v then
+                    Ok(box (b.AsString v))
+                elif b.IsInt v then
+                    Ok(box (Primitives.intToString (b.AsInt v)))
+                elif b.IsFloat v then
+                    Ok(box (Primitives.floatToString (b.AsFloat v)))
+                elif b.IsBool v then
+                    Ok(box (Primitives.boolToString (b.AsBool v)))
+                else
+                    leafError (sprintf "cannot coerce %s to System.String" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "string"
     Definitions = noDefs
 }
 
-and private planInt (b: IJsonBackend) : Plan = {
+and private planInt (b: IJsonBackend) (strict: bool) : Plan = {
     Decode =
-        fun v ->
-            if b.IsInt v then
-                Ok(box (b.AsInt v))
-            elif b.IsFloat v then
-                Ok(box (int (b.AsFloat v)))
-            elif b.IsString v then
-                match Primitives.parseInt (b.AsString v) with
-                | Ok n -> Ok(box n)
-                | Error msg -> leafError msg
-            else
-                leafError (sprintf "cannot coerce %s to System.Int32" (describeValue b v))
+        if strict then
+            fun v ->
+                if b.IsInt v then
+                    Ok(box (b.AsInt v))
+                elif b.IsFloat v && isIntegralFloat (b.AsFloat v) then
+                    Ok(box (int (b.AsFloat v)))
+                else
+                    leafError (sprintf "cannot coerce %s to System.Int32" (describeValue b v))
+        else
+            fun v ->
+                if b.IsInt v then
+                    Ok(box (b.AsInt v))
+                elif b.IsFloat v then
+                    Ok(box (int (b.AsFloat v)))
+                elif b.IsString v then
+                    match Primitives.parseInt (b.AsString v) with
+                    | Ok n -> Ok(box n)
+                    | Error msg -> leafError msg
+                else
+                    leafError (sprintf "cannot coerce %s to System.Int32" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "integer"
     Definitions = noDefs
 }
 
-and private planInt64 (b: IJsonBackend) : Plan = {
+and private planInt64 (b: IJsonBackend) (strict: bool) : Plan = {
     Decode =
-        fun v ->
-            if b.IsInt v then
-                Ok(box (int64 (b.AsInt v)))
-            elif b.IsFloat v then
-                Ok(box (int64 (b.AsFloat v)))
-            elif b.IsString v then
-                match Primitives.parseInt64 (b.AsString v) with
-                | Ok n -> Ok(box n)
-                | Error msg -> leafError msg
-            else
-                leafError (sprintf "cannot coerce %s to System.Int64" (describeValue b v))
+        if strict then
+            fun v ->
+                if b.IsInt v then
+                    Ok(box (int64 (b.AsInt v)))
+                elif b.IsFloat v && isIntegralFloat (b.AsFloat v) then
+                    Ok(box (int64 (b.AsFloat v)))
+                else
+                    leafError (sprintf "cannot coerce %s to System.Int64" (describeValue b v))
+        else
+            fun v ->
+                if b.IsInt v then
+                    Ok(box (int64 (b.AsInt v)))
+                elif b.IsFloat v then
+                    Ok(box (int64 (b.AsFloat v)))
+                elif b.IsString v then
+                    match Primitives.parseInt64 (b.AsString v) with
+                    | Ok n -> Ok(box n)
+                    | Error msg -> leafError msg
+                else
+                    leafError (sprintf "cannot coerce %s to System.Int64" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "integer"
     Definitions = noDefs
 }
 
-and private planFloat (b: IJsonBackend) : Plan = {
+and private planFloat (b: IJsonBackend) (strict: bool) : Plan = {
     Decode =
-        fun v ->
-            if b.IsFloat v then
-                Ok(box (b.AsFloat v))
-            elif b.IsInt v then
-                Ok(box (float (b.AsInt v)))
-            elif b.IsString v then
-                match Primitives.parseFloat (b.AsString v) with
-                | Ok f -> Ok(box f)
-                | Error msg -> leafError msg
-            else
-                leafError (sprintf "cannot coerce %s to System.Double" (describeValue b v))
+        if strict then
+            fun v ->
+                if b.IsFloat v then
+                    Ok(box (b.AsFloat v))
+                elif b.IsInt v then
+                    Ok(box (float (b.AsInt v)))
+                else
+                    leafError (sprintf "cannot coerce %s to System.Double" (describeValue b v))
+        else
+            fun v ->
+                if b.IsFloat v then
+                    Ok(box (b.AsFloat v))
+                elif b.IsInt v then
+                    Ok(box (float (b.AsInt v)))
+                elif b.IsString v then
+                    match Primitives.parseFloat (b.AsString v) with
+                    | Ok f -> Ok(box f)
+                    | Error msg -> leafError msg
+                else
+                    leafError (sprintf "cannot coerce %s to System.Double" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "number"
     Definitions = noDefs
 }
 
-and private planBool (b: IJsonBackend) : Plan = {
+and private planBool (b: IJsonBackend) (strict: bool) : Plan = {
     Decode =
-        fun v ->
-            if b.IsBool v then
-                Ok(box (b.AsBool v))
-            elif b.IsString v then
-                match Primitives.parseBool (b.AsString v) with
-                | Ok x -> Ok(box x)
-                | Error msg -> leafError msg
-            else
-                leafError (sprintf "cannot coerce %s to System.Boolean" (describeValue b v))
+        if strict then
+            fun v ->
+                if b.IsBool v then
+                    Ok(box (b.AsBool v))
+                else
+                    leafError (sprintf "cannot coerce %s to System.Boolean" (describeValue b v))
+        else
+            fun v ->
+                if b.IsBool v then
+                    Ok(box (b.AsBool v))
+                elif b.IsString v then
+                    match Primitives.parseBool (b.AsString v) with
+                    | Ok x -> Ok(box x)
+                    | Error msg -> leafError msg
+                else
+                    leafError (sprintf "cannot coerce %s to System.Boolean" (describeValue b v))
     // Primitives are already the backend's native form.
     Encode = id
     Schema = primitiveNode "boolean"
@@ -891,6 +983,28 @@ let forType
             Registry = registry
             KeyTransform = keyTransform
             TagTransform = tagTransform
+            StrictJson = false
+            Building = []
+            RefMode = None
+        }
+        t
+
+/// Build a plan whose JSON path accepts only values of the declared JSON type.
+/// String-map decoding has a separate entry point and remains coercing.
+let forTypeStrict
+    (backend: IJsonBackend)
+    (registry: CodecRegistry)
+    (keyTransform: string -> string)
+    (tagTransform: string -> string)
+    (t: System.Type)
+    : Plan =
+    forTypeIn
+        {
+            Backend = backend
+            Registry = registry
+            KeyTransform = keyTransform
+            TagTransform = tagTransform
+            StrictJson = true
             Building = []
             RefMode = None
         }
@@ -913,6 +1027,7 @@ let forTypeWithRefs
             Registry = registry
             KeyTransform = keyTransform
             TagTransform = tagTransform
+            StrictJson = false
             Building = []
             RefMode = Some refPrefix
         }
@@ -953,6 +1068,7 @@ let forTypeFromLookup
         Registry = registry
         KeyTransform = keyTransform
         TagTransform = tagTransform
+        StrictJson = false
         Building = []
         // Decode only — no schema is rendered from this path.
         RefMode = None
