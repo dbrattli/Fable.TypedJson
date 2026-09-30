@@ -62,11 +62,18 @@ use `just bench` for BenchmarkDotNet's .NET allocation diagnostics.
 ## CI and authentication
 
 [The workflow](../../.github/workflows/codspeed.yml) runs on pushes to `main`,
-pull requests, and manual dispatch. It uses CodSpeed's ARM64 Graviton macro
-runner for walltime measurements and installs .NET 10, Node.js 20, Python 3.12,
+pull requests, and manual dispatch. It uses GitHub's Ubuntu 22.04 runner
+for walltime measurements and installs .NET 10, Node.js 20, Python 3.12,
 and Erlang/OTP 27. All four targets report through the same workflow.
 
 Authentication uses [OIDC](https://codspeed.io/docs/integrations/ci/github-actions/configuration#authentication),
 with `contents: read` and `id-token: write` scoped to the benchmark job.
 No static `CODSPEED_TOKEN` secret is needed. The repository must be connected to
-CodSpeed with access to its macro runners.
+CodSpeed.
+
+CodSpeed macro runners are unavailable to GitHub personal accounts, which
+includes this repository's current owner. Standard GitHub runners vary in
+hardware and load, so use these reports to investigate regressions rather than
+treating small timing differences as definitive. If the repository moves to a
+GitHub organization, [macro runners](https://codspeed.io/docs/integrations/ci/github-actions/macro-runners#prerequisites)
+can improve walltime consistency; changing the runner requires a new baseline.

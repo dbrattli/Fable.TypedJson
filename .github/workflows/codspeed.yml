@@ -19,8 +19,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    # decision: uses CodSpeed's bare-metal runner for stable walltime measurements across all four runtimes
-    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
+    # decision: uses GitHub-hosted runners because CodSpeed macro runners require a GitHub organization
+    # tradeoff: accepts host timing variance to report all four runtimes from this personal repository
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
