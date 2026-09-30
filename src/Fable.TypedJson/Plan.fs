@@ -158,6 +158,73 @@ let private noDefs: Map<string, JsonSchemaValue> = Map.empty
 
 let private isIntegralFloat (value: float) : bool = value = System.Math.Truncate value
 
+let private integerError (b: IJsonBackend) (target: string) (v: obj) : Result<obj, FieldError list> =
+    leafError (sprintf "cannot coerce %s to %s" (describeValue b v) target)
+
+// decision: returns the final decode result directly so valid integers allocate no temporary options
+let private decodeStrictInt (b: IJsonBackend) (v: obj) : Result<obj, FieldError list> =
+    if b.IsInt v then
+        let n = b.AsInt v
+
+        if
+            n >= System.Int32.MinValue
+            && n <= System.Int32.MaxValue
+        then
+            Ok(box n)
+        else
+            integerError b "System.Int32" v
+    elif b.IsFloat v then
+        let n = b.AsFloat v
+
+        if
+            isIntegralFloat n
+            && n >= float System.Int32.MinValue
+            && n <= float System.Int32.MaxValue
+        then
+            Ok(box (int n))
+        else
+            integerError b "System.Int32" v
+    else
+        integerError b "System.Int32" v
+
+let private strictInt64Decoder (b: IJsonBackend) : obj -> Result<obj, FieldError list> =
+    // decision: captures exact bigint bounds once per plan because Fable backends can return integers wider than CLR int
+    let lower = bigint System.Int64.MinValue
+    let upper = bigint System.Int64.MaxValue
+
+    fun v ->
+        if b.IsInt v then
+            let n = b.AsInt v
+
+            // decision: widens Int32-range values directly to avoid bigint work on the common path
+            if
+                n >= System.Int32.MinValue
+                && n <= System.Int32.MaxValue
+            then
+                Ok(box (int64 n))
+            else
+                let wide = bigint n
+
+                if wide >= lower && wide <= upper then
+                    Ok(box (int64 wide))
+                else
+                    integerError b "System.Int64" v
+        elif b.IsFloat v then
+            let n = b.AsFloat v
+            // decision: excludes 2^63 because Int64.MaxValue rounds up to that unrepresentable value as a double
+            let upperExclusive = 9223372036854775808.0
+
+            if
+                isIntegralFloat n
+                && n >= float System.Int64.MinValue
+                && n < upperExclusive
+            then
+                Ok(box (int64 n))
+            else
+                integerError b "System.Int64" v
+        else
+            integerError b "System.Int64" v
+
 let private strictInteger (b: IJsonBackend) (v: obj) : bool =
     b.IsInt v
     || (b.IsFloat v && isIntegralFloat (b.AsFloat v))
@@ -363,13 +430,7 @@ and private planString (b: IJsonBackend) (strict: bool) : Plan = {
 and private planInt (b: IJsonBackend) (strict: bool) : Plan = {
     Decode =
         if strict then
-            fun v ->
-                if b.IsInt v then
-                    Ok(box (b.AsInt v))
-                elif b.IsFloat v && isIntegralFloat (b.AsFloat v) then
-                    Ok(box (int (b.AsFloat v)))
-                else
-                    leafError (sprintf "cannot coerce %s to System.Int32" (describeValue b v))
+            decodeStrictInt b
         else
             fun v ->
                 if b.IsInt v then
@@ -391,13 +452,7 @@ and private planInt (b: IJsonBackend) (strict: bool) : Plan = {
 and private planInt64 (b: IJsonBackend) (strict: bool) : Plan = {
     Decode =
         if strict then
-            fun v ->
-                if b.IsInt v then
-                    Ok(box (int64 (b.AsInt v)))
-                elif b.IsFloat v && isIntegralFloat (b.AsFloat v) then
-                    Ok(box (int64 (b.AsFloat v)))
-                else
-                    leafError (sprintf "cannot coerce %s to System.Int64" (describeValue b v))
+            strictInt64Decoder b
         else
             fun v ->
                 if b.IsInt v then

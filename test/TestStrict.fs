@@ -41,6 +41,8 @@ type Scalars = {
 
 type Child = { Count: int }
 
+type Int64Field = { Count: int64 }
+
 type Nested = {
     Child: Child
     Children: Child list
@@ -122,6 +124,93 @@ let private primitiveTests =
         ]
     )
 
+let private integerBoundsTests =
+    testList (
+        "Strict integer bounds",
+        [
+            test (
+                "int rejects numbers outside Int32 bounds",
+                fun _ ->
+                    let codec = autoStrict<Child>()
+
+                    for number in [ "2147483648"; "-2147483649"; "2147483648.0"; "-2147483649.0"; "1e100" ] do
+                        codec.decode (parseRaw ("{\"count\":" + number + "}"))
+                        |> expectErrorPaths [ "count" ]
+            )
+            test (
+                "int accepts both Int32 bounds as integer and floating-point input",
+                fun _ ->
+                    let codec = autoStrict<Child>()
+
+                    for number, expected in
+                        [
+                            "2147483647", System.Int32.MaxValue
+                            "-2147483648", System.Int32.MinValue
+                            "2147483647.0", System.Int32.MaxValue
+                            "-2147483648.0", System.Int32.MinValue
+                        ] do
+                        match codec.decode (parseRaw ("{\"count\":" + number + "}")) with
+                        | Error errors -> assertThat (formatErrors errors) (isEqualTo "Ok")
+                        | Ok value -> assertThat value.Count (isEqualTo expected)
+            )
+            test (
+                "int64 rejects numbers outside Int64 bounds and fractional input",
+                fun _ ->
+                    let codec = autoStrict<Int64Field>()
+
+                    for number in
+                        [
+                            "9223372036854775808"
+                            "-9223372036854777856"
+                            "9223372036854775808.0"
+                            "-9223372036854777856.0"
+                            "1e100"
+                            "3.9"
+                        ] do
+                        codec.decode (parseRaw ("{\"count\":" + number + "}"))
+                        |> expectErrorPaths [ "count" ]
+            )
+            test (
+                "int64 accepts representable numbers at the bounds and beyond Int32",
+                fun _ ->
+                    let codec = autoStrict<Int64Field>()
+
+                    for number, expected in
+                        [
+                            "-9223372036854775808", System.Int64.MinValue
+                            "-9223372036854775808.0", System.Int64.MinValue
+                            "9223372036854774784", 9223372036854774784L
+                            "9223372036854774784.0", 9223372036854774784L
+                            "2147483648", 2147483648L
+                            "2147483648.0", 2147483648L
+                            "2147483647", 2147483647L
+                            "-2147483648", -2147483648L
+                            "-2147483649", -2147483649L
+                            "0", 0L
+                            "42", 42L
+                        ] do
+                        match codec.decode (parseRaw ("{\"count\":" + number + "}")) with
+                        | Error errors -> assertThat (formatErrors errors) (isEqualTo "Ok")
+                        | Ok value -> assertThat value.Count (isEqualTo expected)
+            )
+#if !JS && !DOTNET
+            test (
+                "int64 checks exact native integer bounds",
+                fun _ ->
+                    let codec = autoStrict<Int64Field>()
+
+                    for number in [ "9223372036854775808"; "-9223372036854775809" ] do
+                        codec.decode (parseRaw ("{\"count\":" + number + "}"))
+                        |> expectErrorPaths [ "count" ]
+
+                    match codec.decode (parseRaw """{"count":9223372036854775807}""") with
+                    | Error errors -> assertThat (formatErrors errors) (isEqualTo "Ok")
+                    | Ok value -> assertThat value.Count (isEqualTo System.Int64.MaxValue)
+            )
+#endif
+        ]
+    )
+
 let private structuralTests =
     testList (
         "Structural strictness",
@@ -183,4 +272,4 @@ let private registeredCodecTests =
     )
 
 let tests =
-    testList ("Strict JSON", [ primitiveTests; structuralTests; registeredCodecTests ])
+    testList ("Strict JSON", [ primitiveTests; integerBoundsTests; structuralTests; registeredCodecTests ])

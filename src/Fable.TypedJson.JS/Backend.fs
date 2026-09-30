@@ -6,7 +6,7 @@ array, number, string, boolean, and null for the map abstraction.
 
 decision: uses native JS objects, arrays, and primitives — `JSON.parse` output needs no representation conversion
 decision: mutates `Put` under linear ownership — avoiding a full object spread per key keeps object building O(n)
-decision: classifies whole-valued doubles with `Number.isInteger` — JavaScript has no distinct integer number type
+decision: classifies only Int32-valued doubles as integers — Fable's `AsInt` conversion truncates wider numbers
 decision: prefers Fable interop bindings over raw emits — target-language strings remain limited to missing APIs
 *)
 
@@ -25,6 +25,11 @@ let private jsPut (map: obj) (key: string) (value: obj) : obj = nativeOnly
 // but not `isInteger` (yet). Bind it directly until upstream catches up.
 [<Emit("Number.isInteger($0)")>]
 let private isInteger (v: obj) : bool = nativeOnly
+
+let private isInt32Number (v: obj) : bool =
+    isInteger v
+    && unbox<float> v >= float System.Int32.MinValue
+    && unbox<float> v <= float System.Int32.MaxValue
 
 type private JSBackendImpl() =
     interface IJsonBackend with
@@ -47,10 +52,11 @@ type private JSBackendImpl() =
         member _.IsString(value) = jsTypeof value = "string"
 
         member _.IsInt(value) =
-            jsTypeof value = "number" && isInteger value
+            jsTypeof value = "number" && isInt32Number value
 
         member _.IsFloat(value) =
-            jsTypeof value = "number" && not (isInteger value)
+            jsTypeof value = "number"
+            && not (isInt32Number value)
 
         member _.IsBool(value) = jsTypeof value = "boolean"
 
