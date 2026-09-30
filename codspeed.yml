@@ -3,31 +3,31 @@
 # tradeoff: measures command startup and warmup as well as the batch; counts amortize their cost
 options:
   warmup-time: 1s
-  min-rounds: 5
-  max-rounds: 5
+  min-rounds: 3
+  max-rounds: 3
 
 benchmarks:
-  - name: dotnet/decode-record/6000000-ops
-    exec: bash benchmarks/cli/run.sh dotnet decode-record 6000000
-  - name: dotnet/parse-decode-record/2000000-ops
-    exec: bash benchmarks/cli/run.sh dotnet parse-decode-record 2000000
-  - name: dotnet/encode-record/5000000-ops
-    exec: bash benchmarks/cli/run.sh dotnet encode-record 5000000
-  - name: js/decode-record/10000000-ops
-    exec: bash benchmarks/cli/run.sh js decode-record 10000000
-  - name: js/parse-decode-record/5000000-ops
-    exec: bash benchmarks/cli/run.sh js parse-decode-record 5000000
-  - name: js/encode-record/10000000-ops
-    exec: bash benchmarks/cli/run.sh js encode-record 10000000
-  - name: python/decode-record/500000-ops
-    exec: bash benchmarks/cli/run.sh python decode-record 500000
-  - name: python/parse-decode-record/300000-ops
-    exec: bash benchmarks/cli/run.sh python parse-decode-record 300000
-  - name: python/encode-record/500000-ops
-    exec: bash benchmarks/cli/run.sh python encode-record 500000
-  - name: beam/decode-record/1000000-ops
-    exec: bash benchmarks/cli/run.sh beam decode-record 1000000
-  - name: beam/parse-decode-record/500000-ops
-    exec: bash benchmarks/cli/run.sh beam parse-decode-record 500000
-  - name: beam/encode-record/1000000-ops
-    exec: bash benchmarks/cli/run.sh beam encode-record 1000000
+  - name: dotnet/decode-record/600000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-record 600000
+  - name: dotnet/parse-decode-record/200000-ops
+    exec: bash benchmarks/cli/run.sh dotnet parse-decode-record 200000
+  - name: dotnet/encode-record/500000-ops
+    exec: bash benchmarks/cli/run.sh dotnet encode-record 500000
+  - name: js/decode-record/1000000-ops
+    exec: bash benchmarks/cli/run.sh js decode-record 1000000
+  - name: js/parse-decode-record/500000-ops
+    exec: bash benchmarks/cli/run.sh js parse-decode-record 500000
+  - name: js/encode-record/1000000-ops
+    exec: bash benchmarks/cli/run.sh js encode-record 1000000
+  - name: python/decode-record/50000-ops
+    exec: bash benchmarks/cli/run.sh python decode-record 50000
+  - name: python/parse-decode-record/30000-ops
+    exec: bash benchmarks/cli/run.sh python parse-decode-record 30000
+  - name: python/encode-record/50000-ops
+    exec: bash benchmarks/cli/run.sh python encode-record 50000
+  - name: beam/decode-record/100000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-record 100000
+  - name: beam/parse-decode-record/50000-ops
+    exec: bash benchmarks/cli/run.sh beam parse-decode-record 50000
+  - name: beam/encode-record/100000-ops
+    exec: bash benchmarks/cli/run.sh beam encode-record 100000

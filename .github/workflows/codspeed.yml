@@ -3,6 +3,9 @@ name: CodSpeed
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled]
@@ -16,16 +19,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  benchmarks:
+  build:
     # decision: makes PR benchmarks opt-in while retaining main runs for the performance baseline
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, 'perf')
-    permissions:
-      contents: read
-      id-token: write
-    # decision: uses a fixed Graviton macro runner to reduce host variance in walltime measurements
-    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
+    # decision: compiles on GitHub ARM64 Ubuntu 22.04 to save macro minutes and match the measurement platform
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -70,6 +70,69 @@ jobs:
 
       - name: Check benchmark results
         run: just bench-cli-smoke
+
+      # decision: transfers a tar archive to preserve BEAM symbolic links between runners
+      - name: Package benchmark runners
+        run: tar -czf benchmark-runners.tar.gz build/codspeed
+
+      - name: Upload benchmark runners
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-runners
+          path: benchmark-runners.tar.gz
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  benchmarks:
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+    # decision: uses a fixed Graviton macro runner to reduce host variance in walltime measurements
+    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET runtime
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.x
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Setup Python runtime dependencies
+        run: uv sync --frozen --python 3.12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Download benchmark runners
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-runners
+
+      - name: Unpack benchmark runners
+        run: tar -xzf benchmark-runners.tar.gz
+
+      - name: Check benchmark results
+        run: |
+          bash benchmarks/cli/run.sh dotnet --smoke
+          bash benchmarks/cli/run.sh js --smoke
+          bash benchmarks/cli/run.sh python --smoke
+          bash benchmarks/cli/run.sh beam --smoke
 
       - name: Measure and report benchmarks
         uses: CodSpeedHQ/action@v5
