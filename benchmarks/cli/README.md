@@ -62,7 +62,12 @@ use `just bench` for BenchmarkDotNet's .NET allocation diagnostics.
 ## CI and authentication
 
 [The workflow](../../.github/workflows/codspeed.yml) runs on pushes to `main`,
-pull requests, and manual dispatch. It uses CodSpeed's ARM64 Graviton macro runner
+pull requests labeled `perf`, and manual dispatch. Adding `perf` starts a run;
+subsequent commits rerun benchmarks while the label remains. Unlabeled PRs,
+including Dependabot PRs, skip the benchmark job without allocating a runner.
+Runs on `main` always execute to maintain the comparison baseline.
+
+It uses CodSpeed's ARM64 Graviton macro runner
 for walltime measurements and installs .NET 10, Node.js 20, Python 3.12,
 and Erlang/OTP 27. All four targets report through the same workflow.
 
