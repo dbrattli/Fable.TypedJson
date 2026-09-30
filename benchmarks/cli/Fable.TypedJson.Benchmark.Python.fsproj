@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);PYTHON;FABLE_COMPILER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
+    <ProjectReference Include="../../src/Fable.TypedJson.Python/Fable.TypedJson.Python.fsproj" />
+    <Compile Include="Main.fs" />
+  </ItemGroup>
+  <Import Project="../../.paket/Paket.Restore.targets" />
+</Project>
