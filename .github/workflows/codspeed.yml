@@ -1,0 +1,72 @@
+name: CodSpeed
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codspeed-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmarks:
+    permissions:
+      contents: read
+      id-token: write
+    # decision: uses CodSpeed's bare-metal runner for stable walltime measurements across all four runtimes
+    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.x
+          cache: true
+          cache-dependency-path: paket.lock
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27'
+          rebar3-version: '3'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Setup Python
+        run: uv python install 3.12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Restore dependencies
+        run: |
+          just restore-net
+          uv sync --frozen --python 3.12
+
+      - name: Build benchmark runners
+        run: just build-bench-cli
+
+      - name: Check benchmark results
+        run: just bench-cli-smoke
+
+      - name: Measure and report benchmarks
+        uses: CodSpeedHQ/action@v5
+        with:
+          mode: walltime

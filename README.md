@@ -311,6 +311,10 @@ If you want a low-level JSON AST to inspect or you need maximum control over dec
 
 ### Performance
 
+The [CodSpeed benchmark suite](benchmarks/cli/README.md) tracks shared workloads
+on .NET, JavaScript, Python, and BEAM. It reports fixed-batch command walltime
+for regression tracking; the .NET measurements below come from BenchmarkDotNet.
+
 From `just bench` (BenchmarkDotNet, `DefaultJob`, .NET 10). Absolute figures are machine-specific; the ratios are the portable part.
 
 Thoth's reflection-driven path on .NET is Newtonsoft-backed while this library's .NET shim is System.Text.Json-backed, so a head-to-head ratio mixes parser choice with codec design. Each is therefore also shown against **its own** parser — the only column that says anything about the decoder itself.

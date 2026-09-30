@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CodSpeedHQ/codspeed/refs/heads/main/schemas/codspeed.schema.json
+# decision: uses fixed batches instead of timed loops so regressions cannot reduce the amount of work
+# tradeoff: measures command startup and warmup as well as the batch; counts amortize their cost
+options:
+  warmup-time: 1s
+  min-rounds: 5
+  max-rounds: 5
+
+benchmarks:
+  - name: dotnet/decode-record/6000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-record 6000000
+  - name: dotnet/parse-decode-record/2000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet parse-decode-record 2000000
+  - name: dotnet/encode-record/5000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet encode-record 5000000
+  - name: dotnet/strict-int/20000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet strict-int 20000000
+  - name: dotnet/strict-int64-small/20000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet strict-int64-small 20000000
+  - name: dotnet/strict-int64-wide/20000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet strict-int64-wide 20000000
+  - name: dotnet/strict-int-reject/5000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet strict-int-reject 5000000
+  - name: js/decode-record/10000000-ops
+    exec: bash benchmarks/cli/run.sh js decode-record 10000000
+  - name: js/parse-decode-record/5000000-ops
+    exec: bash benchmarks/cli/run.sh js parse-decode-record 5000000
+  - name: js/encode-record/10000000-ops
+    exec: bash benchmarks/cli/run.sh js encode-record 10000000
+  - name: js/strict-int/20000000-ops
+    exec: bash benchmarks/cli/run.sh js strict-int 20000000
+  - name: js/strict-int64-small/20000000-ops
+    exec: bash benchmarks/cli/run.sh js strict-int64-small 20000000
+  - name: js/strict-int64-wide/8000000-ops
+    exec: bash benchmarks/cli/run.sh js strict-int64-wide 8000000
+  - name: js/strict-int-reject/2000000-ops
+    exec: bash benchmarks/cli/run.sh js strict-int-reject 2000000
+  - name: python/decode-record/500000-ops
+    exec: bash benchmarks/cli/run.sh python decode-record 500000
+  - name: python/parse-decode-record/300000-ops
+    exec: bash benchmarks/cli/run.sh python parse-decode-record 300000
+  - name: python/encode-record/500000-ops
+    exec: bash benchmarks/cli/run.sh python encode-record 500000
+  - name: python/strict-int/500000-ops
+    exec: bash benchmarks/cli/run.sh python strict-int 500000
+  - name: python/strict-int64-small/500000-ops
+    exec: bash benchmarks/cli/run.sh python strict-int64-small 500000
+  - name: python/strict-int64-wide/500000-ops
+    exec: bash benchmarks/cli/run.sh python strict-int64-wide 500000
+  - name: python/strict-int-reject/100000-ops
+    exec: bash benchmarks/cli/run.sh python strict-int-reject 100000
+  - name: beam/decode-record/1000000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-record 1000000
+  - name: beam/parse-decode-record/500000-ops
+    exec: bash benchmarks/cli/run.sh beam parse-decode-record 500000
+  - name: beam/encode-record/1000000-ops
+    exec: bash benchmarks/cli/run.sh beam encode-record 1000000
+  - name: beam/strict-int/2000000-ops
+    exec: bash benchmarks/cli/run.sh beam strict-int 2000000
+  - name: beam/strict-int64-small/2000000-ops
+    exec: bash benchmarks/cli/run.sh beam strict-int64-small 2000000
+  - name: beam/strict-int64-wide/2000000-ops
+    exec: bash benchmarks/cli/run.sh beam strict-int64-wide 2000000
+  - name: beam/strict-int-reject/500000-ops
+    exec: bash benchmarks/cli/run.sh beam strict-int-reject 500000

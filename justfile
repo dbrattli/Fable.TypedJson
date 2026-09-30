@@ -79,11 +79,11 @@ check: check-test-registry
 
 # Format source files
 format:
-    dotnet fantomas src/ test/
+    dotnet fantomas src/ test/ benchmarks/cli/
 
 # Check formatting without modifying — used in CI to fail PRs with bad formatting
 format-check:
-    dotnet fantomas src/ test/ --check
+    dotnet fantomas src/ test/ benchmarks/cli/ --check
 
 # Setup tooling — restore .NET tools (no NuGet restore yet)
 setup:
@@ -144,6 +144,38 @@ shipit *args:
 bench *args='--filter "*"':
     dotnet run -c Release --project benchmarks/dotnet/Fable.TypedJson.DotNet.Benchmark.fsproj \
         -- --artifacts benchmarks/dotnet/BenchmarkDotNet.Artifacts {{args}}
+
+# Build the shared CodSpeed CLI workloads for every runtime before measurement.
+build-bench-cli: build-bench-cli-dotnet build-bench-cli-js build-bench-cli-python build-bench-cli-beam
+
+build-bench-cli-dotnet:
+    dotnet build benchmarks/cli/Fable.TypedJson.Benchmark.DotNet.fsproj -c Release -o build/codspeed/dotnet
+
+build-bench-cli-js:
+    dotnet build benchmarks/cli/Fable.TypedJson.Benchmark.JS.fsproj -c Release
+    {{fable}} benchmarks/cli/Fable.TypedJson.Benchmark.JS.fsproj --exclude Fable.Core --lang javascript --outDir build/codspeed/js --noCache
+    echo '{"type":"module"}' > build/codspeed/js/package.json
+
+build-bench-cli-python:
+    dotnet build benchmarks/cli/Fable.TypedJson.Benchmark.Python.fsproj -c Release
+    {{fable}} benchmarks/cli/Fable.TypedJson.Benchmark.Python.fsproj --exclude Fable.Core --lang python --outDir build/codspeed/python --noCache
+
+build-bench-cli-beam:
+    dotnet build benchmarks/cli/Fable.TypedJson.Benchmark.Beam.fsproj -c Release
+    {{fable}} benchmarks/cli/Fable.TypedJson.Benchmark.Beam.fsproj --exclude Fable.Core --lang beam --outDir build/codspeed/beam --noCache
+    cp benchmarks/cli/rebar.config build/codspeed/beam/rebar.config
+    cd build/codspeed/beam && rebar3 compile
+
+# Verify every workload on every runtime without installing CodSpeed or uploading results.
+bench-cli-smoke:
+    bash benchmarks/cli/run.sh dotnet --smoke
+    bash benchmarks/cli/run.sh js --smoke
+    bash benchmarks/cli/run.sh python --smoke
+    bash benchmarks/cli/run.sh beam --smoke
+
+# Run a single prebuilt workload, e.g. `just bench-cli dotnet strict-int 1000000`.
+bench-cli target *args:
+    bash benchmarks/cli/run.sh {{target}} {{args}}
 
 # --- Test ---
 

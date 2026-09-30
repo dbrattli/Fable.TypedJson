@@ -31,4 +31,6 @@ nupkgs/
 # project. Kept out of the repo; a baseline worth keeping should be recorded
 # deliberately, not carried in as run logs.
 BenchmarkDotNet.Artifacts/
+# V8 symbol logs generated when CodSpeed runs Node.js benchmarks.
+isolate-*-v8.log
 *.binlog

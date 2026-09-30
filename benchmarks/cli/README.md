@@ -1,0 +1,72 @@
+# CodSpeed benchmarks
+
+The seven workloads in [Main.fs](Main.fs) compile to .NET, JavaScript,
+Python, and BEAM. [codspeed.yml](../../codspeed.yml) runs the prebuilt programs
+as CLI commands and reports walltime under separate names for each runtime.
+
+## Local use
+
+```sh
+just restore
+just build-bench-cli
+just bench-cli-smoke
+just bench-cli dotnet strict-int 1000000
+```
+
+Individual builds are available as `just build-bench-cli-dotnet`,
+`build-bench-cli-js`, `build-bench-cli-python`, and `build-bench-cli-beam`.
+The smoke command checks every workload on every runtime with three operations.
+Unknown workloads, invalid iteration counts, or incorrect results fail the command.
+
+After installing the [CodSpeed CLI](https://codspeed.io/docs/benchmarks/cli-commands),
+run `codspeed run -m walltime` to measure and upload the configured workloads.
+For a local check without uploading, use `codspeed run -m walltime --skip-upload`.
+
+## What the numbers mean
+
+Each result is the elapsed time of a **whole fixed batch**, including process
+startup, one codec construction, 10,000 warmup operations, and output.
+Compilation and dependency restoration happen beforehand. Codecs are reused,
+and decode-only workloads reuse parsed input. Only `parse-decode-record`
+parses inside the repeated loop; `encode-record` produces JSON text.
+
+Every operation checks its result and contributes to a checked checksum.
+The encode fixture also round-trips before its loop. Counts are fixed rather
+than adjusted dynamically: a slower version must execute the same amount of
+work. Initial counts were chosen to give roughly one to four seconds per command
+on the development machine; CI hardware and runtime versions will differ.
+CodSpeed performs a command warmup followed by five measurement rounds.
+
+| Workload | What it exercises | .NET operations | JS operations | Python operations | BEAM operations |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `decode-record` | Cached codec, pre-parsed three-field record | 6,000,000 | 10,000,000 | 500,000 | 1,000,000 |
+| `parse-decode-record` | JSON parsing plus record decoding | 2,000,000 | 5,000,000 | 300,000 | 500,000 |
+| `encode-record` | Record serialization to JSON text | 5,000,000 | 10,000,000 | 500,000 | 1,000,000 |
+| `strict-int` | Valid Int32 value, 42 | 20,000,000 | 20,000,000 | 500,000 | 2,000,000 |
+| `strict-int64-small` | Int64 value within Int32 bounds, 42 | 20,000,000 | 20,000,000 | 500,000 | 2,000,000 |
+| `strict-int64-wide` | Int64 value outside Int32 bounds, 2147483648 | 20,000,000 | 8,000,000 | 500,000 | 2,000,000 |
+| `strict-int-reject` | Out-of-range Int32 rejection with field path | 5,000,000 | 2,000,000 | 100,000 | 500,000 |
+
+Compare a workload against its own history. These are not isolated nanoseconds
+per decode, and the different batch sizes prevent comparing raw times across
+runtimes. The wide Int64 JSON value follows the backend's native numeric
+representation, which differs across targets. Keep iteration counts, runtime
+versions, and the CI runner label stable when assessing a code change. Counts
+are included in benchmark names so changing the amount of work starts a new
+history.
+
+The .NET runner disables tiered compilation, and BEAM uses one scheduler.
+Those settings are fixed in [run.sh](run.sh). CLI timing tracks elapsed time;
+use `just bench` for BenchmarkDotNet's .NET allocation diagnostics.
+
+## CI and authentication
+
+[The workflow](../../.github/workflows/codspeed.yml) runs on pushes to `main`,
+pull requests, and manual dispatch. It uses CodSpeed's ARM64 Graviton macro
+runner for walltime measurements and installs .NET 10, Node.js 20, Python 3.12,
+and Erlang/OTP 27. All four targets report through the same workflow.
+
+Authentication uses [OIDC](https://codspeed.io/docs/integrations/ci/github-actions/configuration#authentication),
+with `contents: read` and `id-token: write` scoped to the benchmark job.
+No static `CODSPEED_TOKEN` secret is needed. The repository must be connected to
+CodSpeed with access to its macro runners.
