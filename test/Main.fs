@@ -40,4 +40,5 @@ let main _ =
         Union.tests
         Scalars.tests
         Strict.tests
+        Text.tests
     ]

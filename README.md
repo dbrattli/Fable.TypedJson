@@ -112,6 +112,17 @@ Error [
 
 `formatErrors` turns the list into one human-readable string — handy for surfacing back to an LLM as a tool error, or to a user as a form-validation summary.
 
+Each target adapter also exposes `decodeText`, which keeps malformed JSON text separate from typed validation errors:
+
+```fsharp
+match decodeText codec jsonText with
+| Ok value -> handle value
+| Error (InvalidText message) -> reportMalformedJson message
+| Error (InvalidValue errors) -> reportValidationErrors errors
+```
+
+Only parser exceptions become `InvalidText`. Exceptions raised by a decoder, registered codec, or model validator still propagate as defects.
+
 ## Case rules
 
 Field names from F# reflection become JSON keys via a `CaseRules` setting on the codec. The default is `LowerFirst` (camelCase). Use `withCaseRules` to switch.

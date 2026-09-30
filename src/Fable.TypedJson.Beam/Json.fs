@@ -20,6 +20,11 @@ let beam: IJsonBackend = Fable.TypedJson.Beam.Backend.beam
 /// and consumers don't have to thread the backend explicitly.
 let parseRaw (json: string) : JsonMap = beam.ParseRaw json
 
+/// Parse and decode JSON text. Only parser exceptions become `InvalidText`;
+/// decoder and validator exceptions still propagate.
+let decodeText (codec: TypedJson<'T>) (text: string) : Result<'T, JsonTextError> =
+    Fable.TypedJson.Json.decodeTextWith parseRaw codec text
+
 let inline auto<'T> () : TypedJson<'T> = Fable.TypedJson.Json.auto<'T> beam
 
 let inline autoStrict<'T> () : TypedJson<'T> =

@@ -98,6 +98,12 @@ let applyCaseRule (caseRule: CaseRules) (name: string) : string =
 /// Each `IJsonBackend` interprets it as its own concrete type.
 type JsonMap = obj
 
+/// Failure while decoding JSON text. Syntax/parser failures are distinct from
+/// typed validation failures so callers can report them appropriately.
+type JsonTextError =
+    | InvalidText of message: string
+    | InvalidValue of FieldError list
+
 type TypedJson<'T> = {
     /// Decode using the codec's configured `caseRules`. Use `decodeWith` to
     /// override the rule for a single call.
@@ -136,6 +142,24 @@ type TypedJson<'T> = {
     /// Rebuild this codec with a different alias map. Used by `alias`.
     withAliases: Map<string, string> -> TypedJson<'T>
 }
+
+(**
+Decode JSON text while translating parser exceptions into data. The decoder
+runs after the exception boundary: defects in custom codecs or model
+validators must remain visible to the application rather than looking like
+malformed input.
+
+invariant: only `parseRaw` executes inside `try/with`
+*)
+let decodeTextWith (parseRaw: string -> JsonMap) (codec: TypedJson<'T>) (text: string) : Result<'T, JsonTextError> =
+    let parsed =
+        try
+            Ok(parseRaw text)
+        with ex ->
+            Error(InvalidText ex.Message)
+
+    parsed
+    |> Result.bind (codec.decode >> Result.mapError InvalidValue)
 
 // ============================================================================
 // Encode Module
