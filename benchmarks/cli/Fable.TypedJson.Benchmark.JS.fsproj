@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);JS;FABLE_COMPILER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fable.TypedJson/Fable.TypedJson.fsproj" />
+    <ProjectReference Include="../../src/Fable.TypedJson.JS/Fable.TypedJson.JS.fsproj" />
+    <Compile Include="Main.fs" />
+  </ItemGroup>
+  <Import Project="../../.paket/Paket.Restore.targets" />
+</Project>
