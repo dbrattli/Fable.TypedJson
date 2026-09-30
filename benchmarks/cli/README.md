@@ -62,7 +62,7 @@ use `just bench` for BenchmarkDotNet's .NET allocation diagnostics.
 ## CI and authentication
 
 [The workflow](../../.github/workflows/codspeed.yml) runs on pushes to `main`,
-pull requests, and manual dispatch. It uses GitHub's Ubuntu 22.04 runner
+pull requests, and manual dispatch. It uses CodSpeed's ARM64 Graviton macro runner
 for walltime measurements and installs .NET 10, Node.js 20, Python 3.12,
 and Erlang/OTP 27. All four targets report through the same workflow.
 
@@ -71,9 +71,9 @@ with `contents: read` and `id-token: write` scoped to the benchmark job.
 No static `CODSPEED_TOKEN` secret is needed. The repository must be connected to
 CodSpeed.
 
-CodSpeed macro runners are unavailable to GitHub personal accounts, which
-includes this repository's current owner. Standard GitHub runners vary in
-hardware and load, so use these reports to investigate regressions rather than
-treating small timing differences as definitive. If the repository moves to a
-GitHub organization, [macro runners](https://codspeed.io/docs/integrations/ci/github-actions/macro-runners#prerequisites)
-can improve walltime consistency; changing the runner requires a new baseline.
+The `fable-hub` organization must enable CodSpeed for this repository and allow
+public repositories in the runner group used by CodSpeed. See the
+[macro runner prerequisites](https://codspeed.io/docs/integrations/ci/github-actions/macro-runners#prerequisites).
+Keep the Graviton runner label stable for comparable measurements. Switching
+from the previous GitHub-hosted x64 runner establishes a new ARM64 baseline;
+times across that transition do not measure a code regression or improvement.
