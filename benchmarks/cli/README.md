@@ -110,8 +110,8 @@ it writes the selected config into the build artifact. For the same selection
 locally:
 
 ```sh
-python3 benchmarks/cli/select-codspeed.py --target beam --suite core --output build/codspeed/selected.yml
-codspeed run -m walltime --config build/codspeed/selected.yml --working-directory "$PWD"
+python3 benchmarks/cli/select-codspeed.py --target beam --suite core --output .codspeed-selected.yml
+codspeed run -m walltime --config .codspeed-selected.yml
 ```
 
 Plain `codspeed run -m walltime` still measures all 56 configured workloads.
