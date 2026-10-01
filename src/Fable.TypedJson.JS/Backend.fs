@@ -42,6 +42,9 @@ type private JSBackendImpl() =
         // `JsInterop.(?)` lowers to `map[key]`.
         member _.Get(map, key) = map?(key)
 
+        member _.TryGet(map, key) =
+            if jsIn key map then Some(map?(key)) else None
+
         member _.Put(map, key, value) = jsPut map key value
 
         member _.ParseRaw(json) = JS.JSON.parse json

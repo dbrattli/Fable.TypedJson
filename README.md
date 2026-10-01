@@ -354,6 +354,11 @@ Two design axes, each independent:
 
 Adding a target means implementing `IJsonBackend` in a new `Fable.TypedJson.<Target>` project plus a `<Target>.Json` convenience module; the core does not change.
 
+Custom backends must implement `TryGet(map, key)`: return `None` for a missing
+key and `Some value` for a present key, including JSON null. Existing backends
+can implement it with `ContainsKey` followed by `Get`; native lookup APIs avoid
+the duplicate lookup when available.
+
 Custom backends must add `ArrayMapper`. Return `None` to retain indexed
 traversal, or `Some IJsonArrayMapper` to map native elements in order and stop
 at the first callback error, returning its zero-based index. Empty input
