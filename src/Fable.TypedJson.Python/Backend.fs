@@ -100,6 +100,19 @@ type private PythonBackendImpl() =
         member _.ArrayLength(arr) = builtins.len arr
         // ArrayAt is symmetric to Get — return the raw native value.
         member _.ArrayAt(arr, i) = arr?(i)
+
+        member _.TryFoldArray(arr, folder, state) =
+            let length = builtins.len arr
+
+            let rec loop index state =
+                if index = length then
+                    Ok state
+                else
+                    match folder index state (arr?(index)) with
+                    | Ok next -> loop (index + 1) next
+                    | Error error -> Error error
+
+            loop 0 state
         // F# `obj list` is FSharpList on Python (cons cells with __slots__).
         // `json.dumps` would render that as a record-like dict, not a JSON
         // array. Convert to a native Python list via `list(xs)`.

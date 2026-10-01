@@ -354,6 +354,12 @@ Two design axes, each independent:
 
 Adding a target means implementing `IJsonBackend` in a new `Fable.TypedJson.<Target>` project plus a `<Target>.Json` convenience module; the core does not change.
 
+Custom backends must implement `TryFoldArray`: visit native array elements in
+order with zero-based indexes, return the initial state for an empty array, and
+stop at the first callback `Error`. This member lets linked-list backends walk
+tails directly. Callback exceptions propagate; type validation stays in the
+shared codec plan.
+
 ## Contributing
 
 ### Prerequisites

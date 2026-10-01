@@ -602,8 +602,8 @@ and private planDecimal (b: IJsonBackend) : Plan = {
 CLR generics and arrays are invariant: an `obj list` cannot be assigned to an
 `int list` field, nor an `obj[]` to an `int[]` one.
 
-Iteration goes through `ArrayLength` / `ArrayAt` rather than an F# list or
-array, because the native sequence shape differs per backend.
+Iteration goes through `TryFoldArray`, because the native sequence shape
+differs per backend. BEAM can walk list tails while other backends use indexes.
 
 decision: stops at the first invalid sequence element — avoids decoding an unused tail after the result is already an error
 tradeoff: reports one invalid element per sequence decode in exchange for bounded failure work
@@ -629,21 +629,15 @@ and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> 
                 if not (b.IsArray v) then
                     leafError expected
                 else
-                    let len = b.ArrayLength v
-                    let mutable i = 0
-                    let mutable failure: FieldError list option = None
-                    let mutable acc: obj list = []
-
-                    while i < len && failure.IsNone do
-                        match element.Decode(b.ArrayAt(v, i)) with
-                        | Ok x -> acc <- x :: acc
-                        | Error errs -> failure <- Some(under (sprintf "[%d]" i) errs)
-
-                        i <- i + 1
-
-                    match failure with
-                    | Some errs -> Error errs
-                    | None -> Ok(build (List.rev acc))
+                    b.TryFoldArray(
+                        v,
+                        (fun i acc item ->
+                            match element.Decode item with
+                            | Ok x -> Ok(x :: acc)
+                            | Error errs -> Error(under (sprintf "[%d]" i) errs)),
+                        []
+                    )
+                    |> Result.map (List.rev >> build)
     }
 
 // --- Records ----------------------------------------------------------------

@@ -481,6 +481,57 @@ let private arrayFieldTests =
         ]
     )
 
+let private nativeTraversalTests =
+    testList (
+        "Native array traversal",
+        [
+            test (
+                "empty array preserves initial state without visiting elements",
+                fun _ ->
+                    let result =
+                        backend.TryFoldArray(parseRaw "[]", (fun _ _ _ -> failwith "unexpected element"), 42)
+
+                    assertThat (result: Result<int, string>) (isEqualTo (Ok 42))
+            )
+            test (
+                "visits every element in order with zero-based indexes",
+                fun _ ->
+                    let result =
+                        backend.TryFoldArray(parseRaw "[4,5,6]", (fun index acc item -> Ok((index, backend.AsInt item) :: acc)), [])
+
+                    assertThat (result: Result<(int * int) list, string>) (isEqualTo (Ok [ (2, 6); (1, 5); (0, 4) ]))
+            )
+            test (
+                "stops on the first error without visiting the tail",
+                fun _ ->
+                    let result =
+                        backend.TryFoldArray(
+                            parseRaw "[4,5,6]",
+                            (fun index total item ->
+                                if index > 1 then failwith "visited rejected tail"
+                                elif index = 1 then Error(total, backend.AsInt item)
+                                else Ok(total + backend.AsInt item)),
+                            0
+                        )
+
+                    assertThat result (isEqualTo (Error(4, 5)))
+            )
+            test (
+                "callback exceptions propagate",
+                fun _ ->
+                    let mutable caught = false
+
+                    try
+                        backend.TryFoldArray(parseRaw "[1]", (fun _ _ _ -> failwith "traversal callback failed"), ())
+                        |> ignore
+                    with ex ->
+                        caught <- ex.Message.Contains "traversal callback failed"
+
+                    assertThat caught isTrue
+            )
+        ]
+    )
+
 let tests =
     testList (
         "Nested",
@@ -491,5 +542,6 @@ let tests =
             caseRulesRecursiveTests
             recursiveTypeTests
             arrayFieldTests
+            nativeTraversalTests
         ]
     )

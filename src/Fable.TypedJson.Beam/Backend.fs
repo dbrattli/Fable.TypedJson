@@ -47,6 +47,9 @@ let private erlListLength (l: obj) : int = nativeOnly
 [<Emit("lists:nth($1 + 1, fable_utils:to_list($0))")>]
 let private erlListAt (l: obj) (i: int) : obj = nativeOnly
 
+[<Emit("fable_utils:to_list($0)")>]
+let private erlListItems (value: obj) : obj list = nativeOnly
+
 // F# `obj list` IS an Erlang list at runtime on Fable BEAM, so the box is
 // effectively the identity here. Kept explicit for documentation and parity
 // with the Python backend (where the conversion is non-trivial).
@@ -97,6 +100,19 @@ type private BeamBackendImpl() =
         member _.AsBool(value) = unbox<bool> value
         member _.ArrayLength(arr) = erlListLength arr
         member _.ArrayAt(arr, i) = erlListAt arr i
+
+        member _.TryFoldArray(arr, folder, state) =
+            // decision: walks native list tails once so sequence decoding is linear and needs no mutable process-dictionary cells
+            let rec loop index state remaining =
+                match remaining with
+                | [] -> Ok state
+                | item :: tail ->
+                    match folder index state item with
+                    | Ok next -> loop (index + 1) next tail
+                    | Error error -> Error error
+
+            loop 0 state (erlListItems arr)
+
         member _.BuildArray(items) = erlListFromFSharpList items
 
         member _.Null = erlNull
