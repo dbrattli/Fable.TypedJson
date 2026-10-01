@@ -63,3 +63,59 @@ benchmarks:
     exec: bash benchmarks/cli/run.sh beam strict-int64-wide 200000
   - name: beam/strict-int-reject/50000-ops
     exec: bash benchmarks/cli/run.sh beam strict-int-reject 50000
+  - name: dotnet/construct-record/10000-ops
+    exec: bash benchmarks/cli/run.sh dotnet construct-record 10000
+  - name: dotnet/decode-wide-record/200000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-wide-record 200000
+  - name: dotnet/decode-array-128/100000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-array-128 100000
+  - name: dotnet/decode-array-1024/10000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-array-1024 10000
+  - name: dotnet/decode-list-1024/10000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-list-1024 10000
+  - name: dotnet/decode-recursive-tree/2000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-recursive-tree 2000
+  - name: dotnet/reject-nested-sequence/200000-ops
+    exec: bash benchmarks/cli/run.sh dotnet reject-nested-sequence 200000
+  - name: js/construct-record/50000-ops
+    exec: bash benchmarks/cli/run.sh js construct-record 50000
+  - name: js/decode-wide-record/500000-ops
+    exec: bash benchmarks/cli/run.sh js decode-wide-record 500000
+  - name: js/decode-array-128/200000-ops
+    exec: bash benchmarks/cli/run.sh js decode-array-128 200000
+  - name: js/decode-array-1024/20000-ops
+    exec: bash benchmarks/cli/run.sh js decode-array-1024 20000
+  - name: js/decode-list-1024/20000-ops
+    exec: bash benchmarks/cli/run.sh js decode-list-1024 20000
+  - name: js/decode-recursive-tree/5000-ops
+    exec: bash benchmarks/cli/run.sh js decode-recursive-tree 5000
+  - name: js/reject-nested-sequence/200000-ops
+    exec: bash benchmarks/cli/run.sh js reject-nested-sequence 200000
+  - name: python/construct-record/500-ops
+    exec: bash benchmarks/cli/run.sh python construct-record 500
+  - name: python/decode-wide-record/10000-ops
+    exec: bash benchmarks/cli/run.sh python decode-wide-record 10000
+  - name: python/decode-array-128/10000-ops
+    exec: bash benchmarks/cli/run.sh python decode-array-128 10000
+  - name: python/decode-array-1024/1000-ops
+    exec: bash benchmarks/cli/run.sh python decode-array-1024 1000
+  - name: python/decode-list-1024/1000-ops
+    exec: bash benchmarks/cli/run.sh python decode-list-1024 1000
+  - name: python/decode-recursive-tree/200-ops
+    exec: bash benchmarks/cli/run.sh python decode-recursive-tree 200
+  - name: python/reject-nested-sequence/10000-ops
+    exec: bash benchmarks/cli/run.sh python reject-nested-sequence 10000
+  - name: beam/construct-record/2000-ops
+    exec: bash benchmarks/cli/run.sh beam construct-record 2000
+  - name: beam/decode-wide-record/20000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-wide-record 20000
+  - name: beam/decode-array-128/10000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-array-128 10000
+  - name: beam/decode-array-1024/1000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-array-1024 1000
+  - name: beam/decode-list-1024/1000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-list-1024 1000
+  - name: beam/decode-recursive-tree/200-ops
+    exec: bash benchmarks/cli/run.sh beam decode-recursive-tree 200
+  - name: beam/reject-nested-sequence/20000-ops
+    exec: bash benchmarks/cli/run.sh beam reject-nested-sequence 20000

@@ -1,6 +1,6 @@
 # CodSpeed benchmarks
 
-The seven workloads in [Main.fs](Main.fs) compile to .NET, JavaScript,
+The fourteen workloads in [Main.fs](Main.fs) compile to .NET, JavaScript,
 Python, and BEAM. [codspeed.yml](../../codspeed.yml) runs the prebuilt programs
 as CLI commands and reports walltime under separate names for each runtime.
 
@@ -19,16 +19,30 @@ The smoke command checks every workload on every runtime with three operations.
 Unknown workloads, invalid iteration counts, or incorrect results fail the command.
 
 After installing the [CodSpeed CLI](https://codspeed.io/docs/benchmarks/cli-commands),
-run `codspeed run -m walltime` to measure and upload the configured workloads.
-For a local check without uploading, use `codspeed run -m walltime --skip-upload`.
+authenticate with `codspeed auth login`, then run `codspeed run -m walltime` to
+measure and upload the configured workloads. On Linux, CodSpeed's kernel setup
+requires sudo credentials; run `sudo -v` in the same terminal first if necessary.
+For a focused measurement, use:
+
+```sh
+codspeed exec -m walltime --name local/dotnet/decode-record/1000000-ops -- \
+    bash benchmarks/cli/run.sh dotnet decode-record 1000000
+```
+
+Compare local results on the same machine. CI uses a fixed ARM64 macro runner;
+its absolute timings are not directly comparable with a local machine.
 
 ## What the numbers mean
 
 Each result is the elapsed time of a **whole fixed batch**, including process
-startup, one codec construction, 10,000 warmup operations, and output.
+startup, setup, warmup operations, and output.
 Compilation and dependency restoration happen beforehand. Codecs are reused,
 and decode-only workloads reuse parsed input. Only `parse-decode-record`
 parses inside the repeated loop; `encode-record` produces JSON text.
+`construct-record` creates a codec and decodes one pre-parsed record per operation,
+separating repeated construction from cached decoding. The original seven workloads
+retain 10,000 warmup operations; the seven structural workloads use ten so that
+recursive plan construction and quadratic traversal do not dominate warmup.
 
 Every operation checks its result and contributes to a checked checksum.
 The encode fixture also round-trips before its loop. Counts are fixed rather
@@ -47,6 +61,18 @@ with results from the previous larger batches.
 | `strict-int64-small` | Int64 value within Int32 bounds, 42 | 2,000,000 | 2,000,000 | 50,000 | 200,000 |
 | `strict-int64-wide` | Int64 value outside Int32 bounds, 2147483648 | 2,000,000 | 800,000 | 50,000 | 200,000 |
 | `strict-int-reject` | Out-of-range Int32 rejection with field path | 500,000 | 200,000 | 10,000 | 50,000 |
+| `construct-record` | Codec construction plus one checked record decode | 10,000 | 50,000 | 500 | 2,000 |
+| `decode-wide-record` | Cached codec, pre-parsed 16-field record | 200,000 | 500,000 | 10,000 | 20,000 |
+| `decode-array-128` | 128 integers decoded to an F# array | 100,000 | 200,000 | 10,000 | 10,000 |
+| `decode-array-1024` | 1,024 integers decoded to an F# array | 10,000 | 20,000 | 1,000 | 1,000 |
+| `decode-list-1024` | 1,024 integers decoded to an F# list | 10,000 | 20,000 | 1,000 | 1,000 |
+| `decode-recursive-tree` | Fifteen nodes of a recursive record/list type | 2,000 | 5,000 | 200 | 200 |
+| `reject-nested-sequence` | Strict nested rejection at `groups[1].items[2]` | 200,000 | 200,000 | 10,000 | 20,000 |
+
+Sequence and tree workloads sum all decoded values; wide-record decoding checks
+all sixteen fields. These checks are included in the measured batch. Array sizes
+expose traversal scaling, while array/list outputs exercise different builders.
+The structural workloads add new histories without changing the original counts.
 
 Compare a workload against its own history. These are not isolated nanoseconds
 per decode, and the different batch sizes prevent comparing raw times across
