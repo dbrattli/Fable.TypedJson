@@ -61,18 +61,21 @@ with results from the previous larger batches.
 | `strict-int64-small` | Int64 value within Int32 bounds, 42 | 2,000,000 | 2,000,000 | 50,000 | 200,000 |
 | `strict-int64-wide` | Int64 value outside Int32 bounds, 2147483648 | 2,000,000 | 800,000 | 50,000 | 200,000 |
 | `strict-int-reject` | Out-of-range Int32 rejection with field path | 500,000 | 200,000 | 10,000 | 50,000 |
-| `construct-record` | Codec construction plus one checked record decode | 10,000 | 50,000 | 500 | 2,000 |
+| `construct-record` | Codec construction plus one checked record decode | 300 | 50,000 | 500 | 2,000 |
 | `decode-wide-record` | Cached codec, pre-parsed 16-field record | 200,000 | 500,000 | 10,000 | 20,000 |
-| `decode-array-128` | 128 integers decoded to an F# array | 100,000 | 200,000 | 10,000 | 10,000 |
-| `decode-array-1024` | 1,024 integers decoded to an F# array | 10,000 | 20,000 | 1,000 | 1,000 |
-| `decode-list-1024` | 1,024 integers decoded to an F# list | 10,000 | 20,000 | 1,000 | 1,000 |
-| `decode-recursive-tree` | Fifteen nodes of a recursive record/list type | 2,000 | 5,000 | 200 | 200 |
-| `reject-nested-sequence` | Strict nested rejection at `groups[1].items[2]` | 200,000 | 200,000 | 10,000 | 20,000 |
+| `decode-array-128` | 128 integers decoded to an F# array | 25,000 | 100,000 | 2,000 | 10,000 |
+| `decode-array-1024` | 1,024 integers decoded to an F# array | 2,500 | 10,000 | 250 | 250 |
+| `decode-list-1024` | 1,024 integers decoded to an F# list | 1,500 | 20,000 | 250 | 1,000 |
+| `decode-recursive-tree` | Fifteen nodes of a recursive record/list type | 50 | 5,000 | 200 | 200 |
+| `reject-nested-sequence` | Strict nested rejection at `groups[1].items[2]` | 200,000 | 50,000 | 10,000 | 20,000 |
 
 Sequence and tree workloads sum all decoded values; wide-record decoding checks
 all sixteen fields. These checks are included in the measured batch. Array sizes
 expose traversal scaling, while array/list outputs exercise different builders.
-The structural workloads add new histories without changing the original counts.
+Structural counts are calibrated from the first Graviton run. In particular, the
+.NET construction and recursive-tree batches previously took 33 and 57 seconds
+per round. Reduced counts have new benchmark names; the original seven workload
+counts remain unchanged.
 
 Compare a workload against its own history. These are not isolated nanoseconds
 per decode, and the different batch sizes prevent comparing raw times across
@@ -87,6 +90,37 @@ Those settings are fixed in [run.sh](run.sh). CLI timing tracks elapsed time;
 use `just bench` for BenchmarkDotNet's .NET allocation diagnostics.
 
 ## CI and authentication
+
+CI defaults to 40 workloads (ten per runtime). `strict-int`,
+`strict-int64-small`, `decode-wide-record`, and `reject-nested-sequence` are
+reserved for explicit `full` runs: correctness remains covered by the shared
+tests, while the core suite retains wide Int64, scalar rejection, and both
+sequence output builders. All suites use three measurement rounds.
+
+For traversal changes, `sequences` measures just the two array sizes, list
+output, and recursive tree: sixteen workloads across all runtimes, or four
+for one runtime. Workload names, counts, and measurement settings match the
+core suite, so its baseline can be reused.
+
+Manual dispatch accepts `target` (`all`, `dotnet`, `js`, `python`, `beam`) and
+`suite` (`core`, `sequences`, `full`). Focused runs build, install, and measure only that
+runtime:
+
+```sh
+gh workflow run codspeed.yml --ref <branch> -f target=beam -f suite=core
+gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=sequences
+```
+
+[select-codspeed.py](select-codspeed.py) filters the canonical configuration;
+it writes the selected config into the build artifact. For the same selection
+locally:
+
+```sh
+python3 benchmarks/cli/select-codspeed.py --target beam --suite core --output .codspeed-selected.yml
+codspeed run -m walltime --config .codspeed-selected.yml
+```
+
+Plain `codspeed run -m walltime` still measures all 56 configured workloads.
 
 [The workflow](../../.github/workflows/codspeed.yml) runs on pushes to `main`,
 pull requests labeled `perf`, and manual dispatch. Adding `perf` starts a run;
