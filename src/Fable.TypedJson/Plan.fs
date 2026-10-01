@@ -602,7 +602,7 @@ and private planDecimal (b: IJsonBackend) : Plan = {
 CLR generics and arrays are invariant: an `obj list` cannot be assigned to an
 `int list` field, nor an `obj[]` to an `int[]` one.
 
-Iteration goes through `TryFoldArray`, because the native sequence shape
+Iteration goes through `TryMapArray`, because the native sequence shape
 differs per backend. BEAM can walk list tails while other backends use indexes.
 
 decision: stops at the first invalid sequence element — avoids decoding an unused tail after the result is already an error
@@ -629,15 +629,10 @@ and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> 
                 if not (b.IsArray v) then
                     leafError expected
                 else
-                    b.TryFoldArray(
-                        v,
-                        (fun i acc item ->
-                            match element.Decode item with
-                            | Ok x -> Ok(x :: acc)
-                            | Error errs -> Error(under (sprintf "[%d]" i) errs)),
-                        []
-                    )
-                    |> Result.map (List.rev >> build)
+                    // decision: passes the existing decoder directly so success needs no extra callback or per-element Result wrapper
+                    match b.TryMapArray(v, element.Decode) with
+                    | Ok items -> Ok(build items)
+                    | Error(index, errors) -> Error(under (sprintf "[%d]" index) errors)
     }
 
 // --- Records ----------------------------------------------------------------

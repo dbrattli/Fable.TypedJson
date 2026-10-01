@@ -486,35 +486,36 @@ let private nativeTraversalTests =
         "Native array traversal",
         [
             test (
-                "empty array preserves initial state without visiting elements",
+                "empty array returns no values without visiting elements",
                 fun _ ->
                     let result =
-                        backend.TryFoldArray(parseRaw "[]", (fun _ _ _ -> failwith "unexpected element"), 42)
+                        backend.TryMapArray(parseRaw "[]", (fun _ -> failwith "unexpected element"))
 
-                    assertThat (result: Result<int, string>) (isEqualTo (Ok 42))
+                    assertThat (result: Result<int list, int * string>) (isEqualTo (Ok []))
             )
             test (
-                "visits every element in order with zero-based indexes",
+                "maps every element and preserves its order",
                 fun _ ->
                     let result =
-                        backend.TryFoldArray(parseRaw "[4,5,6]", (fun index acc item -> Ok((index, backend.AsInt item) :: acc)), [])
+                        backend.TryMapArray(parseRaw "[4,5,6]", (fun item -> Ok(2 * backend.AsInt item)))
 
-                    assertThat (result: Result<(int * int) list, string>) (isEqualTo (Ok [ (2, 6); (1, 5); (0, 4) ]))
+                    assertThat (result: Result<int list, int * string>) (isEqualTo (Ok [ 8; 10; 12 ]))
             )
             test (
                 "stops on the first error without visiting the tail",
                 fun _ ->
                     let result =
-                        backend.TryFoldArray(
+                        backend.TryMapArray(
                             parseRaw "[4,5,6]",
-                            (fun index total item ->
-                                if index > 1 then failwith "visited rejected tail"
-                                elif index = 1 then Error(total, backend.AsInt item)
-                                else Ok(total + backend.AsInt item)),
-                            0
+                            (fun item ->
+                                let value = backend.AsInt item
+
+                                if value = 6 then failwith "visited rejected tail"
+                                elif value = 5 then Error value
+                                else Ok value)
                         )
 
-                    assertThat result (isEqualTo (Error(4, 5)))
+                    assertThat result (isEqualTo (Error(1, 5)))
             )
             test (
                 "callback exceptions propagate",
@@ -522,7 +523,7 @@ let private nativeTraversalTests =
                     let mutable caught = false
 
                     try
-                        backend.TryFoldArray(parseRaw "[1]", (fun _ _ _ -> failwith "traversal callback failed"), ())
+                        backend.TryMapArray(parseRaw "[1]", (fun _ -> failwith "traversal callback failed"))
                         |> ignore
                     with ex ->
                         caught <- ex.Message.Contains "traversal callback failed"

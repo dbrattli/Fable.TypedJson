@@ -261,23 +261,23 @@ type private DotNetBackendImpl() =
             | :? System.Array as a -> a.GetValue(i)
             | _ -> failwithf "expected array, got %A" arr
 
-        member _.TryFoldArray(arr, folder, state) =
-            let fold length itemAt =
-                let rec loop index state =
+        member _.TryMapArray(arr, mapping) =
+            let map length itemAt =
+                let rec loop index acc =
                     if index = length then
-                        Ok state
+                        Ok(List.rev acc)
                     else
-                        match folder index state (itemAt index) with
-                        | Ok next -> loop (index + 1) next
-                        | Error error -> Error error
+                        match mapping (itemAt index) with
+                        | Ok value -> loop (index + 1) (value :: acc)
+                        | Error error -> Error(index, error)
 
-                loop 0 state
+                loop 0 []
 
             match arr with
             | :? JsonValue as JArray inner ->
                 let items = unbox<JsonValue[]> inner
-                fold items.Length (fun i -> box items.[i])
-            | :? System.Array as items -> fold items.Length (fun i -> items.GetValue(i))
+                map items.Length (fun i -> box items.[i])
+            | :? System.Array as items -> map items.Length (fun i -> items.GetValue(i))
             | _ -> failwithf "expected array, got %A" arr
 
         member _.BuildArray(items) =

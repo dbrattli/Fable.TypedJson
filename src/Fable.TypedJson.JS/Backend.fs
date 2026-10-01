@@ -85,18 +85,18 @@ type private JSBackendImpl() =
         member _.ArrayLength(arr) = unbox<int> arr?length
         member _.ArrayAt(arr, i) = arr?(i)
 
-        member _.TryFoldArray(arr, folder, state) =
+        member _.TryMapArray(arr, mapping) =
             let length = unbox<int> arr?length
 
-            let rec loop index state =
+            let rec loop index acc =
                 if index = length then
-                    Ok state
+                    Ok(List.rev acc)
                 else
-                    match folder index state (arr?(index)) with
-                    | Ok next -> loop (index + 1) next
-                    | Error error -> Error error
+                    match mapping (arr?(index)) with
+                    | Ok value -> loop (index + 1) (value :: acc)
+                    | Error error -> Error(index, error)
 
-            loop 0 state
+            loop 0 []
 
         // F# `obj list` on Fable's JS target is a linked-list structure (not
         // a JS array), which `JSON.stringify` would render as a record-like

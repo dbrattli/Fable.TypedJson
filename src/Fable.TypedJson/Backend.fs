@@ -90,14 +90,14 @@ type IJsonBackend =
     /// Element at `index` in a JSON array (0-based).
     abstract member ArrayAt: array: obj * index: int -> obj
 
-    /// Fold native array elements in order, with a zero-based index.
-    /// Returns the initial state for an empty array and stops immediately on
-    /// the first Error. Behaviour is undefined unless `IsArray array`.
+    /// Map native array elements in order. Returns an empty list for an empty
+    /// array and stops immediately on the first Error, returning its zero-based
+    /// index together with the callback error. Behaviour is undefined unless
+    /// `IsArray array`.
     /// Callback exceptions propagate to the caller.
     ///
     /// decision: delegates sequential traversal to the backend so linked lists need no repeated indexed lookup
-    abstract member TryFoldArray:
-        array: obj * folder: (int -> 'State -> obj -> Result<'State, 'Error>) * state: 'State -> Result<'State, 'Error>
+    abstract member TryMapArray: array: obj * mapping: (obj -> Result<'Value, 'Error>) -> Result<'Value list, int * 'Error>
 
     /// Build a JSON array from F# list of values. Each backend produces its
     /// native sequence form so the subsequent `Stringify` emits a JSON array

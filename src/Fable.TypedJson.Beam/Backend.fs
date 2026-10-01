@@ -101,17 +101,17 @@ type private BeamBackendImpl() =
         member _.ArrayLength(arr) = erlListLength arr
         member _.ArrayAt(arr, i) = erlListAt arr i
 
-        member _.TryFoldArray(arr, folder, state) =
+        member _.TryMapArray(arr, mapping) =
             // decision: walks native list tails once so sequence decoding is linear and needs no mutable process-dictionary cells
-            let rec loop index state remaining =
+            let rec loop index acc remaining =
                 match remaining with
-                | [] -> Ok state
+                | [] -> Ok(List.rev acc)
                 | item :: tail ->
-                    match folder index state item with
-                    | Ok next -> loop (index + 1) next tail
-                    | Error error -> Error error
+                    match mapping item with
+                    | Ok value -> loop (index + 1) (value :: acc) tail
+                    | Error error -> Error(index, error)
 
-            loop 0 state (erlListItems arr)
+            loop 0 [] (erlListItems arr)
 
         member _.BuildArray(items) = erlListFromFSharpList items
 
