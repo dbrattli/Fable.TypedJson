@@ -111,7 +111,7 @@ locally:
 
 ```sh
 python3 benchmarks/cli/select-codspeed.py --target beam --suite core --output build/codspeed/selected.yml
-codspeed run -m walltime --config build/codspeed/selected.yml
+codspeed run -m walltime --config build/codspeed/selected.yml --working-directory "$PWD"
 ```
 
 Plain `codspeed run -m walltime` still measures all 56 configured workloads.
