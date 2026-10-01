@@ -20,7 +20,9 @@ Unknown workloads, invalid iteration counts, or incorrect results fail the comma
 
 After installing the [CodSpeed CLI](https://codspeed.io/docs/benchmarks/cli-commands),
 authenticate with `codspeed auth login`, then run `codspeed run -m walltime` to
-measure and upload the configured workloads. For a focused measurement, use:
+measure and upload the configured workloads. On Linux, CodSpeed's kernel setup
+requires sudo credentials; run `sudo -v` in the same terminal first if necessary.
+For a focused measurement, use:
 
 ```sh
 codspeed exec -m walltime --name local/dotnet/decode-record/1000000-ops -- \
