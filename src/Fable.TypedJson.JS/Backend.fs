@@ -85,6 +85,8 @@ type private JSBackendImpl() =
         member _.ArrayLength(arr) = unbox<int> arr?length
         member _.ArrayAt(arr, i) = arr?(i)
 
+        member _.ArrayMapper = None
+
         // F# `obj list` on Fable's JS target is a linked-list structure (not
         // a JS array), which `JSON.stringify` would render as a record-like
         // object instead of a JSON array. Walk to a fresh JS array.

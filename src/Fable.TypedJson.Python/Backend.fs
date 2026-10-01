@@ -100,6 +100,8 @@ type private PythonBackendImpl() =
         member _.ArrayLength(arr) = builtins.len arr
         // ArrayAt is symmetric to Get — return the raw native value.
         member _.ArrayAt(arr, i) = arr?(i)
+
+        member _.ArrayMapper = None
         // F# `obj list` is FSharpList on Python (cons cells with __slots__).
         // `json.dumps` would render that as a record-like dict, not a JSON
         // array. Convert to a native Python list via `list(xs)`.

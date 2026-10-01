@@ -11,6 +11,13 @@ decision: carries native JSON values as `obj` — each target has an incompatibl
 
 module Fable.TypedJson.Backend
 
+/// Optional native array traversal for backends where indexed access is costly.
+type IJsonArrayMapper =
+    /// Map elements in order; empty input returns an empty list. Stop at the
+    /// first callback Error and return its zero-based index with the error.
+    /// Callback exceptions propagate. The caller must validate IsArray first.
+    abstract member TryMapArray: array: obj * mapping: (obj -> Result<'Value, 'Error>) -> Result<'Value list, int * 'Error>
+
 /// A JSON map abstraction over the backend's native representation:
 ///   - JS: a plain object `{ ... }`
 ///   - Python: a `dict`
@@ -89,6 +96,12 @@ type IJsonBackend =
     abstract member ArrayLength: array: obj -> int
     /// Element at `index` in a JSON array (0-based).
     abstract member ArrayAt: array: obj * index: int -> obj
+
+    /// Some mapper opts into native traversal; None uses ArrayLength/ArrayAt.
+    /// Selected once when a codec plan is built.
+    /// decision: advertises capabilities explicitly because interface type tests cannot distinguish BEAM map-backed implementations
+    abstract member ArrayMapper: IJsonArrayMapper option
+
     /// Build a JSON array from F# list of values. Each backend produces its
     /// native sequence form so the subsequent `Stringify` emits a JSON array
     /// rather than an internal F# list representation.

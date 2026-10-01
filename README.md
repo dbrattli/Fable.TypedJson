@@ -354,6 +354,12 @@ Two design axes, each independent:
 
 Adding a target means implementing `IJsonBackend` in a new `Fable.TypedJson.<Target>` project plus a `<Target>.Json` convenience module; the core does not change.
 
+Custom backends must add `ArrayMapper`. Return `None` to retain indexed
+traversal, or `Some IJsonArrayMapper` to map native elements in order and stop
+at the first callback error, returning its zero-based index. Empty input
+returns an empty list and callback exceptions propagate. BEAM uses this
+capability to walk list tails once; validation stays in the shared codec plan.
+
 ## Contributing
 
 ### Prerequisites

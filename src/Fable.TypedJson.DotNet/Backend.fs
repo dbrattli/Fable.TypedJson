@@ -261,6 +261,8 @@ type private DotNetBackendImpl() =
             | :? System.Array as a -> a.GetValue(i)
             | _ -> failwithf "expected array, got %A" arr
 
+        member _.ArrayMapper = None
+
         member _.BuildArray(items) =
             let arr = items |> List.map wrap |> List.toArray
             box (JArray(box arr))
