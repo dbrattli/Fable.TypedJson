@@ -95,14 +95,20 @@ CI defaults to 40 workloads (ten per runtime). `strict-int`,
 `strict-int64-small`, `decode-wide-record`, and `reject-nested-sequence` are
 reserved for explicit `full` runs: correctness remains covered by the shared
 tests, while the core suite retains wide Int64, scalar rejection, and both
-sequence output builders. Both suites use three measurement rounds.
+sequence output builders. All suites use three measurement rounds.
+
+For traversal changes, `sequences` measures just the two array sizes, list
+output, and recursive tree: sixteen workloads across all runtimes, or four
+for one runtime. Workload names, counts, and measurement settings match the
+core suite, so its baseline can be reused.
 
 Manual dispatch accepts `target` (`all`, `dotnet`, `js`, `python`, `beam`) and
-`suite` (`core`, `full`). Focused runs build, install, and measure only that
+`suite` (`core`, `sequences`, `full`). Focused runs build, install, and measure only that
 runtime:
 
 ```sh
 gh workflow run codspeed.yml --ref <branch> -f target=beam -f suite=core
+gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=sequences
 ```
 
 [select-codspeed.py](select-codspeed.py) filters the canonical configuration;
