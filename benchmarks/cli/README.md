@@ -19,8 +19,16 @@ The smoke command checks every workload on every runtime with three operations.
 Unknown workloads, invalid iteration counts, or incorrect results fail the command.
 
 After installing the [CodSpeed CLI](https://codspeed.io/docs/benchmarks/cli-commands),
-run `codspeed run -m walltime` to measure and upload the configured workloads.
-For a local check without uploading, use `codspeed run -m walltime --skip-upload`.
+authenticate with `codspeed auth login`, then run `codspeed run -m walltime` to
+measure and upload the configured workloads. For a focused measurement, use:
+
+```sh
+codspeed exec -m walltime --name local/dotnet/decode-record/1000000-ops -- \
+    bash benchmarks/cli/run.sh dotnet decode-record 1000000
+```
+
+Compare local results on the same machine. CI uses a fixed ARM64 macro runner;
+its absolute timings are not directly comparable with a local machine.
 
 ## What the numbers mean
 
