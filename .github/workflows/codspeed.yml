@@ -165,7 +165,10 @@ jobs:
           name: benchmark-runners
 
       - name: Unpack benchmark runners
-        run: tar -xzf benchmark-runners.tar.gz
+        run: |
+          tar -xzf benchmark-runners.tar.gz
+          # decision: keeps the selected config at the repo root because exec commands resolve relative to the config
+          cp build/codspeed/selected.yml .codspeed-selected.yml
 
       - name: Check benchmark results
         run: |
@@ -179,5 +182,4 @@ jobs:
         uses: CodSpeedHQ/action@v5
         with:
           mode: walltime
-          config: build/codspeed/selected.yml
-          working-directory: ${{ github.workspace }}
+          config: .codspeed-selected.yml

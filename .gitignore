@@ -35,4 +35,6 @@ nupkgs/
 BenchmarkDotNet.Artifacts/
 # V8 symbol logs generated when CodSpeed runs Node.js benchmarks.
 isolate-*-v8.log
+# Runtime selection generated from the canonical CodSpeed configuration.
+/.codspeed-selected.yml
 *.binlog
