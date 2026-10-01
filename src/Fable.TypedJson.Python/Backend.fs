@@ -101,18 +101,7 @@ type private PythonBackendImpl() =
         // ArrayAt is symmetric to Get — return the raw native value.
         member _.ArrayAt(arr, i) = arr?(i)
 
-        member _.TryMapArray(arr, mapping) =
-            let length = builtins.len arr
-
-            let rec loop index acc =
-                if index = length then
-                    Ok(List.rev acc)
-                else
-                    match mapping (arr?(index)) with
-                    | Ok value -> loop (index + 1) (value :: acc)
-                    | Error error -> Error(index, error)
-
-            loop 0 []
+        member _.ArrayMapper = None
         // F# `obj list` is FSharpList on Python (cons cells with __slots__).
         // `json.dumps` would render that as a record-like dict, not a JSON
         // array. Convert to a native Python list via `list(xs)`.

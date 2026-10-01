@@ -261,24 +261,7 @@ type private DotNetBackendImpl() =
             | :? System.Array as a -> a.GetValue(i)
             | _ -> failwithf "expected array, got %A" arr
 
-        member _.TryMapArray(arr, mapping) =
-            let map length itemAt =
-                let rec loop index acc =
-                    if index = length then
-                        Ok(List.rev acc)
-                    else
-                        match mapping (itemAt index) with
-                        | Ok value -> loop (index + 1) (value :: acc)
-                        | Error error -> Error(index, error)
-
-                loop 0 []
-
-            match arr with
-            | :? JsonValue as JArray inner ->
-                let items = unbox<JsonValue[]> inner
-                map items.Length (fun i -> box items.[i])
-            | :? System.Array as items -> map items.Length (fun i -> items.GetValue(i))
-            | _ -> failwithf "expected array, got %A" arr
+        member _.ArrayMapper = None
 
         member _.BuildArray(items) =
             let arr = items |> List.map wrap |> List.toArray

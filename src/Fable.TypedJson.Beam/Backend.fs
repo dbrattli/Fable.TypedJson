@@ -62,7 +62,23 @@ let private erlListFromFSharpList (xs: obj list) : obj = nativeOnly
 [<Emit("null")>]
 let private erlNull: obj = nativeOnly
 
+type private BeamArrayMapper() =
+    interface IJsonArrayMapper with
+        member _.TryMapArray(arr, mapping) =
+            // decision: walks native list tails once so sequence decoding is linear and needs no mutable process-dictionary cells
+            let rec loop index acc remaining =
+                match remaining with
+                | [] -> Ok(List.rev acc)
+                | item :: tail ->
+                    match mapping item with
+                    | Ok value -> loop (index + 1) (value :: acc) tail
+                    | Error error -> Error(index, error)
+
+            loop 0 [] (erlListItems arr)
+
 type private BeamBackendImpl() =
+    let arrayMapper = Some(BeamArrayMapper() :> IJsonArrayMapper)
+
     interface IJsonBackend with
         member _.NewMap() = box (BeamMaps.empty ())
 
@@ -101,17 +117,7 @@ type private BeamBackendImpl() =
         member _.ArrayLength(arr) = erlListLength arr
         member _.ArrayAt(arr, i) = erlListAt arr i
 
-        member _.TryMapArray(arr, mapping) =
-            // decision: walks native list tails once so sequence decoding is linear and needs no mutable process-dictionary cells
-            let rec loop index acc remaining =
-                match remaining with
-                | [] -> Ok(List.rev acc)
-                | item :: tail ->
-                    match mapping item with
-                    | Ok value -> loop (index + 1) (value :: acc) tail
-                    | Error error -> Error(index, error)
-
-            loop 0 [] (erlListItems arr)
+        member _.ArrayMapper = arrayMapper
 
         member _.BuildArray(items) = erlListFromFSharpList items
 

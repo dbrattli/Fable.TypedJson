@@ -602,8 +602,8 @@ and private planDecimal (b: IJsonBackend) : Plan = {
 CLR generics and arrays are invariant: an `obj list` cannot be assigned to an
 `int list` field, nor an `obj[]` to an `int[]` one.
 
-Iteration goes through `TryMapArray`, because the native sequence shape
-differs per backend. BEAM can walk list tails while other backends use indexes.
+Iteration selects an optional native mapper once during planning. BEAM walks
+list tails; indexed backends retain ArrayLength / ArrayAt traversal.
 
 decision: stops at the first invalid sequence element — avoids decoding an unused tail after the result is already an error
 tradeoff: reports one invalid element per sequence decode in exchange for bounded failure work
@@ -625,14 +625,36 @@ and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> 
                 |> List.map element.Encode
                 |> b.BuildArray
         Decode =
-            fun v ->
-                if not (b.IsArray v) then
-                    leafError expected
-                else
-                    // decision: passes the existing decoder directly so success needs no extra callback or per-element Result wrapper
-                    match b.TryMapArray(v, element.Decode) with
-                    | Ok items -> Ok(build items)
-                    | Error(index, errors) -> Error(under (sprintf "[%d]" index) errors)
+            // decision: selects native traversal at plan construction so indexed backends keep their measured hot loop
+            match b.ArrayMapper with
+            | Some mapper ->
+                fun v ->
+                    if not (b.IsArray v) then
+                        leafError expected
+                    else
+                        match mapper.TryMapArray(v, element.Decode) with
+                        | Ok items -> Ok(build items)
+                        | Error(index, errors) -> Error(under (sprintf "[%d]" index) errors)
+            | None ->
+                fun v ->
+                    if not (b.IsArray v) then
+                        leafError expected
+                    else
+                        let len = b.ArrayLength v
+                        let mutable i = 0
+                        let mutable failure: FieldError list option = None
+                        let mutable acc: obj list = []
+
+                        while i < len && failure.IsNone do
+                            match element.Decode(b.ArrayAt(v, i)) with
+                            | Ok x -> acc <- x :: acc
+                            | Error errs -> failure <- Some(under (sprintf "[%d]" i) errs)
+
+                            i <- i + 1
+
+                        match failure with
+                        | Some errs -> Error errs
+                        | None -> Ok(build (List.rev acc))
     }
 
 // --- Records ----------------------------------------------------------------
