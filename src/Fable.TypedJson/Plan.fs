@@ -3,14 +3,14 @@
 
 The library is a staged compiler. Stage 1 walks `typeof<'T>` at
 codec-construction time and emits a tree of `Plan` nodes; stage 2 runs the
-closures those nodes hold. No `System.Type`, no `FullName` comparison and no
-`FSharpType` call survives into stage 2, **at any depth**.
+closures those nodes hold. Non-recursive paths perform no type walk during
+decode or encode. Recursive paths expand deferred plans as described below.
 
 The same walk emits decode, encode, and JSON Schema data. Keeping all three
 faces on one node prevents wire-shape drift while keeping reflection out of
-per-value work at every depth.
+ordinary per-value work.
 
-decision: resolves reflection once per codec — repeated decode and encode calls stay on precomputed closures
+decision: precomputes non-recursive reflection per codec — repeated decode and encode calls stay on closures
 decision: emits a tree of closures rather than an interpreted plan DU — avoids a tag dispatch before each node call
 invariant: a node's `Decode` is total for its declared type — unsupported shapes are rejected at construction
 
@@ -27,8 +27,10 @@ built plan tree would not terminate. `Building` carries the root-to-node path
 of record/union `FullName`s; re-entering a type already on it defers the
 sub-walk to call time, where the document supplies the finite base case.
 
-decision: defers recursive sub-walks instead of tying mutable-ref knots — captured-ref lowering is unverified on BEAM
-tradeoff: re-walks a recursive subtree per nested value to keep recursive planning stateless and portable
+decision: defers recursive sub-walks instead of tying mutable-ref knots — construction terminates without captured-ref lowering
+decision: memoizes deferred plans per codec on .NET, JS, and Python so siblings and repeated calls reuse each reached depth
+tradeoff: retains plans up to the deepest visited level in exchange for avoiding repeated recursive reflection
+tradeoff: re-walks recursive subtrees on BEAM because its Lazy implementation stores process-local references
 *)
 
 module internal Fable.TypedJson.Plan
@@ -1011,9 +1013,16 @@ and private planDeferred (ctx: BuildCtx) (t: System.Type) : Plan =
     // of nesting, exactly as it did before plans existed.
     let restart = { ctx with Building = [] }
 
+#if FABLE_COMPILER_BEAM
+    let resolve () = forTypeIn restart t
+#else
+    let resolved = lazy (forTypeIn restart t)
+    let resolve () = resolved.Value
+#endif
+
     {
-        Decode = fun v -> (forTypeIn restart t).Decode v
-        Encode = fun v -> (forTypeIn restart t).Encode v
+        Decode = fun v -> (resolve ()).Decode v
+        Encode = fun v -> (resolve ()).Encode v
         Schema =
             match ctx.RefMode with
             // A cycle is exactly what `$ref` is for: the ancestor currently
