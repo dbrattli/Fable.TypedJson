@@ -11,6 +11,7 @@
     <Description>BEAM (Erlang) backend shim for Fable.TypedJson. Wires `Fable.Beam.Maps` and `Fable.Beam.Jsx.Jsx` into the IJsonBackend abstraction.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Optimizations/Bindings.fs" />
     <Compile Include="Backend.fs" />
     <Compile Include="Json.fs" />
   </ItemGroup>
@@ -19,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="*.fsproj; **\*.fs; **\*.fsi" PackagePath="fable\" />
+    <!-- Native modules land in the package's OTP src directory when Fable copies its sources. -->
+    <Content Include="Optimizations/*.erl" PackagePath="fable/src/" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\LICENSE" Pack="true" Visible="false" PackagePath="\" />

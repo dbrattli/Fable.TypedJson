@@ -28,9 +28,7 @@ of record/union `FullName`s; re-entering a type already on it defers the
 sub-walk to call time, where the document supplies the finite base case.
 
 decision: defers recursive sub-walks instead of tying mutable-ref knots — construction terminates without captured-ref lowering
-decision: memoizes deferred plans per codec on .NET, JS, and Python so siblings and repeated calls reuse each reached depth
-tradeoff: retains plans up to the deepest visited level in exchange for avoiding repeated recursive reflection
-tradeoff: re-walks recursive subtrees on BEAM because its Lazy implementation stores process-local references
+decision: delegates traversal and deferred-plan reuse to Optimizations so the planner stays target-neutral
 *)
 
 module internal Fable.TypedJson.Plan
@@ -604,8 +602,8 @@ and private planDecimal (b: IJsonBackend) : Plan = {
 CLR generics and arrays are invariant: an `obj list` cannot be assigned to an
 `int list` field, nor an `obj[]` to an `int[]` one.
 
-Iteration selects an optional native mapper once during planning. BEAM walks
-list tails; indexed backends retain ArrayLength / ArrayAt traversal.
+Optimizations selects traversal once during planning; the plan supplies the
+element decoder, output constructor, and error paths.
 
 decision: stops at the first invalid sequence element — avoids decoding an unused tail after the result is already an error
 tradeoff: reports one invalid element per sequence decode in exchange for bounded failure work
@@ -618,6 +616,10 @@ and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> 
     let build = builder elementType
     let expected = sprintf "expected JSON array for %s[]" elementType.Name
 
+    let decode =
+        Optimizations.Sequences.createDecoder b element.Decode build (fun () -> leafError expected) (fun index errors ->
+            under (sprintf "[%d]" index) errors)
+
     {
         Schema = SVDict(Map.ofList [ "type", SVStr "array"; "items", element.Schema ])
         Definitions = element.Definitions
@@ -626,37 +628,7 @@ and private planSeq (ctx: BuildCtx) (elementType: System.Type) (extract: obj -> 
                 extract v
                 |> List.map element.Encode
                 |> b.BuildArray
-        Decode =
-            // decision: selects native traversal at plan construction so indexed backends keep their measured hot loop
-            match b.ArrayMapper with
-            | Some mapper ->
-                fun v ->
-                    if not (b.IsArray v) then
-                        leafError expected
-                    else
-                        match mapper.TryMapArray(v, element.Decode) with
-                        | Ok items -> Ok(build items)
-                        | Error(index, errors) -> Error(under (sprintf "[%d]" index) errors)
-            | None ->
-                fun v ->
-                    if not (b.IsArray v) then
-                        leafError expected
-                    else
-                        let len = b.ArrayLength v
-                        let mutable i = 0
-                        let mutable failure: FieldError list option = None
-                        let mutable acc: obj list = []
-
-                        while i < len && failure.IsNone do
-                            match element.Decode(b.ArrayAt(v, i)) with
-                            | Ok x -> acc <- x :: acc
-                            | Error errs -> failure <- Some(under (sprintf "[%d]" i) errs)
-
-                            i <- i + 1
-
-                        match failure with
-                        | Some errs -> Error errs
-                        | None -> Ok(build (List.rev acc))
+        Decode = decode
     }
 
 // --- Records ----------------------------------------------------------------
@@ -1013,12 +985,7 @@ and private planDeferred (ctx: BuildCtx) (t: System.Type) : Plan =
     // of nesting, exactly as it did before plans existed.
     let restart = { ctx with Building = [] }
 
-#if FABLE_COMPILER_BEAM
-    let resolve () = forTypeIn restart t
-#else
-    let resolved = lazy (forTypeIn restart t)
-    let resolve () = resolved.Value
-#endif
+    let resolve = Optimizations.Deferred.createResolver (fun () -> forTypeIn restart t)
 
     {
         Decode = fun v -> (resolve ()).Decode v

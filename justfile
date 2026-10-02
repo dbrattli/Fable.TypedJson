@@ -23,6 +23,7 @@ build: clean build-beam build-python build-js
 build-beam:
     {{fable}} src/Fable.TypedJson --exclude Fable.Core --lang beam --outDir apps/fable_typed_json --noCache
     {{fable}} src/Fable.TypedJson.Beam --exclude Fable.Core --lang beam --outDir apps/fable_typed_json_beam --noCache
+    cp src/Fable.TypedJson.Beam/Optimizations/*.erl apps/fable_typed_json_beam/src/
     rebar3 compile
 
 # Transpile core + Python shim to Python (no further compile step needed)
@@ -163,6 +164,7 @@ build-bench-cli-python:
 build-bench-cli-beam:
     dotnet build benchmarks/cli/Fable.TypedJson.Benchmark.Beam.fsproj -c Release
     {{fable}} benchmarks/cli/Fable.TypedJson.Benchmark.Beam.fsproj --exclude Fable.Core --lang beam --outDir build/codspeed/beam --noCache
+    cp src/Fable.TypedJson.Beam/Optimizations/*.erl build/codspeed/beam/src/
     cp benchmarks/cli/rebar.config build/codspeed/beam/rebar.config
     cd build/codspeed/beam && rebar3 compile
 
@@ -198,6 +200,7 @@ test-beam: build-test-beam
 build-test-beam:
     dotnet build test/Fable.TypedJson.Test.Beam.fsproj
     {{fable}} test/Fable.TypedJson.Test.Beam.fsproj --exclude Fable.Core --lang beam --outDir {{build_test_path}}
+    cp src/Fable.TypedJson.Beam/Optimizations/*.erl {{build_test_path}}/src/
     cp test/rebar.config {{build_test_path}}/rebar.config
     cd {{build_test_path}} && rebar3 compile
 

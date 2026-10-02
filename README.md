@@ -354,6 +354,24 @@ Two design axes, each independent:
 
 Adding a target means implementing `IJsonBackend` in a new `Fable.TypedJson.<Target>` project plus a `<Target>.Json` convenience module; the core does not change.
 
+The shared F# code describes the codec workflow. Specialized traversal,
+deferred-plan reuse, runtime representation helpers, and numeric-parser
+compatibility live in `src/Fable.TypedJson/Optimizations/`. Target-specific
+implementations and native bindings belong in the adapter's `Optimizations/`
+folder and are written in Erlang, JavaScript, or Python, with thin F# bindings.
+BEAM's sequence mapper lives in `Optimizations/typedjson_beam_sequences.erl`;
+`Bindings.fs` exposes it through `IJsonArrayMapper`. Compiler conditionals
+stay inside these helpers, and traversal capabilities are selected when the
+codec is built. Validation rules, error paths, and schema generation remain
+shared. BEAM, JavaScript, and Python are the primary performance targets;
+.NET remains supported for execution and validation.
+
+Local BEAM recipes copy the native modules into the generated application's
+`src/` directory before Erlang compilation. The BEAM NuGet package includes
+them under `fable/src/`, so Fable copies them into the dependency's OTP
+application and ordinary `rebar3 compile` builds them without a consumer-side
+copy step.
+
 Custom backends must implement `TryGet(map, key)`: return `None` for a missing
 key and `Some value` for a present key, including JSON null. Existing backends
 can implement it with `ContainsKey` followed by `Get`; native lookup APIs avoid

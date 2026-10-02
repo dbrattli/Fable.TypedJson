@@ -4,6 +4,10 @@
 
 `src/Fable.TypedJson/` contains the backend-neutral F# core. Target adapters live in sibling projects: `Fable.TypedJson.Beam`, `.Python`, `.JS`, and `.DotNet`. Keep backend-specific JSON operations behind `IJsonBackend`; avoid introducing target dependencies into the core.
 
+Keep the shared codec workflow readable. Put specialized traversal, caching, representation helpers, native bindings, and compiler workarounds in the owning project's `Optimizations/` folder. Confine `#if FABLE_COMPILER*` directives to those helpers; select runtime capabilities at codec construction. BEAM, JavaScript, and Python are the primary performance targets; .NET remains a supported execution and validation target.
+
+Implement target-specific optimization algorithms in the target's native language (Erlang, JavaScript, or Python). F# files in an adapter's `Optimizations/` folder should contain only bindings and capability wiring. Include native files in both local builds and the Fable package; packaged consumers must not need this repository's build recipes.
+
 Tests are shared across all four runtimes in `test/`. Each `Test*.fs` module is compiled through target-specific `.fsproj` files and registered in `test/Main.fs`. .NET benchmarks live in `benchmarks/dotnet/`. Generated output goes to `apps/`, `build/`, or `_build/` and should not be edited.
 
 ## Build, Test, and Development Commands

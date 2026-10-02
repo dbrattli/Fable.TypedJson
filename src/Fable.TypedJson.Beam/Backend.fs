@@ -47,9 +47,6 @@ let private erlListLength (l: obj) : int = nativeOnly
 [<Emit("lists:nth($1 + 1, fable_utils:to_list($0))")>]
 let private erlListAt (l: obj) (i: int) : obj = nativeOnly
 
-[<Emit("fable_utils:to_list($0)")>]
-let private erlListItems (value: obj) : obj list = nativeOnly
-
 // F# `obj list` IS an Erlang list at runtime on Fable BEAM, so the box is
 // effectively the identity here. Kept explicit for documentation and parity
 // with the Python backend (where the conversion is non-trivial).
@@ -62,22 +59,8 @@ let private erlListFromFSharpList (xs: obj list) : obj = nativeOnly
 [<Emit("null")>]
 let private erlNull: obj = nativeOnly
 
-type private BeamArrayMapper() =
-    interface IJsonArrayMapper with
-        member _.TryMapArray(arr, mapping) =
-            // decision: walks native list tails once so sequence decoding is linear and needs no mutable process-dictionary cells
-            let rec loop index acc remaining =
-                match remaining with
-                | [] -> Ok(List.rev acc)
-                | item :: tail ->
-                    match mapping item with
-                    | Ok value -> loop (index + 1) (value :: acc) tail
-                    | Error error -> Error(index, error)
-
-            loop 0 [] (erlListItems arr)
-
 type private BeamBackendImpl() =
-    let arrayMapper = Some(BeamArrayMapper() :> IJsonArrayMapper)
+    let arrayMapper = Optimizations.Bindings.createMapper ()
 
     interface IJsonBackend with
         member _.NewMap() = box (BeamMaps.empty ())
