@@ -250,6 +250,10 @@ let private run name iterations warmup =
     require iterations checksum |> ignore
     printfn "%s: %d operations, checksum %d" name iterations checksum
 
+#if CODSPEED_THROUGHPUT
+// decision: shares checked fixtures with the JS throughput harness so only the measurement boundary changes
+let prepareScenario name = createScenario name
+#else
 [<EntryPoint>]
 let main (args: string array) =
     match args with
@@ -274,3 +278,4 @@ let main (args: string array) =
     | _ -> failwith "Usage: benchmark <scenario> <iterations> [warmup] | --smoke"
 
     0
+#endif

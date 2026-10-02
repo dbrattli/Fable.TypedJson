@@ -22,10 +22,10 @@ on:
         default: core
         options: [core, sequences, repeatability, full]
       profile:
-        description: Quick screening or longer confirmation batches with seven rounds
+        description: Quick, confirm, or warmed JS throughput (target js, suite repeatability)
         type: choice
         default: quick
-        options: [quick, confirm]
+        options: [quick, confirm, throughput]
 
 env:
   BENCH_TARGET: ${{ inputs.target || 'all' }}
@@ -92,21 +92,25 @@ jobs:
             uv sync --frozen --python 3.12
           fi
 
+      - name: Select measurement workloads
+        # decision: validates selection before building and keeps the chosen config in the runner artifact
+        run: python3 benchmarks/cli/select-codspeed.py --target "$BENCH_TARGET" --suite "$BENCH_SUITE" --profile "$BENCH_PROFILE" --output build/codspeed/selected.yml
+
       - name: Build benchmark runners
         run: |
-          if [ "$BENCH_TARGET" = all ]; then
+          if [ "$BENCH_PROFILE" = throughput ]; then
+            just build-bench-throughput-js
+          elif [ "$BENCH_TARGET" = all ]; then
             just build-bench-cli
           else
             just "build-bench-cli-$BENCH_TARGET"
           fi
 
-      - name: Select measurement workloads
-        # decision: defaults to representative coverage and builds only the requested runtime for focused optimization
-        run: python3 benchmarks/cli/select-codspeed.py --target "$BENCH_TARGET" --suite "$BENCH_SUITE" --profile "$BENCH_PROFILE" --output build/codspeed/selected.yml
-
       - name: Check benchmark results
         run: |
-          if [ "$BENCH_TARGET" = all ]; then
+          if [ "$BENCH_PROFILE" = throughput ]; then
+            node build/codspeed/js-throughput/bench.mjs --smoke
+          elif [ "$BENCH_TARGET" = all ]; then
             just bench-cli-smoke
           else
             bash benchmarks/cli/run.sh "$BENCH_TARGET" --smoke
@@ -178,6 +182,10 @@ jobs:
 
       - name: Check benchmark results
         run: |
+          if [ "$BENCH_PROFILE" = throughput ]; then
+            node build/codspeed/js-throughput/bench.mjs --smoke
+            exit 0
+          fi
           targets=(dotnet js python beam)
           if [ "$BENCH_TARGET" != all ]; then targets=("$BENCH_TARGET"); fi
           for target in "${targets[@]}"; do

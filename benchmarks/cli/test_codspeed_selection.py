@@ -74,6 +74,23 @@ class SelectionTests(unittest.TestCase):
         self.assertIn("js strict-int64-wide 2400000 100000", config)
         self.assertIn("js decode-array-128 300000 10000", config)
 
+    def test_throughput_uses_instrumented_entrypoint(self):
+        config = self.select("--target", "js", "--suite", "repeatability", "--profile", "throughput")
+        self.assertEqual(config, "benchmarks:\n  - entrypoint: node build/codspeed/js-throughput/bench.mjs\n")
+
+    def test_throughput_rejects_unsupported_selections(self):
+        for target, suite in [("all", "repeatability"), ("beam", "repeatability"), ("js", "core")]:
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "selected.yml"
+                result = subprocess.run(
+                    [sys.executable, str(SELECTOR), "--profile", "throughput", "--target", target,
+                     "--suite", suite, "--output", str(output)],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("throughput requires", result.stderr)
+                self.assertFalse(output.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

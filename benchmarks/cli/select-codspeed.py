@@ -7,9 +7,18 @@ import shlex
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--target", choices=["all", "dotnet", "js", "python", "beam"], default="all")
 parser.add_argument("--suite", choices=["core", "sequences", "repeatability", "full"], default="core")
-parser.add_argument("--profile", choices=["quick", "confirm"], default="quick")
+parser.add_argument("--profile", choices=["quick", "confirm", "throughput"], default="quick")
 parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
+
+if args.profile == "throughput":
+    if args.target != "js" or args.suite != "repeatability":
+        parser.error("throughput requires --target js --suite repeatability")
+    # decision: uses an instrumented entrypoint so process startup and warmup stay outside the JS measurement window
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text("benchmarks:\n  - entrypoint: node build/codspeed/js-throughput/bench.mjs\n")
+    print("Selected 3 repeatability workloads for js (throughput)")
+    raise SystemExit(0)
 
 # decision: retains duplicate scalar cases and additional structure probes for explicit full runs
 extra_scenarios = {"strict-int", "strict-int64-small", "decode-wide-record", "reject-nested-sequence"}
