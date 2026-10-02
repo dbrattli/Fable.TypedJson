@@ -4,7 +4,7 @@ import { Bench } from "tinybench";
 import { prepareScenario } from "./Main.js";
 
 const batchSize = 1000;
-const scenarios = ["decode-record", "strict-int64-wide", "decode-array-128"];
+const scenarios = ["decode-wide-record"];
 const args = process.argv.slice(2);
 const smoke = args.length === 1 && args[0] === "--smoke";
 if (args.length !== 0 && !smoke) {
@@ -39,7 +39,7 @@ if (smoke) {
     }
     // decision: measures repeated fixed batches in one warmed process; the plugin excludes setup and warmup
     const bench = withCodSpeed(new Bench({
-        name: "js-throughput-v1",
+        name: "js-wide-record-v1",
         time: 2000,
         iterations: 100,
         warmupTime: 1000,
