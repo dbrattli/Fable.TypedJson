@@ -95,20 +95,45 @@ CI defaults to 40 workloads (ten per runtime). `strict-int`,
 `strict-int64-small`, `decode-wide-record`, and `reject-nested-sequence` are
 reserved for explicit `full` runs: correctness remains covered by the shared
 tests, while the core suite retains wide Int64, scalar rejection, and both
-sequence output builders. All suites use three measurement rounds.
+sequence output builders. The default `quick` profile uses three measurement rounds.
 
 For traversal changes, `sequences` measures just the two array sizes, list
 output, and recursive tree: sixteen workloads across all runtimes, or four
 for one runtime. Workload names, counts, and measurement settings match the
 core suite, so its baseline can be reused.
 
+The `repeatability` suite selects record decoding, wide Int64 decoding, and
+128-element array decoding: twelve workloads across all runtimes, or three
+for one runtime. Run it twice on the same commit before attributing small
+changes to an optimization. With the `quick` profile its settings match the
+existing baseline.
+
+The opt-in `confirm` profile uses threefold batches and seven measurement
+rounds. JS uses 100,000 in-process warmup operations for record and scalar
+workloads, 10,000 for sequence traversal and nested rejection, and 50 for
+construction and recursive trees. Other targets retain their existing warmup
+counts. Longer batches amortize startup and setup; command-level warmups still
+launch fresh processes and cannot warm V8 for the measured process.
+Both profiles measure the entire process, including the specified warmup.
+
+Confirmation names include `confirm-v1`, the operation count, and the warmup
+count. They start a separate history: compare base and candidate using the
+same profile, suite, runtime, and runner. If these settings change, increment
+the profile version and establish another baseline. `confirm` is intended for
+focused investigations; confirming every workload on every target costs more
+runner time.
+
 Manual dispatch accepts `target` (`all`, `dotnet`, `js`, `python`, `beam`) and
-`suite` (`core`, `sequences`, `full`). Focused runs build, install, and measure only that
+`suite` (`core`, `sequences`, `repeatability`, `full`), and `profile` (`quick`,
+`confirm`, `throughput`). Focused runs build, install, and measure only that
 runtime:
 
 ```sh
 gh workflow run codspeed.yml --ref <branch> -f target=beam -f suite=core
 gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=sequences
+gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=repeatability
+gh workflow run codspeed.yml --ref <branch> -f target=js -f suite=repeatability -f profile=confirm
+gh workflow run codspeed.yml --ref <branch> -f target=js -f suite=repeatability -f profile=throughput
 ```
 
 [select-codspeed.py](select-codspeed.py) filters the canonical configuration;
@@ -119,6 +144,53 @@ locally:
 python3 benchmarks/cli/select-codspeed.py --target beam --suite core --output .codspeed-selected.yml
 codspeed run -m walltime --config .codspeed-selected.yml
 ```
+
+Add `--profile confirm` to generate the longer measurements locally. The CLI
+also accepts an explicit in-process warmup count, for example
+`bash benchmarks/cli/run.sh js decode-record 3 1` for a correctness smoke check.
+
+### Isolated JS throughput
+
+The JS-only `throughput` profile requires `target=js` and `suite=repeatability`.
+It compiles the same F# fixtures as an importable module, then uses the
+[CodSpeed tinybench integration](https://codspeed.io/docs/benchmarks/nodejs/tinybench)
+to measure the decode loop within one process. Codec construction, input
+preparation, process startup, and framework warmup are outside the measurement
+window. The process profiles remain useful for end-to-end behavior.
+
+Each measured callback performs 1,000 checked operations. Tinybench warms each
+task for at least one second and 100 batches, then samples for at least two
+seconds and 100 batches. The reported unit is time per 1,000-operation batch,
+not time for the entire sample window. The three workloads have a separate
+`js-throughput-v1` history and run sequentially in a fixed order. Plugin
+dependencies and Node compatibility are pinned in [the package](../js/package.json).
+Changes to these settings require a new history and fresh base measurements.
+
+```sh
+just build-bench-throughput-js
+node build/codspeed/js-throughput/bench.mjs --smoke
+codspeed run -m walltime -- node build/codspeed/js-throughput/bench.mjs
+```
+
+The smoke command checks results without recording timings. Uninstrumented
+measurement runs fail instead of silently falling back to raw tinybench.
+
+### Accepting a performance change
+
+1. Run the baseline twice on the same commit and settings. Compare these A/A
+   runs in CodSpeed to establish observed variability for each workload.
+2. Run the candidate with matching settings. Check the fastest-round metric
+   used by CodSpeed alongside the median, spread, and flamegraph.
+3. Treat a result within observed A/A variability, or one whose direction
+   fails to repeat, as inconclusive. A green check alone is not evidence of
+   equivalence; a red check alone does not identify a code-level cause.
+4. Confirm a proposed gain on the affected target, then screen the other
+   targets. Follow up on any regression flags before accepting the change.
+
+Three rounds provide a cheap screen; seven rounds do not guarantee precision.
+Increase sampling only for the workloads whose variability prevents a decision.
+Keep the library implementation and measurement settings fixed during repeats;
+do not keep rerunning until a desirable result appears.
 
 Plain `codspeed run -m walltime` still measures all 56 configured workloads.
 

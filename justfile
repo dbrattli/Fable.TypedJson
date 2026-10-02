@@ -70,12 +70,16 @@ check-test-registry:
     echo "test registry OK — $(echo "$declared" | wc -l | tr -d ' ') modules registered"
 
 # Type check via dotnet build
-check: check-test-registry
+check: check-test-registry check-bench-config
     dotnet build src/Fable.TypedJson
     dotnet build src/Fable.TypedJson.Beam
     dotnet build src/Fable.TypedJson.Python
     dotnet build src/Fable.TypedJson.JS
     dotnet build src/Fable.TypedJson.DotNet
+
+# Guard benchmark histories and generated confirmation commands without third-party Python dependencies.
+check-bench-config:
+    python3 -m unittest discover -s benchmarks/cli -p 'test_*.py'
 
 # Format source files
 format:
@@ -155,6 +159,13 @@ build-bench-cli-js:
     dotnet build benchmarks/cli/Fable.TypedJson.Benchmark.JS.fsproj -c Release
     {{fable}} benchmarks/cli/Fable.TypedJson.Benchmark.JS.fsproj --exclude Fable.Core --lang javascript --outDir build/codspeed/js --noCache
     echo '{"type":"module"}' > build/codspeed/js/package.json
+
+# Compile shared fixtures without the CLI entrypoint and package the warmed JS measurement harness.
+build-bench-throughput-js:
+    dotnet build benchmarks/cli/Fable.TypedJson.Benchmark.JS.fsproj -c Release
+    {{fable}} benchmarks/cli/Fable.TypedJson.Benchmark.JS.fsproj --exclude Fable.Core --define CODSPEED_THROUGHPUT --lang javascript --outDir build/codspeed/js-throughput --noCache
+    cp benchmarks/js/package.json benchmarks/js/package-lock.json benchmarks/js/bench.mjs build/codspeed/js-throughput/
+    npm ci --prefix build/codspeed/js-throughput --ignore-scripts --no-audit --no-fund
 
 build-bench-cli-python:
     dotnet build benchmarks/cli/Fable.TypedJson.Benchmark.Python.fsproj -c Release

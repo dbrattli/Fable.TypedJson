@@ -1,0 +1,11 @@
+{
+  "name": "typedjson-js-benchmarks",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "devDependencies": {
+    "@codspeed/core": "5.7.1",
+    "@codspeed/tinybench-plugin": "5.7.1",
+    "tinybench": "6.2.0"
+  }
+}

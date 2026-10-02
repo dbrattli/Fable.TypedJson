@@ -232,6 +232,9 @@ let private run name iterations warmup =
     if iterations <= 0 then
         failwith "Iteration count must be positive"
 
+    if warmup < 0 then
+        failwith "Warmup count must be non-negative"
+
     let operation = createScenario name
 
     // decision: warms the workload within each process because CodSpeed CLI warmups launch fresh processes
@@ -247,6 +250,10 @@ let private run name iterations warmup =
     require iterations checksum |> ignore
     printfn "%s: %d operations, checksum %d" name iterations checksum
 
+#if CODSPEED_THROUGHPUT
+// decision: shares checked fixtures with the JS throughput harness so only the measurement boundary changes
+let prepareScenario name = createScenario name
+#else
 [<EntryPoint>]
 let main (args: string array) =
     match args with
@@ -267,6 +274,8 @@ let main (args: string array) =
             | _ -> 10000
 
         run name (int iterations) warmup
-    | _ -> failwith "Usage: benchmark <scenario> <iterations> | --smoke"
+    | [| name; iterations; warmup |] -> run name (int iterations) (int warmup)
+    | _ -> failwith "Usage: benchmark <scenario> <iterations> [warmup] | --smoke"
 
     0
+#endif
