@@ -58,6 +58,9 @@ let private pyListOf (xs: obj) : obj = nativeOnly
 // `key in dict` — Python's `in` is a syntactic operator with no Fable wrapper.
 let private contains (map: obj) (key: string) : bool = emitPyExpr (key, map) "$0 in $1"
 
+// decision: uses a private identity sentinel because None and false are valid JSON field values
+let private missing: obj = emitPyExpr () "object()"
+
 type private PythonBackendImpl() =
     interface IJsonBackend with
         member _.NewMap() = pyEmptyDict ()
@@ -67,6 +70,14 @@ type private PythonBackendImpl() =
         // Get returns raw native values; the schema layer dispatches through
         // `backend.IsX` / `AsX`, so no representation conversion is needed.
         member _.Get(map, key) = map?(key)
+
+        member _.TryGet(map, key) =
+            let value: obj = emitPyExpr (map, key, missing) "$0.get($1, $2)"
+
+            if emitPyExpr (value, missing) "$0 is $1" then
+                None
+            else
+                Some value
 
         member _.Put(map, key, value) =
             map?(key) <- value

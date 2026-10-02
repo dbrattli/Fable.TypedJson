@@ -428,11 +428,7 @@ let describeValue (backend: IJsonBackend) (fv: obj) : string =
 /// One implementation backing both the internal record/union resolvers and
 /// the public adapters — declared ahead of the walker
 /// so the recursive group can reference it.
-let mapLookup (backend: IJsonBackend) (m: obj) (key: string) : obj option =
-    if backend.ContainsKey(m, key) then
-        Some(backend.Get(m, key))
-    else
-        None
+let mapLookup (backend: IJsonBackend) (m: obj) (key: string) : obj option = backend.TryGet(m, key)
 
 // ============================================================================
 // Adapters

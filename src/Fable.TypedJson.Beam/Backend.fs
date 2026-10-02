@@ -87,6 +87,9 @@ type private BeamBackendImpl() =
         member _.Get(map, key) =
             BeamMaps.get key (unbox<BeamMaps.BeamMap<string, obj>> map)
 
+        member _.TryGet(map, key) =
+            BeamMaps.tryFind key (unbox<BeamMaps.BeamMap<string, obj>> map)
+
         member _.Put(map, key, value) =
             box (BeamMaps.put key value (unbox<BeamMaps.BeamMap<string, obj>> map))
 

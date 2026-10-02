@@ -915,6 +915,58 @@ let private stringMapDispatchTests =
         ]
     )
 
+let private lookupTests =
+    testList (
+        "backend field lookup",
+        [
+            test (
+                "missing keys differ from null and falsy values",
+                fun _ ->
+                    let map = parseRaw """{"null":null,"bool":false,"int":0,"string":""}"""
+                    assertThat (backend.TryGet(map, "missing").IsNone) (isEqualTo true)
+
+                    let require key =
+                        match backend.TryGet(map, key) with
+                        | Some value -> value
+                        | None -> failwithf "missing present key '%s'" key
+
+                    assertThat (backend.IsNull(require "null")) (isEqualTo true)
+                    assertThat (backend.AsBool(require "bool")) (isEqualTo false)
+                    assertThat (backend.AsInt(require "int")) (isEqualTo 0)
+                    assertThat (backend.AsString(require "string")) (isEqualTo "")
+            )
+            test (
+                "nested maps and arrays retain their native shape",
+                fun _ ->
+                    let map = parseRaw """{"map":{"value":42},"array":["first"]}"""
+
+                    match mapLookup backend map "map", mapLookup backend map "array" with
+                    | Some nested, Some array ->
+                        assertThat (backend.IsMap nested) (isEqualTo true)
+                        assertThat (getInt backend nested "value") (isEqualTo 42)
+                        assertThat (backend.IsArray array) (isEqualTo true)
+                        assertThat (arrayAtString backend array 0) (isEqualTo "first")
+                    | _ -> failwith "missing nested values"
+            )
+            test (
+                "lookup supports constructed maps and unusual parsed keys",
+                fun _ ->
+                    let constructed = backend.Put(backend.NewMap(), "value", backend.Null)
+
+                    match backend.TryGet(constructed, "value") with
+                    | Some value -> assertThat (backend.IsNull value) (isEqualTo true)
+                    | None -> failwith "missing constructed value"
+
+                    let parsed = parseRaw """{"__proto__":"proto","constructor":"ctor","æ":"unicode"}"""
+
+                    for key, expected in [ "__proto__", "proto"; "constructor", "ctor"; "æ", "unicode" ] do
+                        match backend.TryGet(parsed, key) with
+                        | Some value -> assertThat (backend.AsString value) (isEqualTo expected)
+                        | None -> failwithf "missing parsed key '%s'" key
+            )
+        ]
+    )
+
 let tests =
     testList (
         "Schema",
@@ -927,5 +979,6 @@ let tests =
             multiWordKeyTests
             stringMapCaseRuleTests
             stringMapDispatchTests
+            lookupTests
         ]
     )

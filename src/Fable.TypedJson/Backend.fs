@@ -39,6 +39,11 @@ type IJsonBackend =
     /// Get the raw value at `key`. Behavior is undefined if the key is missing —
     /// callers should use `ContainsKey` first.
     abstract member Get: map: obj * key: string -> obj
+    /// Read a value if the key exists. A present JSON null returns Some Null;
+    /// only a missing key returns None. The caller must supply a JSON map.
+    ///
+    /// decision: combines presence and retrieval so backends can perform one native lookup
+    abstract member TryGet: map: obj * key: string -> obj option
     /// Set `key` to `value` and return the map to use for the NEXT call.
     ///
     /// Linear ownership: the map passed in is DEAD once this returns, and
