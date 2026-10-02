@@ -305,10 +305,102 @@ type Branch = { Tag: string; Leaf: Twig option }
 
 and Twig = { Kind: string; Parent: Branch option }
 
+type TreeValue = TreeValue of string
+
+type RegisteredTree = {
+    Value: TreeValue
+    Children: RegisteredTree list
+}
+
 let private recursiveTypeTests =
     testList (
         "Recursive types round-trip",
         [
+            test (
+                "one recursive codec handles changing values and deeper documents",
+                fun _ ->
+                    let codec = auto<Tree>()
+
+                    for original in
+                        [
+                            { Label = "first"; Children = [] }
+                            {
+                                Label = "second"
+                                Children = [
+                                    {
+                                        Label = "child"
+                                        Children = [ { Label = "grandchild"; Children = [] } ]
+                                    }
+                                ]
+                            }
+                            {
+                                Label = "third"
+                                Children = [ { Label = "other"; Children = [] } ]
+                            }
+                        ] do
+                        assertThat (codec.decode (parseRaw (codec.encode original))) (isEqualTo (Ok original))
+            )
+            test (
+                "recursive strict and coercing codecs remain isolated after reuse",
+                fun _ ->
+                    let coercing = auto<Tree>()
+                    let strict = autoStrict<Tree>()
+
+                    let valid =
+                        parseRaw """{"label":"root","children":[{"label":"child","children":[]}]}"""
+
+                    let numeric =
+                        parseRaw """{"label":"root","children":[{"label":42,"children":[]}]}"""
+
+                    strict.decode valid |> ignore
+
+                    for _ = 1 to 2 do
+                        match coercing.decode numeric with
+                        | Ok value -> assertThat value.Children.[0].Label (isEqualTo "42")
+                        | Error errors -> assertThat (formatErrors errors) (isEqualTo "Ok")
+
+                        match strict.decode numeric with
+                        | Error errors -> assertThat (errors |> List.map _.path) (isEqualTo [ "children[0].label" ])
+                        | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+            )
+            test (
+                "recursive aliases do not reuse another codec's plan",
+                fun _ ->
+                    let plain = auto<Tree>()
+                    let renamed = plain |> alias "Label" "node_name"
+
+                    let original = {
+                        Label = "root"
+                        Children = [ { Label = "child"; Children = [] } ]
+                    }
+
+                    for codec, key in [ plain, "label"; renamed, "node_name"; plain, "label"; renamed, "node_name" ] do
+                        let raw = parseRaw (codec.encode original)
+                        let child = backend.ArrayAt(backend.Get(raw, "children"), 0)
+                        assertThat (backend.ContainsKey(child, key)) isTrue
+                        assertThat (codec.decode raw) (isEqualTo (Ok original))
+            )
+            test (
+                "recursive registry plans remain local to their codec",
+                fun _ ->
+                    let makeCodec prefix =
+                        let valueCodec =
+                            Fable.TypedJson.Codec.string
+                            |> Fable.TypedJson.Codec.map (fun value -> TreeValue(prefix + value)) (fun (TreeValue value) -> value)
+
+                        autoWith<RegisteredTree>(emptyRegistry |> register valueCodec)
+
+                    let first = makeCodec "A:"
+                    let second = makeCodec "B:"
+
+                    let raw =
+                        parseRaw """{"value":"root","children":[{"value":"child","children":[]}]}"""
+
+                    for codec, expected in [ first, "A:child"; second, "B:child"; first, "A:child"; second, "B:child" ] do
+                        match codec.decode raw with
+                        | Ok value -> assertThat value.Children.[0].Value (isEqualTo (TreeValue expected))
+                        | Error errors -> assertThat (formatErrors errors) (isEqualTo "Ok")
+            )
             test (
                 "self-referential record decodes nested children",
                 fun _ ->
@@ -481,6 +573,61 @@ let private arrayFieldTests =
         ]
     )
 
+let private nativeTraversalTests =
+    match backend.ArrayMapper with
+    | None -> testList ("Indexed array traversal", [])
+    | Some mapper ->
+        testList (
+            "Native array traversal",
+            [
+                test (
+                    "empty array returns no values without visiting elements",
+                    fun _ ->
+                        let result =
+                            mapper.TryMapArray(parseRaw "[]", (fun _ -> failwith "unexpected element"))
+
+                        assertThat (result: Result<int list, int * string>) (isEqualTo (Ok []))
+                )
+                test (
+                    "maps every element and preserves its order",
+                    fun _ ->
+                        let result =
+                            mapper.TryMapArray(parseRaw "[4,5,6]", (fun item -> Ok(2 * backend.AsInt item)))
+
+                        assertThat (result: Result<int list, int * string>) (isEqualTo (Ok [ 8; 10; 12 ]))
+                )
+                test (
+                    "stops on the first error without visiting the tail",
+                    fun _ ->
+                        let result =
+                            mapper.TryMapArray(
+                                parseRaw "[4,5,6]",
+                                (fun item ->
+                                    let value = backend.AsInt item
+
+                                    if value = 6 then failwith "visited rejected tail"
+                                    elif value = 5 then Error value
+                                    else Ok value)
+                            )
+
+                        assertThat result (isEqualTo (Error(1, 5)))
+                )
+                test (
+                    "callback exceptions propagate",
+                    fun _ ->
+                        let mutable caught = false
+
+                        try
+                            mapper.TryMapArray(parseRaw "[1]", (fun _ -> failwith "traversal callback failed"))
+                            |> ignore
+                        with ex ->
+                            caught <- ex.Message.Contains "traversal callback failed"
+
+                        assertThat caught isTrue
+                )
+            ]
+        )
+
 let tests =
     testList (
         "Nested",
@@ -491,5 +638,6 @@ let tests =
             caseRulesRecursiveTests
             recursiveTypeTests
             arrayFieldTests
+            nativeTraversalTests
         ]
     )

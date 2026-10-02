@@ -6,7 +6,7 @@ array, number, string, boolean, and null for the map abstraction.
 
 decision: uses native JS objects, arrays, and primitives — `JSON.parse` output needs no representation conversion
 decision: mutates `Put` under linear ownership — avoiding a full object spread per key keeps object building O(n)
-decision: classifies whole-valued doubles with `Number.isInteger` — JavaScript has no distinct integer number type
+decision: classifies only Int32-valued doubles as integers — Fable's `AsInt` conversion truncates wider numbers
 decision: prefers Fable interop bindings over raw emits — target-language strings remain limited to missing APIs
 *)
 
@@ -26,6 +26,11 @@ let private jsPut (map: obj) (key: string) (value: obj) : obj = nativeOnly
 [<Emit("Number.isInteger($0)")>]
 let private isInteger (v: obj) : bool = nativeOnly
 
+let private isInt32Number (v: obj) : bool =
+    isInteger v
+    && unbox<float> v >= float System.Int32.MinValue
+    && unbox<float> v <= float System.Int32.MaxValue
+
 type private JSBackendImpl() =
     interface IJsonBackend with
         // `createEmpty<obj>` lowers to `{}`.
@@ -37,6 +42,9 @@ type private JSBackendImpl() =
         // `JsInterop.(?)` lowers to `map[key]`.
         member _.Get(map, key) = map?(key)
 
+        member _.TryGet(map, key) =
+            if jsIn key map then Some(map?(key)) else None
+
         member _.Put(map, key, value) = jsPut map key value
 
         member _.ParseRaw(json) = JS.JSON.parse json
@@ -47,10 +55,11 @@ type private JSBackendImpl() =
         member _.IsString(value) = jsTypeof value = "string"
 
         member _.IsInt(value) =
-            jsTypeof value = "number" && isInteger value
+            jsTypeof value = "number" && isInt32Number value
 
         member _.IsFloat(value) =
-            jsTypeof value = "number" && not (isInteger value)
+            jsTypeof value = "number"
+            && not (isInt32Number value)
 
         member _.IsBool(value) = jsTypeof value = "boolean"
 
@@ -78,6 +87,8 @@ type private JSBackendImpl() =
         // because `?` returns generic `'a` and `length` is `int`.
         member _.ArrayLength(arr) = unbox<int> arr?length
         member _.ArrayAt(arr, i) = arr?(i)
+
+        member _.ArrayMapper = None
 
         // F# `obj list` on Fable's JS target is a linked-list structure (not
         // a JS array), which `JSON.stringify` would render as a record-like

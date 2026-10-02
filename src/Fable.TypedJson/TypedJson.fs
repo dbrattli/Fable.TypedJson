@@ -12,6 +12,7 @@ decision: accepts a backend through the core API — target shims only pre-apply
 decision: CaseRules implemented at runtime since Fable.Core.CaseRules is compile-time only
 decision: one plan per (type, case rule, aliases), built at codec construction and captured — build a codec once and reuse it
 decision: keeps `decodeStringMap` on the codec — case rules and aliases apply to JSON and string maps alike
+decision: keeps strictness out of the public codec record — additive constructors preserve the record's binary shape
 invariant: `decode`, `encode` and the emitted JSON Schema all read the same plan, so they cannot disagree about a wire shape
 invariant: `validateMap` / `validateJson` / `dump` stay camelCase-only — a case rule is asked for, never inferred
 *)
@@ -97,6 +98,12 @@ let applyCaseRule (caseRule: CaseRules) (name: string) : string =
 /// Each `IJsonBackend` interprets it as its own concrete type.
 type JsonMap = obj
 
+/// Failure while decoding JSON text. Syntax/parser failures are distinct from
+/// typed validation failures so callers can report them appropriately.
+type JsonTextError =
+    | InvalidText of message: string
+    | InvalidValue of FieldError list
+
 type TypedJson<'T> = {
     /// Decode using the codec's configured `caseRules`. Use `decodeWith` to
     /// override the rule for a single call.
@@ -135,6 +142,24 @@ type TypedJson<'T> = {
     /// Rebuild this codec with a different alias map. Used by `alias`.
     withAliases: Map<string, string> -> TypedJson<'T>
 }
+
+(**
+Decode JSON text while translating parser exceptions into data. The decoder
+runs after the exception boundary: defects in custom codecs or model
+validators must remain visible to the application rather than looking like
+malformed input.
+
+invariant: only `parseRaw` executes inside `try/with`
+*)
+let decodeTextWith (parseRaw: string -> JsonMap) (codec: TypedJson<'T>) (text: string) : Result<'T, JsonTextError> =
+    let parsed =
+        try
+            Ok(parseRaw text)
+        with ex ->
+            Error(InvalidText ex.Message)
+
+    parsed
+    |> Result.bind (codec.decode >> Result.mapError InvalidValue)
 
 // ============================================================================
 // Encode Module
@@ -235,7 +260,7 @@ it, so the `unbox` inside costs nothing.
 
 invariant: the body of every public `inline` function is exactly one call to a non-inline function taking System.Type
 *)
-let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: System.Type) : TypedJson<'T> =
+let buildCodecWithMode<'T> (strictJson: bool) (backend: IJsonBackend) (registry: CodecRegistry) (typ: System.Type) : TypedJson<'T> =
 
     // Recursive constructor — building a new codec with different aliases or
     // a different default case rule is a single recursive call away. F#
@@ -253,7 +278,10 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
         // Resolve the whole type tree once. The plan walks to the leaves, so
         // nested records perform no additional reflection per decode.
         let defaultPlan =
-            Plan.forType backend registry defaultKeyTransform defaultTagTransform typ
+            if strictJson then
+                Plan.forTypeStrict backend registry defaultKeyTransform defaultTagTransform typ
+            else
+                Plan.forType backend registry defaultKeyTransform defaultTagTransform typ
 
         (**
         The string-map face of the same (type, rules, aliases) combo.
@@ -282,6 +310,8 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
             let plan =
                 if rules = caseRules then
                     defaultPlan
+                elif strictJson then
+                    Plan.forTypeStrict backend registry (resolveKey aliases rules) (applyCaseRule rules) typ
                 else
                     Plan.forType backend registry (resolveKey aliases rules) (applyCaseRule rules) typ
 
@@ -296,6 +326,8 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
             let plan =
                 if rules = caseRules then
                     defaultPlan
+                elif strictJson then
+                    Plan.forTypeStrict backend registry (resolveKey aliases rules) (applyCaseRule rules) typ
                 else
                     Plan.forType backend registry (resolveKey aliases rules) (applyCaseRule rules) typ
 
@@ -315,12 +347,24 @@ let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: Syste
 
     build Map.empty CaseRules.LowerFirst
 
+let buildCodec<'T> (backend: IJsonBackend) (registry: CodecRegistry) (typ: System.Type) : TypedJson<'T> =
+    buildCodecWithMode<'T> false backend registry typ
+
 let inline autoWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : TypedJson<'T> =
     buildCodec<'T> backend registry typeof<'T>
 
 /// Auto codec with the default empty codec registry. Use `autoWith` to pass a registry of custom codecs.
 let inline auto<'T> (backend: IJsonBackend) : TypedJson<'T> =
     autoWith<'T> backend Fable.TypedJson.Schema.emptyRegistry
+
+/// Strict JSON codec with an explicit custom-codec registry. Unlike
+/// `decodeStringMap`, JSON decoding rejects cross-type primitive coercion.
+let inline autoStrictWith<'T> (backend: IJsonBackend) (registry: CodecRegistry) : TypedJson<'T> =
+    buildCodecWithMode<'T> true backend registry typeof<'T>
+
+/// Strict JSON codec with the default empty codec registry.
+let inline autoStrict<'T> (backend: IJsonBackend) : TypedJson<'T> =
+    autoStrictWith<'T> backend Fable.TypedJson.Schema.emptyRegistry
 
 (**
 Dump a record to a backend-native JSON map (e.g. for inter-process messaging).

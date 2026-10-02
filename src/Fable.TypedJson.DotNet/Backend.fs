@@ -152,6 +152,18 @@ type private DotNetBackendImpl() =
 
         member _.Get(map, key) = box ((asDict map).[key])
 
+        member _.TryGet(map, key) =
+            match map with
+            | :? JsonValue as JMap inner ->
+                let dict = unbox<Dictionary<string, JsonValue>> inner
+                let mutable value = Unchecked.defaultof<JsonValue>
+
+                if dict.TryGetValue(key, &value) then
+                    Some(box value)
+                else
+                    None
+            | _ -> None
+
         member _.Put(map, key, value) =
             // Mutating-and-returning the same boxed JMap is sound because
             // the core only uses Put inside fold patterns; see file header.
@@ -260,6 +272,8 @@ type private DotNetBackendImpl() =
             | :? JsonValue as JArray inner -> box ((unbox<JsonValue[]> inner).[i])
             | :? System.Array as a -> a.GetValue(i)
             | _ -> failwithf "expected array, got %A" arr
+
+        member _.ArrayMapper = None
 
         member _.BuildArray(items) =
             let arr = items |> List.map wrap |> List.toArray

@@ -19,10 +19,21 @@ let python: IJsonBackend = Fable.TypedJson.Python.Backend.python
 /// Equivalent to `python.ParseRaw json`; provided for convenience.
 let parseRaw (json: string) : JsonMap = python.ParseRaw json
 
+/// Parse and decode JSON text. Only parser exceptions become `InvalidText`;
+/// decoder and validator exceptions still propagate.
+let decodeText (codec: TypedJson<'T>) (text: string) : Result<'T, JsonTextError> =
+    Fable.TypedJson.Json.decodeTextWith parseRaw codec text
+
 let inline auto<'T> () : TypedJson<'T> = Fable.TypedJson.Json.auto<'T> python
+
+let inline autoStrict<'T> () : TypedJson<'T> =
+    Fable.TypedJson.Json.autoStrict<'T> python
 
 let inline autoWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
     Fable.TypedJson.Json.autoWith<'T> python registry
+
+let inline autoStrictWith<'T> (registry: CodecRegistry) : TypedJson<'T> =
+    Fable.TypedJson.Json.autoStrictWith<'T> python registry
 
 let inline validateJson<'T> (map: obj) : Result<'T, FieldError list> =
     Fable.TypedJson.Json.validateJson<'T> python map

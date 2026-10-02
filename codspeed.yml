@@ -13,21 +13,109 @@ benchmarks:
     exec: bash benchmarks/cli/run.sh dotnet parse-decode-record 200000
   - name: dotnet/encode-record/500000-ops
     exec: bash benchmarks/cli/run.sh dotnet encode-record 500000
+  - name: dotnet/strict-int/2000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet strict-int 2000000
+  - name: dotnet/strict-int64-small/2000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet strict-int64-small 2000000
+  - name: dotnet/strict-int64-wide/2000000-ops
+    exec: bash benchmarks/cli/run.sh dotnet strict-int64-wide 2000000
+  - name: dotnet/strict-int-reject/500000-ops
+    exec: bash benchmarks/cli/run.sh dotnet strict-int-reject 500000
   - name: js/decode-record/1000000-ops
     exec: bash benchmarks/cli/run.sh js decode-record 1000000
   - name: js/parse-decode-record/500000-ops
     exec: bash benchmarks/cli/run.sh js parse-decode-record 500000
   - name: js/encode-record/1000000-ops
     exec: bash benchmarks/cli/run.sh js encode-record 1000000
+  - name: js/strict-int/2000000-ops
+    exec: bash benchmarks/cli/run.sh js strict-int 2000000
+  - name: js/strict-int64-small/2000000-ops
+    exec: bash benchmarks/cli/run.sh js strict-int64-small 2000000
+  - name: js/strict-int64-wide/800000-ops
+    exec: bash benchmarks/cli/run.sh js strict-int64-wide 800000
+  - name: js/strict-int-reject/200000-ops
+    exec: bash benchmarks/cli/run.sh js strict-int-reject 200000
   - name: python/decode-record/50000-ops
     exec: bash benchmarks/cli/run.sh python decode-record 50000
   - name: python/parse-decode-record/30000-ops
     exec: bash benchmarks/cli/run.sh python parse-decode-record 30000
   - name: python/encode-record/50000-ops
     exec: bash benchmarks/cli/run.sh python encode-record 50000
+  - name: python/strict-int/50000-ops
+    exec: bash benchmarks/cli/run.sh python strict-int 50000
+  - name: python/strict-int64-small/50000-ops
+    exec: bash benchmarks/cli/run.sh python strict-int64-small 50000
+  - name: python/strict-int64-wide/50000-ops
+    exec: bash benchmarks/cli/run.sh python strict-int64-wide 50000
+  - name: python/strict-int-reject/10000-ops
+    exec: bash benchmarks/cli/run.sh python strict-int-reject 10000
   - name: beam/decode-record/100000-ops
     exec: bash benchmarks/cli/run.sh beam decode-record 100000
   - name: beam/parse-decode-record/50000-ops
     exec: bash benchmarks/cli/run.sh beam parse-decode-record 50000
   - name: beam/encode-record/100000-ops
     exec: bash benchmarks/cli/run.sh beam encode-record 100000
+  - name: beam/strict-int/200000-ops
+    exec: bash benchmarks/cli/run.sh beam strict-int 200000
+  - name: beam/strict-int64-small/200000-ops
+    exec: bash benchmarks/cli/run.sh beam strict-int64-small 200000
+  - name: beam/strict-int64-wide/200000-ops
+    exec: bash benchmarks/cli/run.sh beam strict-int64-wide 200000
+  - name: beam/strict-int-reject/50000-ops
+    exec: bash benchmarks/cli/run.sh beam strict-int-reject 50000
+  - name: dotnet/construct-record/300-ops
+    exec: bash benchmarks/cli/run.sh dotnet construct-record 300
+  - name: dotnet/decode-wide-record/200000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-wide-record 200000
+  - name: dotnet/decode-array-128/25000-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-array-128 25000
+  - name: dotnet/decode-array-1024/2500-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-array-1024 2500
+  - name: dotnet/decode-list-1024/1500-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-list-1024 1500
+  - name: dotnet/decode-recursive-tree/50-ops
+    exec: bash benchmarks/cli/run.sh dotnet decode-recursive-tree 50
+  - name: dotnet/reject-nested-sequence/200000-ops
+    exec: bash benchmarks/cli/run.sh dotnet reject-nested-sequence 200000
+  - name: js/construct-record/50000-ops
+    exec: bash benchmarks/cli/run.sh js construct-record 50000
+  - name: js/decode-wide-record/500000-ops
+    exec: bash benchmarks/cli/run.sh js decode-wide-record 500000
+  - name: js/decode-array-128/100000-ops
+    exec: bash benchmarks/cli/run.sh js decode-array-128 100000
+  - name: js/decode-array-1024/10000-ops
+    exec: bash benchmarks/cli/run.sh js decode-array-1024 10000
+  - name: js/decode-list-1024/20000-ops
+    exec: bash benchmarks/cli/run.sh js decode-list-1024 20000
+  - name: js/decode-recursive-tree/5000-ops
+    exec: bash benchmarks/cli/run.sh js decode-recursive-tree 5000
+  - name: js/reject-nested-sequence/50000-ops
+    exec: bash benchmarks/cli/run.sh js reject-nested-sequence 50000
+  - name: python/construct-record/500-ops
+    exec: bash benchmarks/cli/run.sh python construct-record 500
+  - name: python/decode-wide-record/10000-ops
+    exec: bash benchmarks/cli/run.sh python decode-wide-record 10000
+  - name: python/decode-array-128/2000-ops
+    exec: bash benchmarks/cli/run.sh python decode-array-128 2000
+  - name: python/decode-array-1024/250-ops
+    exec: bash benchmarks/cli/run.sh python decode-array-1024 250
+  - name: python/decode-list-1024/250-ops
+    exec: bash benchmarks/cli/run.sh python decode-list-1024 250
+  - name: python/decode-recursive-tree/200-ops
+    exec: bash benchmarks/cli/run.sh python decode-recursive-tree 200
+  - name: python/reject-nested-sequence/10000-ops
+    exec: bash benchmarks/cli/run.sh python reject-nested-sequence 10000
+  - name: beam/construct-record/2000-ops
+    exec: bash benchmarks/cli/run.sh beam construct-record 2000
+  - name: beam/decode-wide-record/20000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-wide-record 20000
+  - name: beam/decode-array-128/10000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-array-128 10000
+  - name: beam/decode-array-1024/250-ops
+    exec: bash benchmarks/cli/run.sh beam decode-array-1024 250
+  - name: beam/decode-list-1024/1000-ops
+    exec: bash benchmarks/cli/run.sh beam decode-list-1024 1000
+  - name: beam/decode-recursive-tree/200-ops
+    exec: bash benchmarks/cli/run.sh beam decode-recursive-tree 200
+  - name: beam/reject-nested-sequence/20000-ops
+    exec: bash benchmarks/cli/run.sh beam reject-nested-sequence 20000
