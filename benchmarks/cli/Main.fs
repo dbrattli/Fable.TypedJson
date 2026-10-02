@@ -232,6 +232,9 @@ let private run name iterations warmup =
     if iterations <= 0 then
         failwith "Iteration count must be positive"
 
+    if warmup < 0 then
+        failwith "Warmup count must be non-negative"
+
     let operation = createScenario name
 
     // decision: warms the workload within each process because CodSpeed CLI warmups launch fresh processes
@@ -267,6 +270,7 @@ let main (args: string array) =
             | _ -> 10000
 
         run name (int iterations) warmup
-    | _ -> failwith "Usage: benchmark <scenario> <iterations> | --smoke"
+    | [| name; iterations; warmup |] -> run name (int iterations) (int warmup)
+    | _ -> failwith "Usage: benchmark <scenario> <iterations> [warmup] | --smoke"
 
     0

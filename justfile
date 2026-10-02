@@ -70,12 +70,16 @@ check-test-registry:
     echo "test registry OK — $(echo "$declared" | wc -l | tr -d ' ') modules registered"
 
 # Type check via dotnet build
-check: check-test-registry
+check: check-test-registry check-bench-config
     dotnet build src/Fable.TypedJson
     dotnet build src/Fable.TypedJson.Beam
     dotnet build src/Fable.TypedJson.Python
     dotnet build src/Fable.TypedJson.JS
     dotnet build src/Fable.TypedJson.DotNet
+
+# Guard benchmark histories and generated confirmation commands without third-party Python dependencies.
+check-bench-config:
+    python3 -m unittest discover -s benchmarks/cli -p 'test_*.py'
 
 # Format source files
 format:
