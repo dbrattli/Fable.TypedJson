@@ -701,7 +701,7 @@ and private buildRecordPlan (ctx: BuildCtx) (t: System.Type) : RecordPlan =
 /// invariant: all fields are attempted and errors accumulate — not fail-fast
 and decodeRecordWith (b: IJsonBackend) (rp: RecordPlan) (lookup: string -> obj option) : Result<obj, FieldError list> =
     let n = rp.Fields.Length
-    let values = Array.zeroCreate<obj> n
+    let values = Fable.TypedJson.Optimizations.RecordBuffer.create n
     let mutable errs: FieldError list = []
 
     for i = 0 to n - 1 do

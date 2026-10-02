@@ -144,6 +144,29 @@ let private decodeTests =
                         assertThat (errors.[0].path) (isEqualTo "age")
             )
             test (
+                "record decode writes optional slots after a failed decode",
+                fun _ ->
+                    let codec =
+                        auto<RecordWithOption>()
+                        |> withCaseRules CaseRules.SnakeCase
+
+                    match codec.decode (parseRaw """{"email":"discarded"}""") with
+                    | Ok _ -> assertThat "Ok" (isEqualTo "Error")
+                    | Error errors -> assertThat (errors |> List.map _.path) (isEqualTo [ "name" ])
+
+                    for json, expected in
+                        [
+                            """{"name":"Alice","email":null}""", None
+                            """{"name":"Bob","email":"b@example.com"}""", Some "b@example.com"
+                            """{"name":"Carol"}""", None
+                        ] do
+                        match codec.decode (parseRaw json) with
+                        | Ok record ->
+                            assertThat record.Email (isEqualTo expected)
+                            assertThat (System.String.IsNullOrEmpty record.Name) isFalse
+                        | Error errors -> assertThat (sprintf "Error: %A" errors) (isEqualTo "Ok")
+            )
+            test (
                 "auto decode accumulates all errors",
                 fun _ ->
                     let codec =
