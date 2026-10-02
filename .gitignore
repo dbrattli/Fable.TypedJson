@@ -38,3 +38,5 @@ isolate-*-v8.log
 # Runtime selection generated from the canonical CodSpeed configuration.
 /.codspeed-selected.yml
 *.binlog
+# JS benchmark dependencies are installed from the committed lockfile.
+node_modules/

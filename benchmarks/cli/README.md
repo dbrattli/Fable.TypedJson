@@ -125,7 +125,7 @@ runner time.
 
 Manual dispatch accepts `target` (`all`, `dotnet`, `js`, `python`, `beam`) and
 `suite` (`core`, `sequences`, `repeatability`, `full`), and `profile` (`quick`,
-`confirm`). Focused runs build, install, and measure only that
+`confirm`, `throughput`). Focused runs build, install, and measure only that
 runtime:
 
 ```sh
@@ -133,6 +133,7 @@ gh workflow run codspeed.yml --ref <branch> -f target=beam -f suite=core
 gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=sequences
 gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=repeatability
 gh workflow run codspeed.yml --ref <branch> -f target=js -f suite=repeatability -f profile=confirm
+gh workflow run codspeed.yml --ref <branch> -f target=js -f suite=repeatability -f profile=throughput
 ```
 
 [select-codspeed.py](select-codspeed.py) filters the canonical configuration;
@@ -147,6 +148,32 @@ codspeed run -m walltime --config .codspeed-selected.yml
 Add `--profile confirm` to generate the longer measurements locally. The CLI
 also accepts an explicit in-process warmup count, for example
 `bash benchmarks/cli/run.sh js decode-record 3 1` for a correctness smoke check.
+
+### Isolated JS throughput
+
+The JS-only `throughput` profile requires `target=js` and `suite=repeatability`.
+It compiles the same F# fixtures as an importable module, then uses the
+[CodSpeed tinybench integration](https://codspeed.io/docs/benchmarks/nodejs/tinybench)
+to measure the decode loop within one process. Codec construction, input
+preparation, process startup, and framework warmup are outside the measurement
+window. The process profiles remain useful for end-to-end behavior.
+
+Each measured callback performs 1,000 checked operations. Tinybench warms each
+task for at least one second and 100 batches, then samples for at least two
+seconds and 100 batches. The reported unit is time per 1,000-operation batch,
+not time for the entire sample window. The three workloads have a separate
+`js-throughput-v1` history and run sequentially in a fixed order. Plugin
+dependencies and Node compatibility are pinned in [the package](../js/package.json).
+Changes to these settings require a new history and fresh base measurements.
+
+```sh
+just build-bench-throughput-js
+node build/codspeed/js-throughput/bench.mjs --smoke
+codspeed run -m walltime -- node build/codspeed/js-throughput/bench.mjs
+```
+
+The smoke command checks results without recording timings. Uninstrumented
+measurement runs fail instead of silently falling back to raw tinybench.
 
 ### Accepting a performance change
 
