@@ -95,7 +95,7 @@ CI defaults to 40 workloads (ten per runtime). `strict-int`,
 `strict-int64-small`, `decode-wide-record`, and `reject-nested-sequence` are
 reserved for explicit `full` runs: correctness remains covered by the shared
 tests, while the core suite retains wide Int64, scalar rejection, and both
-sequence output builders. All suites use three measurement rounds.
+sequence output builders. The default `quick` profile uses three measurement rounds.
 
 For traversal changes, `sequences` measures just the two array sizes, list
 output, and recursive tree: sixteen workloads across all runtimes, or four
@@ -105,16 +105,34 @@ core suite, so its baseline can be reused.
 The `repeatability` suite selects record decoding, wide Int64 decoding, and
 128-element array decoding: twelve workloads across all runtimes, or three
 for one runtime. Run it twice on the same commit before attributing small
-changes to an optimization. Its initial settings match the existing baseline.
+changes to an optimization. With the `quick` profile its settings match the
+existing baseline.
+
+The opt-in `confirm` profile uses threefold batches and seven measurement
+rounds. JS uses 100,000 in-process warmup operations for record and scalar
+workloads, 10,000 for sequence traversal and nested rejection, and 50 for
+construction and recursive trees. Other targets retain their existing warmup
+counts. Longer batches amortize startup and setup; command-level warmups still
+launch fresh processes and cannot warm V8 for the measured process.
+Both profiles measure the entire process, including the specified warmup.
+
+Confirmation names include `confirm-v1`, the operation count, and the warmup
+count. They start a separate history: compare base and candidate using the
+same profile, suite, runtime, and runner. If these settings change, increment
+the profile version and establish another baseline. `confirm` is intended for
+focused investigations; confirming every workload on every target costs more
+runner time.
 
 Manual dispatch accepts `target` (`all`, `dotnet`, `js`, `python`, `beam`) and
-`suite` (`core`, `sequences`, `repeatability`, `full`). Focused runs build, install, and measure only that
+`suite` (`core`, `sequences`, `repeatability`, `full`), and `profile` (`quick`,
+`confirm`). Focused runs build, install, and measure only that
 runtime:
 
 ```sh
 gh workflow run codspeed.yml --ref <branch> -f target=beam -f suite=core
 gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=sequences
 gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=repeatability
+gh workflow run codspeed.yml --ref <branch> -f target=js -f suite=repeatability -f profile=confirm
 ```
 
 [select-codspeed.py](select-codspeed.py) filters the canonical configuration;
@@ -125,6 +143,27 @@ locally:
 python3 benchmarks/cli/select-codspeed.py --target beam --suite core --output .codspeed-selected.yml
 codspeed run -m walltime --config .codspeed-selected.yml
 ```
+
+Add `--profile confirm` to generate the longer measurements locally. The CLI
+also accepts an explicit in-process warmup count, for example
+`bash benchmarks/cli/run.sh js decode-record 3 1` for a correctness smoke check.
+
+### Accepting a performance change
+
+1. Run the baseline twice on the same commit and settings. Compare these A/A
+   runs in CodSpeed to establish observed variability for each workload.
+2. Run the candidate with matching settings. Check the fastest-round metric
+   used by CodSpeed alongside the median, spread, and flamegraph.
+3. Treat a result within observed A/A variability, or one whose direction
+   fails to repeat, as inconclusive. A green check alone is not evidence of
+   equivalence; a red check alone does not identify a code-level cause.
+4. Confirm a proposed gain on the affected target, then screen the other
+   targets. Follow up on any regression flags before accepting the change.
+
+Three rounds provide a cheap screen; seven rounds do not guarantee precision.
+Increase sampling only for the workloads whose variability prevents a decision.
+Keep the library implementation and measurement settings fixed during repeats;
+do not keep rerunning until a desirable result appears.
 
 Plain `codspeed run -m walltime` still measures all 56 configured workloads.
 

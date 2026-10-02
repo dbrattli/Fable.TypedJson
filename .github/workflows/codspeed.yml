@@ -21,10 +21,16 @@ on:
         type: choice
         default: core
         options: [core, sequences, repeatability, full]
+      profile:
+        description: Quick screening or longer confirmation batches with seven rounds
+        type: choice
+        default: quick
+        options: [quick, confirm]
 
 env:
   BENCH_TARGET: ${{ inputs.target || 'all' }}
   BENCH_SUITE: ${{ inputs.suite || 'core' }}
+  BENCH_PROFILE: ${{ inputs.profile || 'quick' }}
 
 permissions:
   contents: read
@@ -96,7 +102,7 @@ jobs:
 
       - name: Select measurement workloads
         # decision: defaults to representative coverage and builds only the requested runtime for focused optimization
-        run: python3 benchmarks/cli/select-codspeed.py --target "$BENCH_TARGET" --suite "$BENCH_SUITE" --output build/codspeed/selected.yml
+        run: python3 benchmarks/cli/select-codspeed.py --target "$BENCH_TARGET" --suite "$BENCH_SUITE" --profile "$BENCH_PROFILE" --output build/codspeed/selected.yml
 
       - name: Check benchmark results
         run: |
