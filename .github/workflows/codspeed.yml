@@ -17,10 +17,10 @@ on:
         default: all
         options: [all, dotnet, js, python, beam]
       suite:
-        description: Core, sequence-focused, or every workload
+        description: Core, sequences, repeatability probes, or every workload
         type: choice
         default: core
-        options: [core, sequences, full]
+        options: [core, sequences, repeatability, full]
 
 env:
   BENCH_TARGET: ${{ inputs.target || 'all' }}

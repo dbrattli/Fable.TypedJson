@@ -5,13 +5,15 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--target", choices=["all", "dotnet", "js", "python", "beam"], default="all")
-parser.add_argument("--suite", choices=["core", "sequences", "full"], default="core")
+parser.add_argument("--suite", choices=["core", "sequences", "repeatability", "full"], default="core")
 parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
 
 # decision: retains duplicate scalar cases and additional structure probes for explicit full runs
 extra_scenarios = {"strict-int", "strict-int64-small", "decode-wide-record", "reject-nested-sequence"}
 sequence_scenarios = {"decode-array-128", "decode-array-1024", "decode-list-1024", "decode-recursive-tree"}
+# decision: calibrates scalar, record, and traversal measurements with a small fixed workload set
+repeatability_scenarios = {"decode-record", "strict-int64-wide", "decode-array-128"}
 source = Path(__file__).resolve().parents[2] / "codspeed.yml"
 # invariant: the canonical configuration has a shared preamble and literal name/exec blocks
 preamble, *blocks = source.read_text().split("  - name: ")
@@ -24,6 +26,8 @@ for block in blocks:
     if args.suite == "core" and scenario in extra_scenarios:
         continue
     if args.suite == "sequences" and scenario not in sequence_scenarios:
+        continue
+    if args.suite == "repeatability" and scenario not in repeatability_scenarios:
         continue
     selected.append("  - name: " + block)
 

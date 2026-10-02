@@ -102,13 +102,19 @@ output, and recursive tree: sixteen workloads across all runtimes, or four
 for one runtime. Workload names, counts, and measurement settings match the
 core suite, so its baseline can be reused.
 
+The `repeatability` suite selects record decoding, wide Int64 decoding, and
+128-element array decoding: twelve workloads across all runtimes, or three
+for one runtime. Run it twice on the same commit before attributing small
+changes to an optimization. Its initial settings match the existing baseline.
+
 Manual dispatch accepts `target` (`all`, `dotnet`, `js`, `python`, `beam`) and
-`suite` (`core`, `sequences`, `full`). Focused runs build, install, and measure only that
+`suite` (`core`, `sequences`, `repeatability`, `full`). Focused runs build, install, and measure only that
 runtime:
 
 ```sh
 gh workflow run codspeed.yml --ref <branch> -f target=beam -f suite=core
 gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=sequences
+gh workflow run codspeed.yml --ref <branch> -f target=all -f suite=repeatability
 ```
 
 [select-codspeed.py](select-codspeed.py) filters the canonical configuration;
