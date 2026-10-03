@@ -27,7 +27,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="*.fsproj; **\*.fs; **\*.fsi" PackagePath="fable\" />
-    <Content Include="Optimizations/*.mjs" PackagePath="fable/Optimizations" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\LICENSE" Pack="true" Visible="false" PackagePath="\" />
