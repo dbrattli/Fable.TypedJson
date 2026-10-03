@@ -35,25 +35,9 @@ let parseInt64 (s: string) : Result<int64, string> =
     | true, n -> Ok n
     | _ -> Error(sprintf "cannot parse '%s' as int64" s)
 
-(**
-JSON numbers are always `.`-as-decimal per RFC 8259. On the CLR the
-parameterless `TryParse` reads the *thread* culture, which on a
-`.`-as-thousands locale (es/fr/de/…) silently turns `"22.5"` into `225` —
-pin InvariantCulture there.
-
-Fable backends transpile to locale-immune native parsers (Erlang
-`binary_to_float`, Python `float`, JS `parseFloat`) and do not implement the
-3-argument overload — it returns `0.0` on BEAM — so the short form is the
-correct one there, not merely the convenient one.
-
-decision: pins CLR float parsing here — both primitive entry paths inherit locale-independent JSON semantics
-*)
+/// Parse a JSON number independently of the ambient culture.
 let parseFloat (s: string) : Result<float, string> =
-#if FABLE_COMPILER
-    match System.Double.TryParse(s) with
-#else
-    match System.Double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture) with
-#endif
+    match Optimizations.Numbers.tryParseFloat s with
     | true, f -> Ok f
     | _ -> Error(sprintf "cannot parse '%s' as float" s)
 
@@ -180,17 +164,9 @@ let parseGuid (s: string) : Result<System.Guid, string> =
     with _ ->
         Error(sprintf "cannot parse '%s' as Guid" s)
 
-(**
-Same InvariantCulture reasoning as `parseFloat`: the parameterless CLR overload
-reads the thread culture, and the 3-argument form is not implemented on the
-Fable backends.
-*)
+/// Parse an exact decimal independently of the ambient culture.
 let parseDecimal (s: string) : Result<decimal, string> =
-#if FABLE_COMPILER
-    match System.Decimal.TryParse(s) with
-#else
-    match System.Decimal.TryParse(s, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture) with
-#endif
+    match Optimizations.Numbers.tryParseDecimal s with
     | true, d -> Ok d
     | _ -> Error(sprintf "cannot parse '%s' as decimal" s)
 

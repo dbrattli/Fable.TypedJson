@@ -597,6 +597,25 @@ let private nativeTraversalTests =
                         assertThat (result: Result<int list, int * string>) (isEqualTo (Ok [ 8; 10; 12 ]))
                 )
                 test (
+                    "normalizes a Fable array before native traversal",
+                    fun _ ->
+                        let result =
+                            mapper.TryMapArray(box [| 4; 5; 6 |], (fun item -> Ok(backend.AsInt item)))
+
+                        assertThat (result: Result<int list, int * string>) (isEqualTo (Ok [ 4; 5; 6 ]))
+                )
+                test (
+                    "preserves successful null values across the native result boundary",
+                    fun _ ->
+                        let result: Result<obj list, int * string> =
+                            mapper.TryMapArray(parseRaw "[1,2]", (fun _ -> Ok backend.Null))
+
+                        assertThat
+                            (result
+                             |> Result.map (fun items -> List.length items, List.forall backend.IsNull items))
+                            (isEqualTo (Ok(2, true)))
+                )
+                test (
                     "stops on the first error without visiting the tail",
                     fun _ ->
                         let result =
