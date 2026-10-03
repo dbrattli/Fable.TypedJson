@@ -1,5 +1,5 @@
 ---
-last_commit_released: 9a4c8ef28ffb77ddbe2201c59eace6d7da154a5a
+last_commit_released: 1f8d0b947226ecb5ea91a022d5ae78be604eef3f
 name: Fable.TypedJson
 include:
   - ../../**
@@ -14,6 +14,18 @@ All packages in this repository share this version and follow [Semantic Versioni
 This changelog is generated using [EasyBuild.ShipIt](https://github.com/easybuild-org/EasyBuild.ShipIt).
 
 ⚠ Only edit the front matter metadata at the top of this file. All other changes will be overwritten when a new release is created.
+
+## 5.5.0 - 2026-10-03
+
+### 🚀 Features
+
+* Add strict JSON and typed text decoding (#78) ([e4cb25a](https://github.com/fable-hub/Fable.TypedJson/commit/e4cb25a978812ab5ec57236bee9eaa21eb12665e))
+
+### ⚡ Performance Improvements
+
+* Skip redundant JS record buffer initialization (#92) ([bb9851f](https://github.com/fable-hub/Fable.TypedJson/commit/bb9851f7c66fe69829e1ecf1bc918a3c052add2c))
+
+<strong><small>[View changes on Github](https://github.com/fable-hub/Fable.TypedJson/compare/9a4c8ef28ffb77ddbe2201c59eace6d7da154a5a..1f8d0b947226ecb5ea91a022d5ae78be604eef3f)</small></strong>
 
 ## 5.4.0 - 2026-09-05
 
