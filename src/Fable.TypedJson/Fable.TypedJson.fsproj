@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Backend.fs" />
+    <Compile Include="Optimizations/RecordBuffer.fs" />
     <Compile Include="Casing.fs" />
     <!-- Ahead of both Codec.fs and Plan.fs, the two primitive-coercion callers. -->
     <Compile Include="Primitives.fs" />
